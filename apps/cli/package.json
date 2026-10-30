@@ -1,0 +1,13 @@
+{
+  "name": "@signet/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "verify": "tsx src/verify.ts",
+    "keysweep": "tsx src/keysweep.ts"
+  },
+  "dependencies": {
+    "@signet/core": "*"
+  }
+}

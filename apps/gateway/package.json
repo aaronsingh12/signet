@@ -1,0 +1,16 @@
+{
+  "name": "@signet/gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "cross-env SIGNET_NODE_ID=gw-a1 tsx src/index.ts",
+    "start:a2": "cross-env SIGNET_GATEWAY_PORT=8101 SIGNET_NODE_ID=gw-a2 tsx src/index.ts"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^3.7.6",
+    "@open-policy-agent/opa-wasm": "^1.10.0",
+    "@signet/core": "*",
+    "express": "4.21.2"
+  }
+}

@@ -1,0 +1,97 @@
+# Phase 0 pipeline (BP 18.3, 20.2): every pull request is type-checked, tested, scanned for secrets
+# and vulnerable dependencies; the Rego policy is tested with OPA and compiled to WebAssembly; on main,
+# images are built, given a CycloneDX SBOM and signed with Sigstore cosign (keyless).
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run typecheck
+      - run: npm test
+      - name: Dependency audit (fail on high or critical)
+        run: npm audit --omit=dev --audit-level=high
+
+  policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: open-policy-agent/setup-opa@v2
+        with:
+          version: 1.4.2
+      - name: Rego conformance tests (same cases as the gateway evaluator)
+        run: opa test policy/ -v
+      - name: Compile policy to WebAssembly for in-process evaluation
+        run: |
+          opa build -t wasm -e signet/decision/result policy/signet.rego -o bundle.tar.gz
+          mkdir -p policy/dist && tar -xzf bundle.tar.gz -C policy/dist /policy.wasm
+      - uses: actions/upload-artifact@v4
+        with:
+          name: policy-wasm
+          path: policy/dist/policy.wasm
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  images:
+    if: github.ref == 'refs/heads/main'
+    needs: [test, policy, secrets]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write # keyless cosign signing
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: policy-wasm
+          path: policy/dist
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: CycloneDX SBOM
+        run: npx --yes @cyclonedx/cyclonedx-npm@2 --omit dev --output-file sbom.cdx.json
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: sigstore/cosign-installer@v3
+      - name: Build, push and sign images
+        run: |
+          for svc in control gateway; do
+            img=ghcr.io/${{ github.repository }}/$svc:${{ github.sha }}
+            docker build --target $svc -t $img .
+            docker push $img
+            digest=$(docker inspect --format='{{index .RepoDigests 0}}' $img)
+            cosign sign --yes "$digest"
+            cosign attest --yes --type cyclonedx --predicate sbom.cdx.json "$digest"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.cdx.json

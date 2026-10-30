@@ -1,0 +1,11 @@
+node_modules/
+data/
+.env
+*.log
+exports/
+# build output (npm run build)
+dist/
+apps/web/dist/
+# detector model weights: too large for git, downloaded separately (see README)
+models/
+tools/bin/

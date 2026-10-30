@@ -1,0 +1,35 @@
+{
+  "name": "signet",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Signet: AI agent governance, runtime enforcement and evidence platform",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "up": "docker compose up -d keycloak",
+    "dev": "concurrently -k -n control,gw-a1,gw-a2,tools,web -c blue,magenta,magenta,yellow,green \"npm run start -w @signet/control\" \"npm run start -w @signet/gateway\" \"npm run start:a2 -w @signet/gateway\" \"npm run start -w @signet/mock-tools\" \"npm run dev -w @signet/web\"",
+    "dev:api": "concurrently -k -n control,gw-a1,gw-a2,tools -c blue,magenta,magenta,yellow \"npm run start -w @signet/control\" \"npm run start -w @signet/gateway\" \"npm run start:a2 -w @signet/gateway\" \"npm run start -w @signet/mock-tools\"",
+    "demo": "npm run start -w @signet/demo-agent",
+    "perf": "npm run perf -w @signet/demo-agent",
+    "verify": "npm run verify -w @signet/cli --",
+    "keysweep": "npm run keysweep -w @signet/cli --",
+    "build": "node scripts/build.mjs",
+    "test": "node --import tsx --test packages/core/test/*.test.ts apps/gateway/test/*.test.ts apps/control/test/*.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p apps/web/tsconfig.json",
+    "ci": "npm run typecheck && npm test"
+  },
+  "devDependencies": {
+    "@types/express": "4.17.21",
+    "@types/node": "24.10.1",
+    "concurrently": "9.2.1",
+    "cross-env": "^7.0.3",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3"
+  },
+  "engines": {
+    "node": ">=22.13"
+  }
+}

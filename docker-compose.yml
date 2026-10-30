@@ -1,0 +1,46 @@
+# Dev and test environment (Phase 0 "IaC for dev/test").
+#   docker compose up -d keycloak          identity provider only (run Signet with `npm run dev`)
+#   docker compose --profile full up -d    the whole stack in containers
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.4
+    command: ["start-dev", "--import-realm", "--http-port=8180"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HEALTH_ENABLED: "true"
+    ports: ["8180:8180"]
+    volumes:
+      - ./infra/keycloak/realm-signet.json:/opt/keycloak/data/import/realm-signet.json:ro
+
+  control:
+    profiles: ["full"]
+    build: { context: ., target: control }
+    environment:
+      SIGNET_OIDC_ISSUER: http://localhost:8180/realms/signet
+      SIGNET_DATA_DIR: /data
+    volumes: ["signet-data:/data"]
+    network_mode: host
+
+  gateway-a1:
+    profiles: ["full"]
+    build: { context: ., target: gateway }
+    environment:
+      SIGNET_DATA_DIR: /data
+      SIGNET_GATEWAY_PORT: "8100"
+      SIGNET_NODE_ID: gw-a1
+    volumes: ["signet-data:/data"]
+    network_mode: host
+
+  gateway-a2:
+    profiles: ["full"]
+    build: { context: ., target: gateway }
+    environment:
+      SIGNET_DATA_DIR: /data
+      SIGNET_GATEWAY_PORT: "8101"
+      SIGNET_NODE_ID: gw-a2
+    volumes: ["signet-data:/data"]
+    network_mode: host
+
+volumes:
+  signet-data:

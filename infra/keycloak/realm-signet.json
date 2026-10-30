@@ -1,0 +1,287 @@
+{
+  "realm": "signet",
+  "enabled": true,
+  "displayName": "Northwind Financial (dev)",
+  "sslRequired": "none",
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "registrationAllowed": false,
+  "resetPasswordAllowed": false,
+  "accessTokenLifespan": 600,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 43200,
+  "bruteForceProtected": true,
+  "groups": [
+    {
+      "name": "signet-tenant-admins"
+    },
+    {
+      "name": "signet-platform-admins"
+    },
+    {
+      "name": "signet-governance-board"
+    },
+    {
+      "name": "signet-risk-officers"
+    },
+    {
+      "name": "signet-security-officers"
+    },
+    {
+      "name": "signet-agent-owners"
+    },
+    {
+      "name": "signet-builders"
+    },
+    {
+      "name": "signet-approvers"
+    },
+    {
+      "name": "signet-auditors"
+    },
+    {
+      "name": "signet-viewers"
+    },
+    {
+      "name": "signet-automation"
+    }
+  ],
+  "users": [
+    {
+      "username": "ananya.rao",
+      "email": "ananya.rao@northwind.example",
+      "firstName": "Ananya",
+      "lastName": "Rao",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Signet!2026",
+          "temporary": false
+        }
+      ],
+      "groups": [
+        "/signet-risk-officers"
+      ]
+    },
+    {
+      "username": "jonas.weber",
+      "email": "jonas.weber@northwind.example",
+      "firstName": "Jonas",
+      "lastName": "Weber",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Signet!2026",
+          "temporary": false
+        }
+      ],
+      "groups": [
+        "/signet-security-officers"
+      ]
+    },
+    {
+      "username": "priya.menon",
+      "email": "priya.menon@northwind.example",
+      "firstName": "Priya",
+      "lastName": "Menon",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Signet!2026",
+          "temporary": false
+        }
+      ],
+      "groups": [
+        "/signet-agent-owners"
+      ]
+    },
+    {
+      "username": "ravi.kapoor",
+      "email": "ravi.kapoor@northwind.example",
+      "firstName": "Ravi",
+      "lastName": "Kapoor",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Signet!2026",
+          "temporary": false
+        }
+      ],
+      "groups": [
+        "/signet-governance-board"
+      ]
+    },
+    {
+      "username": "arjun.mehta",
+      "email": "arjun.mehta@northwind.example",
+      "firstName": "Arjun",
+      "lastName": "Mehta",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Signet!2026",
+          "temporary": false
+        }
+      ],
+      "groups": [
+        "/signet-platform-admins",
+        "/signet-builders"
+      ]
+    },
+    {
+      "username": "elena.rossi",
+      "email": "elena.rossi@northwind.example",
+      "firstName": "Elena",
+      "lastName": "Rossi",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Signet!2026",
+          "temporary": false
+        }
+      ],
+      "groups": [
+        "/signet-tenant-admins"
+      ]
+    },
+    {
+      "username": "marta.silva",
+      "email": "marta.silva@northwind.example",
+      "firstName": "Marta",
+      "lastName": "Silva",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Signet!2026",
+          "temporary": false
+        }
+      ],
+      "groups": [
+        "/signet-approvers"
+      ]
+    },
+    {
+      "username": "lena.vogt",
+      "email": "lena.vogt@northwind.example",
+      "firstName": "Lena",
+      "lastName": "Vogt",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Signet!2026",
+          "temporary": false
+        }
+      ],
+      "groups": [
+        "/signet-auditors"
+      ]
+    },
+    {
+      "username": "service-account-signet-automation",
+      "enabled": true,
+      "serviceAccountClientId": "signet-automation",
+      "groups": [
+        "/signet-automation"
+      ]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "signet-console",
+      "name": "Signet console",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "signet-console-dev-secret",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://localhost:5174/api/v1/auth/callback",
+        "http://localhost:4100/api/v1/auth/callback"
+      ],
+      "webOrigins": [
+        "http://localhost:5174"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:5174/*"
+      },
+      "protocolMappers": [
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "config": {
+            "full.path": "false",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "claim.name": "groups"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "signet-dev-cli",
+      "name": "Signet dev CLI (dev realm only)",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "protocolMappers": [
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "config": {
+            "full.path": "false",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "claim.name": "groups"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "signet-automation",
+      "name": "Signet automation (CI/CD)",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "signet-automation-dev-secret",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocolMappers": [
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "config": {
+            "full.path": "false",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "claim.name": "groups"
+          }
+        }
+      ]
+    }
+  ]
+}
