@@ -256,6 +256,291 @@ CREATE TRIGGER IF NOT EXISTS root_no_delete BEFORE DELETE ON daily_root
 BEGIN SELECT RAISE(ABORT, 'daily_root is append-only'); END;
 `);
 
+// --- Phase 2: lifecycle, approvals, control library, connectors ---
+db.exec(`
+-- One lifecycle per agent version being onboarded (BP 6). data holds intake, manifest draft and deploy plan.
+CREATE TABLE IF NOT EXISTS lifecycle (
+  id TEXT PRIMARY KEY,
+  agent_id TEXT NOT NULL REFERENCES agent(id),
+  kind TEXT NOT NULL,                 -- initial | major | minor
+  stage TEXT NOT NULL,
+  status TEXT NOT NULL,               -- in_progress | complete | rejected | retired
+  data TEXT NOT NULL,
+  started_at TEXT NOT NULL,
+  stage_entered_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS lifecycle_agent ON lifecycle(agent_id);
+
+CREATE TABLE IF NOT EXISTS stage_record (
+  id TEXT PRIMARY KEY,
+  lifecycle_id TEXT NOT NULL REFERENCES lifecycle(id),
+  stage TEXT NOT NULL,
+  outcome TEXT NOT NULL,              -- passed | returned | rejected | skipped
+  actor TEXT NOT NULL,
+  gate TEXT NOT NULL,
+  entered_at TEXT NOT NULL,
+  exited_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS classification (
+  lifecycle_id TEXT PRIMARY KEY REFERENCES lifecycle(id),
+  factors TEXT NOT NULL,
+  score REAL NOT NULL,
+  tier TEXT NOT NULL,
+  regulatory_category TEXT NOT NULL,
+  frameworks TEXT NOT NULL,
+  reasons TEXT NOT NULL,
+  overrides TEXT NOT NULL,
+  confirmed_by TEXT,
+  confirmed_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS assessment (
+  id TEXT PRIMARY KEY,
+  lifecycle_id TEXT NOT NULL REFERENCES lifecycle(id),
+  type TEXT NOT NULL,                 -- questionnaire | threat_model | impact | dpia | vendor_risk
+  status TEXT NOT NULL,               -- draft | complete
+  content TEXT NOT NULL,
+  updated_by TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (lifecycle_id, type)
+);
+
+CREATE TABLE IF NOT EXISTS gap (
+  id TEXT PRIMARY KEY,
+  lifecycle_id TEXT NOT NULL REFERENCES lifecycle(id),
+  agent_id TEXT NOT NULL,
+  control_id TEXT,
+  severity TEXT NOT NULL,             -- critical | high | medium | low
+  title TEXT NOT NULL,
+  mitigation TEXT,
+  status TEXT NOT NULL,               -- open | mitigated | accepted | closed
+  acceptance_request_id TEXT,
+  accepted_until TEXT,
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS test_run (
+  id TEXT PRIMARY KEY,
+  lifecycle_id TEXT NOT NULL REFERENCES lifecycle(id),
+  status TEXT NOT NULL,               -- passed | failed
+  suites TEXT NOT NULL,
+  report_sha256 TEXT NOT NULL,
+  actor TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+-- Approvals engine (BP 7): one table for every decision type.
+CREATE TABLE IF NOT EXISTS approval_request (
+  id TEXT PRIMARY KEY,
+  type TEXT NOT NULL,                 -- certificate | risk_acceptance | runtime_hitl | quarantine_release | retirement
+  agent_id TEXT,
+  subject_ref TEXT NOT NULL,
+  title TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  pack TEXT NOT NULL,
+  pack_hash TEXT NOT NULL,
+  slots TEXT NOT NULL,                -- [{slot, label, roles[], count, owner_only, sod}]
+  tier TEXT,
+  status TEXT NOT NULL,               -- pending | approved | rejected | sent_back | expired | cancelled
+  outcome TEXT,
+  sla_due TEXT NOT NULL,
+  escalation INTEGER NOT NULL DEFAULT 0,
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  decided_at TEXT,
+  data TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS approval_status ON approval_request(status, type);
+
+CREATE TABLE IF NOT EXISTS approval_decision (
+  id TEXT PRIMARY KEY,
+  request_id TEXT NOT NULL REFERENCES approval_request(id),
+  approver TEXT NOT NULL,
+  slot TEXT NOT NULL,
+  delegate_of TEXT,
+  decision TEXT NOT NULL,
+  comment TEXT,
+  conditions TEXT,
+  auth_strength TEXT NOT NULL,
+  pack_hash TEXT NOT NULL,
+  ts TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS delegation (
+  id TEXT PRIMARY KEY,
+  from_user TEXT NOT NULL,
+  to_user TEXT NOT NULL,
+  from_date TEXT NOT NULL,
+  to_date TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+-- Runtime HITL "approve for this session" grants (BP 7.4).
+CREATE TABLE IF NOT EXISTS hitl_grant (
+  session_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  action_key TEXT NOT NULL,
+  request_id TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  PRIMARY KEY (session_id, agent_id, action_key)
+);
+
+CREATE TABLE IF NOT EXISTS attestation (
+  id TEXT PRIMARY KEY,
+  agent_id TEXT NOT NULL,
+  type TEXT NOT NULL,                 -- re_attestation | decommission
+  signer TEXT NOT NULL,
+  content TEXT NOT NULL,
+  content_hash TEXT NOT NULL,
+  signed_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS notification (
+  id TEXT PRIMARY KEY,
+  recipient TEXT NOT NULL,            -- user id, or role:<role>
+  kind TEXT NOT NULL,
+  title TEXT NOT NULL,
+  link TEXT,
+  created_at TEXT NOT NULL,
+  read_at TEXT
+);
+CREATE INDEX IF NOT EXISTS notification_recipient ON notification(recipient, read_at);
+
+-- Control library (BP 9): Signet Controls are the hub; framework requirements map to them.
+CREATE TABLE IF NOT EXISTS framework (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  version TEXT NOT NULL,
+  licence TEXT NOT NULL,
+  namespace TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS framework_requirement (
+  id TEXT PRIMARY KEY,
+  framework_id TEXT NOT NULL REFERENCES framework(id),
+  external_id TEXT NOT NULL,
+  summary TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS control (
+  id TEXT PRIMARY KEY,
+  domain TEXT NOT NULL,
+  objective TEXT NOT NULL,
+  test TEXT NOT NULL,
+  test_type TEXT NOT NULL,            -- automated | semi_automated | manual
+  applies_to TEXT NOT NULL,
+  namespace TEXT NOT NULL,
+  severity TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS control_mapping (
+  requirement_id TEXT NOT NULL REFERENCES framework_requirement(id),
+  control_id TEXT NOT NULL REFERENCES control(id),
+  relationship TEXT NOT NULL,
+  PRIMARY KEY (requirement_id, control_id)
+);
+CREATE TABLE IF NOT EXISTS control_result (
+  control_id TEXT NOT NULL REFERENCES control(id),
+  scope TEXT NOT NULL,                -- tenant | agent:<id>
+  status TEXT NOT NULL,               -- effective | partially_effective | ineffective | not_tested
+  detail TEXT NOT NULL,
+  evaluated_at TEXT NOT NULL,
+  PRIMARY KEY (control_id, scope)
+);
+
+-- Connectors (BP 10, 11): outbound events go through an outbox with retry and dead letters.
+CREATE TABLE IF NOT EXISTS connector (
+  id TEXT PRIMARY KEY,
+  type TEXT NOT NULL,                 -- servicenow
+  name TEXT NOT NULL,
+  config TEXT NOT NULL,
+  secret_id TEXT,
+  status TEXT NOT NULL,
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  last_sync_at TEXT,
+  watermark TEXT
+);
+CREATE TABLE IF NOT EXISTS connector_outbox (
+  id TEXT PRIMARY KEY,
+  connector_id TEXT NOT NULL REFERENCES connector(id),
+  event TEXT NOT NULL,
+  object_key TEXT NOT NULL,           -- correlation: signet:<tenant>:<object>:<id>
+  payload TEXT NOT NULL,
+  status TEXT NOT NULL,               -- pending | sent | dead
+  attempts INTEGER NOT NULL DEFAULT 0,
+  next_at INTEGER NOT NULL,
+  last_error TEXT,
+  external_ref TEXT,
+  created_at TEXT NOT NULL,
+  sent_at TEXT
+);
+CREATE INDEX IF NOT EXISTS outbox_due ON connector_outbox(status, next_at);
+CREATE TABLE IF NOT EXISTS connector_mapping (
+  connector_id TEXT NOT NULL,
+  object_key TEXT NOT NULL,
+  table_name TEXT NOT NULL,
+  sys_id TEXT NOT NULL,
+  PRIMARY KEY (connector_id, object_key)
+);
+`);
+
+// Columns added after a table first shipped. SQLite has no ADD COLUMN IF NOT EXISTS, so each is
+// added once, checked against the live schema; existing rows take the default.
+function addColumn(table: string, column: string, ddl: string) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (!cols.some((c) => c.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
+}
+
+// --- Agent connectivity: agent kind and runtime, third-party clients, connection diagnostics ---
+addColumn('agent', 'kind', "TEXT NOT NULL DEFAULT 'self_hosted'"); // self_hosted | framework | no_code | third_party
+addColumn('agent', 'runtime', 'TEXT'); // where it runs: runpod, aws_ec2, docker, kubernetes, on_prem, vendor ...
+addColumn('agent', 'framework', 'TEXT'); // langchain, langgraph, crewai, n8n, flowise, dify, custom ...
+addColumn('agent', 'model_provider', 'TEXT'); // the provider the agent was built against before Signet
+addColumn('agent', 'vendor', 'TEXT'); // third-party agents: Amazon, OpenAI, Microsoft, Salesforce ...
+addColumn('agent', 'vendor_details', "TEXT NOT NULL DEFAULT '{}'"); // contract, contact, data residency, documentation links
+addColumn('bootstrap_credential', 'environment', "TEXT NOT NULL DEFAULT 'dev'");
+addColumn('agent_instance', 'auth_kind', "TEXT NOT NULL DEFAULT 'bootstrap'"); // bootstrap | client_credentials
+addColumn('agent_instance', 'revoked_at', 'TEXT');
+addColumn('gateway_node', 'llm_status', 'TEXT'); // the node's last check of the cloud LLM (JSON)
+addColumn('discovered_asset', 'evidence', "TEXT NOT NULL DEFAULT '{}'"); // what was seen, where, by which source
+addColumn('discovered_asset', 'owner_hint', 'TEXT'); // user or host the activity came from
+addColumn('discovered_asset', 'agent_id', 'TEXT'); // a registered agent the finding concerns, if any
+db.exec(`
+-- Third-party agents (vendor-hosted) cannot hold a bootstrap credential: the vendor platform calls
+-- Signet tools with OAuth client credentials. Only the secret's hash is stored.
+CREATE TABLE IF NOT EXISTS agent_client (
+  client_id TEXT PRIMARY KEY,
+  agent_id TEXT NOT NULL REFERENCES agent(id),
+  secret_hash TEXT NOT NULL,
+  label TEXT NOT NULL,
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  last_used_at TEXT,
+  revoked_at TEXT,
+  revoked_by TEXT
+);
+-- What the SDK or sidecar saw in the agent's runtime at start-up (names only, never values).
+CREATE TABLE IF NOT EXISTS agent_diagnostic (
+  instance_id TEXT PRIMARY KEY REFERENCES agent_instance(id),
+  agent_id TEXT NOT NULL,
+  client TEXT NOT NULL,               -- e.g. signet-python/0.1.0, signet-sidecar/0.1.0
+  report TEXT NOT NULL,
+  bypass_risk INTEGER NOT NULL,
+  reported_at TEXT NOT NULL
+);
+-- Discovery sources and when each last delivered data (Key Sweep, network logs, SaaS audit logs, SDK).
+CREATE TABLE IF NOT EXISTS discovery_source (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  label TEXT NOT NULL,
+  last_ingest_at TEXT,
+  last_count INTEGER NOT NULL DEFAULT 0,
+  total INTEGER NOT NULL DEFAULT 0
+);
+`);
+
 // WAL with synchronous=NORMAL syncs at checkpoints; a checkpoint every 2 s keeps committed records
 // durable within the 2 s the Blueprint allows (BP 2 NFR "durable within 2 s"). A failed checkpoint is
 // retried on the next tick; it never stops the writer.

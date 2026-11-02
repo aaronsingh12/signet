@@ -10,7 +10,7 @@ const entries = {
   gateway: 'apps/gateway/src/index.ts',
   'signet-verify': 'apps/cli/src/verify.ts',
   'signet-keysweep': 'apps/cli/src/keysweep.ts',
-  'mock-tools': 'apps/mock-tools/src/index.ts',
+  'signet-sidecar': 'apps/sidecar/src/index.ts',
 };
 
 rmSync('dist', { recursive: true, force: true });

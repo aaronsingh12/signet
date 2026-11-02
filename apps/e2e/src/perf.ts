@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { REPO_ROOT } from '@signet/core';
-import { MODEL, TOOLS_URL, api, deployAgent, ensureTools, gw } from './api';
+import { MODEL, TOOLS_URL, api, deployAgent, onboard, ensureTools, gw } from './api';
 
 // Gateway latency test (BP 2 NFR: added latency p50 <= 15 ms, p95 <= 50 ms, p99 <= 120 ms, excluding
 // upstream time). Starts a separate gateway node pointed at the fast test model, with the detector
@@ -57,16 +57,18 @@ async function main() {
   });
   try {
     await ensureTools();
-    const reg = await api('owner', 'POST', '/agents', { handle: `perf-agent-${Date.now().toString(36)}`, name: 'Perf agent', purpose: 'Latency test', sponsor: 'ravi.kapoor@northwind.example', tier: 'T4', autonomy_level: 'L2' });
-    const seal = await api('security', 'POST', `/agents/${reg.json.id}/certificates`, {
-      models: [{ model: MODEL, region: 'unverified' }],
-      tools: [{ server: 'mcp://orders', data_scopes: ['personal'], actions: [{ name: 'lookup_order', impact: 'read', constraints: { order_id: { pattern: '^A-[0-9]{4}$' } } }] }],
-      data_classes: { prompt: ['personal'], forbidden: ['payment_card'] },
-      limits: { rpm: 1_000_000, tokens_per_day: 1_000_000_000, usd_per_day: 0, tool_calls_per_session: 1_000_000 },
-      environments: ['dev'],
+    const { agentId } = await onboard({
+      handle: `perf-agent-${Date.now().toString(36)}`, name: 'Perf agent', purpose: 'Latency test agent', autonomy_level: 'L1',
+      intake: { users_affected: ['internal'], data_touched: [], reversibility: 'yes', planned_tools: ['orders lookup (read)'] },
+      manifest: {
+        models: [{ model: MODEL, region: 'unverified' }],
+        tools: [{ server: 'mcp://orders', data_scopes: ['personal'], actions: [{ name: 'lookup_order', impact: 'read', constraints: { order_id: { pattern: '^A-[0-9]{4}$' } } }] }],
+        data_classes: { prompt: ['personal'], forbidden: ['payment_card'] },
+        limits: { rpm: 1_000_000, tokens_per_day: 1_000_000_000, usd_per_day: 0, tool_calls_per_session: 1_000_000 },
+        environments: ['dev'],
+      },
     });
-    if (seal.status !== 201) throw new Error(JSON.stringify(seal.json));
-    const tok = await deployAgent(reg.json.id);
+    const tok = await deployAgent(agentId);
     await new Promise((r) => setTimeout(r, 500));
     const token = tok.token as string;
     const prompt = { model: MODEL, messages: [{ role: 'system', content: 'You are a support assistant.' }, { role: 'user', content: 'Where is order A-1182 for maria.lopez@mail.example? It was due on Tuesday.' }] };

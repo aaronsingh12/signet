@@ -1,4 +1,4 @@
-# One build, one image per service (BP 2 principle 6). Targets: control, gateway.
+# One build, one image per service (BP 2 principle 6). Targets: control, gateway, sidecar.
 #   docker build --target control -t signet/control .
 #   docker build --target gateway -t signet/gateway .
 # CI signs both images with cosign (keyless) and publishes a CycloneDX SBOM (.github/workflows/ci.yml).
@@ -34,3 +34,16 @@ COPY --from=build /src/dist/gateway.mjs /src/dist/detector-worker.mjs ./
 EXPOSE 8100
 HEALTHCHECK CMD node -e "fetch('http://localhost:8100/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 CMD ["node", "gateway.mjs"]
+
+# Signet sidecar: runs next to an agent that cannot use the SDK (n8n, Flowise, Dify, other languages).
+# It holds the agent's workload identity and forwards /v1/* to the gateway. Bind it only to the
+# agent's private network (SIGNET_SIDECAR_BIND); anyone who can reach it acts as the agent.
+#   docker build --target sidecar -t signet/sidecar .
+FROM node:24-slim AS sidecar
+ENV NODE_ENV=production SIGNET_SIDECAR_PORT=8300
+WORKDIR /app
+COPY --from=build --chown=node:node /src/dist/signet-sidecar.mjs ./
+USER node
+EXPOSE 8300
+HEALTHCHECK CMD node -e "fetch('http://127.0.0.1:'+process.env.SIGNET_SIDECAR_PORT+'/signet/status').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+CMD ["node", "signet-sidecar.mjs"]

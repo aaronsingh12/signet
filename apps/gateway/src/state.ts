@@ -2,7 +2,7 @@ import { hostname } from 'node:os';
 import type { KeyObject } from 'node:crypto';
 import {
   canonicalize, devSecret, env, fromJwk, request, scopeKey, sha256, verifyJws,
-  type CertificateBody, type CompiledPolicy, type DetectorConfig, type PolicyBundle, type PublicJwk, type ScopeState, type ToolAlias,
+  type CertificateBody, type CompiledPolicy, type DetectorConfig, type PolicyBundle, type PublicJwk, type Rollout, type ScopeState, type ToolAlias,
 } from '@signet/core';
 
 // Gateway-side cache of the signed policy bundle (BP 3, 5.2). Gateways are stateless apart from this
@@ -22,6 +22,10 @@ export const certs = new Map<string, CertificateBody>();
 export const policies = new Map<string, CompiledPolicy>();
 export const tools = new Map<string, ToolAlias>();
 export const detectors = new Map<string, DetectorConfig>();
+export const rollouts = new Map<string, Rollout>();
+export const hitlWaitMs = () => (bundle?.hitl_wait_seconds ?? 120) * 1000;
+let onHitl: (approvalId: string) => void = () => {};
+export const setHitlListener = (fn: (approvalId: string) => void) => (onHitl = fn);
 let scopes = new Map<string, ScopeState>();
 let revoked = new Set<string>();
 
@@ -114,6 +118,8 @@ export async function refresh() {
   for (const t of next.tools) tools.set(t.alias, t);
   detectors.clear();
   for (const d of next.detectors) detectors.set(d.id, d);
+  rollouts.clear();
+  for (const [k, v] of Object.entries(next.rollouts ?? {})) rollouts.set(k, v);
   revoked = new Set(next.revoked_jti);
   bundle = next;
 }
@@ -149,6 +155,8 @@ async function subscribe() {
             applyScope(String(ev.scope_key), ev.state as ScopeState); // apply first, then confirm
             internal('/internal/acks', { method: 'POST', body: JSON.stringify({ event_id: ev.event_id, node_id: NODE_ID }) }).catch(() => {});
             refresh().catch(() => {});
+          } else if (type === 'hitl') {
+            onHitl(String(ev.approval_id));
           } else if (type === 'secret') {
             secretCache.delete(String(ev.secret_id));
           } else {
@@ -164,7 +172,11 @@ async function subscribe() {
 }
 
 const heartbeat = () =>
-  internal('/internal/heartbeat', { method: 'POST', body: JSON.stringify({ node_id: NODE_ID, url: `http://localhost:${PORT}`, bundle_version: bundle?.version ?? null }) }).catch(() => {});
+  internal('/internal/heartbeat', { method: 'POST', body: JSON.stringify({ node_id: NODE_ID, url: `http://localhost:${PORT}`, bundle_version: bundle?.version ?? null, llm_status: heartbeatExtra() }) }).catch(() => {});
+
+// Set by the provider module, which imports this one (avoids an import cycle).
+let heartbeatExtra: () => unknown = () => null;
+export const setHeartbeatExtra = (fn: () => unknown) => (heartbeatExtra = fn);
 
 export async function init() {
   let trust: { ca: PublicJwk; token: PublicJwk } | undefined;

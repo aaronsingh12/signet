@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "verify": "tsx src/verify.ts",
-    "keysweep": "tsx src/keysweep.ts"
+    "keysweep": "tsx src/keysweep.ts",
+    "chat": "tsx src/chat.ts"
   },
   "dependencies": {
     "@signet/core": "*"

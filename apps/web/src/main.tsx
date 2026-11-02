@@ -5,7 +5,10 @@ import { Shell } from './components/Shell';
 import './index.css';
 import { AuthProvider } from './lib/auth';
 import { Agent360 } from './pages/Agent360';
+import { Approvals, MobileApproval } from './pages/Approvals';
 import { CommandCenter } from './pages/CommandCenter';
+import { Connectors } from './pages/Connectors';
+import { Controls } from './pages/Controls';
 import { Discovery } from './pages/Discovery';
 import { Enforcement } from './pages/Enforcement';
 import { Ledger } from './pages/Ledger';
@@ -23,6 +26,14 @@ createRoot(document.getElementById('root')!).render(
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route
+          path="/m/approvals/:id"
+          element={
+            <AuthProvider>
+              <MobileApproval />
+            </AuthProvider>
+          }
+        />
+        <Route
           element={
             <AuthProvider>
               <Shell />
@@ -34,6 +45,9 @@ createRoot(document.getElementById('root')!).render(
           <Route path="agents/new" element={<Propose />} />
           <Route path="agents/:id" element={<Agent360 />} />
           <Route path="discovery" element={<Discovery />} />
+          <Route path="approvals" element={<Approvals />} />
+          <Route path="controls" element={<Controls />} />
+          <Route path="connectors" element={<Connectors />} />
           <Route path="live" element={<LiveTraffic />} />
           <Route path="enforcement" element={<Enforcement />} />
           <Route path="ledger" element={<Ledger />} />

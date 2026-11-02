@@ -1,5 +1,7 @@
 import http from 'node:http';
 import https from 'node:https';
+import { isIP } from 'node:net';
+import { DestinationBlocked, addressAllowed, guardedLookup, type DestinationPolicy } from './netguard';
 
 // Keep-alive HTTP client for hot paths (gateway -> control plane, model, tools). Measured on Windows,
 // Node's fetch costs ~10 ms per request against ~1 ms for node:http with keep-alive and Nagle off,
@@ -25,19 +27,43 @@ export interface HttpOptions {
   body?: string | Buffer;
   signal?: AbortSignal;
   timeoutMs?: number;
+  // Outbound tool calls: every dialled address is checked against this policy (SSRF).
+  destination?: DestinationPolicy;
+  // Largest response body accepted; larger responses are cut and fail.
+  maxBytes?: number;
 }
+
+export { DestinationBlocked };
 
 export function request(url: string | URL, opts: HttpOptions = {}): Promise<HttpResponse> {
   const u = typeof url === 'string' ? new URL(url) : url;
   const mod = u.protocol === 'https:' ? https : http;
   return new Promise((resolve, reject) => {
     if (opts.signal?.aborted) return reject(opts.signal.reason ?? new Error('aborted'));
+    if (opts.destination) {
+      const host = u.hostname.replace(/^\[|\]$/g, '');
+      if (isIP(host) && !addressAllowed(host, opts.destination).ok) return reject(new DestinationBlocked(`${host} is not a reachable tool address`));
+    }
     const headers: Record<string, string> = { ...(opts.headers ?? {}) };
     if (opts.body !== undefined) headers['content-length'] = String(Buffer.byteLength(opts.body));
-    const req = mod.request(u, { method: opts.method ?? 'GET', headers, agent: agents[u.protocol as 'http:' | 'https:'] }, (res) => {
+    // Guarded calls get their own connection so the lookup check runs for each one.
+    const agent = opts.destination ? false : agents[u.protocol as 'http:' | 'https:'];
+    const lookup = opts.destination ? guardedLookup(opts.destination) : undefined;
+    const req = mod.request(u, { method: opts.method ?? 'GET', headers, agent, ...(lookup ? { lookup: lookup as never } : {}) }, (res) => {
       const chunks: Buffer[] = [];
-      res.on('data', (c: Buffer) => chunks.push(c));
+      let size = 0;
+      let tooBig = false;
+      res.on('data', (c: Buffer) => {
+        size += c.length;
+        if (opts.maxBytes && size > opts.maxBytes) {
+          tooBig = true;
+          res.destroy();
+          return reject(new Error(`response larger than ${opts.maxBytes} bytes`));
+        }
+        chunks.push(c);
+      });
       res.on('end', () => {
+        if (tooBig) return;
         const body = Buffer.concat(chunks);
         const h: Record<string, string> = {};
         for (const [k, v] of Object.entries(res.headers)) if (v !== undefined) h[k] = Array.isArray(v) ? v.join(', ') : v;

@@ -24,7 +24,7 @@ export const env = (name: string, fallback: string) => process.env[name] ?? fall
 
 // Dev-only shared secrets between control plane and gateways, generated on first use.
 // Production supplies these from a secret manager.
-const DEV_SECRETS = ['SIGNET_INTERNAL_TOKEN', 'SIGNET_VAULT_KEY', 'SIGNET_BROKER_KEY', 'SIGNET_DEMO_TOOL_KEY'];
+const DEV_SECRETS = ['SIGNET_INTERNAL_TOKEN', 'SIGNET_VAULT_KEY', 'SIGNET_BROKER_KEY'];
 
 // Several processes start together on a fresh install, so the file is created once, atomically,
 // with every known secret in it; a process that loses the race reads the winner's file.

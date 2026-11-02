@@ -11,6 +11,7 @@ import * as ledger from './ledger';
 import type { Principal } from './rbac';
 import { tenant } from './tenant';
 import { listTools } from './tools';
+import { correlation, enqueue } from './outbox';
 
 const BUNDLE_TTL_MS = 24 * 3_600_000; // BP 3: gateways enforce on the last bundle until it expires
 
@@ -64,6 +65,10 @@ function currentCert(agentId: string): CertificateBody | null {
   return row ? (JSON.parse(row.body) as CertificateBody) : null;
 }
 
+// Set by the lifecycle module at start-up (avoids an import cycle).
+let rolloutSource: () => PolicyBundle['rollouts'] = () => ({});
+export const setRolloutSource = (fn: () => PolicyBundle['rollouts']) => (rolloutSource = fn);
+
 export function buildBundle(): string {
   const now = Date.now();
   const enforcement: Record<string, ScopeState> = {};
@@ -97,6 +102,9 @@ export function buildBundle(): string {
     catalogue: tenant.settings.catalogue,
     tools: listTools(),
     detectors: db.prepare('SELECT id, version, mode FROM detector').all() as unknown as DetectorConfig[],
+    rollouts: rolloutSource(),
+    hitl_wait_seconds: tenant.settings.hitl_wait_seconds,
+    llm_credential: (db.prepare("SELECT id AS secret_id, version FROM secret WHERE tenant_id = ? AND kind = 'llm_provider' ORDER BY created_at LIMIT 1").get(tenant.id) as { secret_id: string; version: number } | undefined) ?? null,
   };
   return signJws(bundle, keys.ca, 'signet-bundle');
 }
@@ -195,10 +203,16 @@ export function applyLadder(target: LadderTarget, action: LadderAction, opts: La
     });
   });
   hub.publish('enforcement', { event_id: eventId, scope_key: key, agent_id: agent.id, state: { level, until_ms: until, ...params }, published_ms: ts });
+  // BP 5.4: every level 4+ event raises a security incident and a GRC issue through connectors.
+  if (level === 'quarantined' || level === 'killed') {
+    const payload = { agent_id: agent.id, tier: agent.tier, level, rule_id: opts.rule_id ?? null, reason: opts.reason, actor: opts.actor, event_id: eventId, scope_key: key };
+    enqueue('incident.create', correlation('incident', eventId), payload);
+    enqueue('issue.upsert', correlation('violation', eventId), { ...payload, title: `Level ${level === 'killed' ? 5 : 4} ${level}: ${opts.reason}`, severity: level === 'killed' ? 'critical' : 'high', state: 'open' });
+  }
   return { event_id: eventId, scope_key: key, level, previous_level: current, until: until ? new Date(until).toISOString() : null, nodes_expected: nodes, tokens_revoked: tokensRevoked, credentials_flagged_for_rotation: rotation };
 }
 
-function revokeTokensFor(agentId: string, scope: string, t: LadderTarget): number {
+export function revokeTokensFor(agentId: string, scope: string, t: LadderTarget): number {
   const now = Math.floor(Date.now() / 1000);
   const rows = (
     scope === 'instance'

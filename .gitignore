@@ -9,3 +9,7 @@ apps/web/dist/
 # detector model weights: too large for git, downloaded separately (see README)
 models/
 tools/bin/
+__pycache__/
+*.egg-info/
+.venv/
+.pytest_cache/

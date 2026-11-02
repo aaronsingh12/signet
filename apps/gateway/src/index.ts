@@ -1,10 +1,10 @@
 import express, { type Request, type Response } from 'express';
-import { request, type ToolAlias } from '@signet/core';
+import { destinationPolicyFromEnv, request, type ToolAlias } from '@signet/core';
 import { handleChat } from './chat';
-import { type Done, Halt, newCtx, preflight } from './ctx';
+import { type Done, Halt, hitlDecided, newCtx, preflight } from './ctx';
 import { modelInfo, startRuntime } from './detectors';
 import { engineName, initEngine } from './engine';
-import type { ChatResponse } from './provider';
+import { llmStatus, probe, type ChatResponse } from './provider';
 import * as state from './state';
 import { handleTool } from './toolcall';
 
@@ -45,11 +45,15 @@ app.post('/v1/messages', guard(async (req, res) => send(res, await handleChat(re
 app.post('/v1/llm/:provider/*', guard(async (req, res) => send(res, await handleChat(req.headers, req.body, req.params.provider))));
 
 // --- MCP proxy (Streamable HTTP, JSON responses) ---
+// Tool destinations are checked on every connection (SSRF); responses are capped at 5 MB.
+const DESTINATIONS = destinationPolicyFromEnv();
+const TOOL_MAX_BYTES = 5 * 1024 * 1024;
+
 async function mcpForward(tool: ToolAlias, credential: string | null, msg: unknown, sessionId: string | undefined, signal: AbortSignal) {
   const headers: Record<string, string> = { 'content-type': 'application/json', accept: 'application/json, text/event-stream' };
   if (sessionId) headers['mcp-session-id'] = sessionId;
   if (credential) headers[tool.auth_header] = tool.auth_header.toLowerCase() === 'authorization' ? `Bearer ${credential}` : credential;
-  const r = await request(tool.url, { method: 'POST', headers, body: JSON.stringify(msg), signal });
+  const r = await request(tool.url, { method: 'POST', headers, body: JSON.stringify(msg), signal, destination: DESTINATIONS, maxBytes: TOOL_MAX_BYTES });
   const outSession = r.headers['mcp-session-id'];
   if (r.status === 202) return { json: null, sessionId: outSession };
   const text = r.text();
@@ -126,11 +130,15 @@ app.all('/v1/tools/http/:alias/:action', guard(async (req, res) => {
       if (!spec) throw new Error('action not mapped on the tool alias');
       const rest = { ...args };
       const path = spec.path.replace(/\{(\w+)\}/g, (_m, k: string) => {
-        const v = rest[k];
+        const v = String(rest[k] ?? '');
         delete rest[k];
-        return encodeURIComponent(String(v ?? ''));
+        // encodeURIComponent keeps "." and "..", which would climb out of the action's path.
+        if (v === '' || v === '.' || v === '..') throw new Error(`path parameter ${k} is empty or a dot segment`);
+        return encodeURIComponent(v);
       });
       const url = new URL(tool.url + path);
+      const base = new URL(tool.url);
+      if (url.origin !== base.origin || !url.pathname.startsWith(base.pathname.replace(/\/$/, ''))) throw new Error('the action resolves outside the registered tool address');
       const headers: Record<string, string> = { accept: 'application/json' };
       if (cred) headers[tool.auth_header] = tool.auth_header.toLowerCase() === 'authorization' ? `Bearer ${cred}` : cred;
       let body: string | undefined;
@@ -139,7 +147,7 @@ app.all('/v1/tools/http/:alias/:action', guard(async (req, res) => {
         headers['content-type'] = 'application/json';
         body = JSON.stringify(rest);
       }
-      const r = await request(url, { method: spec.method, headers, body, signal });
+      const r = await request(url, { method: spec.method, headers, body, signal, destination: DESTINATIONS, maxBytes: TOOL_MAX_BYTES });
       const text = r.text();
       if (!r.ok) throw new Error(`tool returned ${r.status}`);
       try {
@@ -161,15 +169,22 @@ app.get('/healthz', (_req, res) =>
     seals_loaded: state.certs.size,
     tools: [...state.tools.keys()],
     cloud_llm: state.bundle?.catalogue.map((c) => c.model) ?? [],
+    cloud_llm_status: llmStatus(),
     policy_engine: engineName,
     detectors: { runtime: modelInfo, modes: Object.fromEntries([...state.detectors].map(([k, v]) => [k, v.mode])) },
   }),
 );
 
+state.setHitlListener(hitlDecided);
+state.setHeartbeatExtra(llmStatus);
 await initEngine();
 startRuntime();
 state
   .init()
+  .then(() => {
+    void probe().then((st) => console.log(`[gateway] ${state.NODE_ID} cloud LLM check: ${st.state} (${st.detail}; credential from ${st.credential})`));
+    setInterval(() => void probe(), 60_000).unref();
+  })
   .then(() => app.listen(state.PORT, () => console.log(`[gateway] ${state.NODE_ID} enforcing on http://localhost:${state.PORT}  (${state.certs.size} seals; policy engine: ${engineName})`)))
   .catch((e) => {
     console.error(`[gateway] cannot load the policy bundle from ${state.CONTROL_URL}: ${(e as Error).message}`);

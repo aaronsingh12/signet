@@ -54,7 +54,7 @@ export function LiveTraffic() {
               </tbody>
             </table>
           ) : (
-            <Empty>No decisions yet. Run <span className="mono">npm run demo</span> to send traffic.</Empty>
+            <Empty>No gateway traffic yet. Connect an agent (Agent 360 → Connection) and its model and tool calls appear here as they happen.</Empty>
           )}
         </Card>
         <Card title="Gateway pipeline">

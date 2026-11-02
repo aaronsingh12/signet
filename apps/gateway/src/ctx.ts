@@ -1,6 +1,6 @@
 import type { IncomingHttpHeaders } from 'node:http';
 import {
-  newId, verifyJws,
+  TOKEN_AUDIENCE, newId, rewrite, scan, sha256, tokenIssuer, verifyJws,
   type CertificateBody, type CompiledPolicy, type DetectorResult, type Outcome, type WorkloadClaims,
 } from '@signet/core';
 import { appendRecord } from './ledgerclient';
@@ -50,6 +50,10 @@ export interface Ctx {
   responseHash?: string;
   approverGroups: string[];
   extra: Record<string, unknown>;
+  // Deploy-stage rollout (BP 6 Stage 6): in shadow, non-fatal decisions are logged as would_block.
+  shadow: boolean;
+  rollout: string | null;
+  wouldBlock: { step: number; rules: string[]; reason: string }[];
 }
 
 export class Halt extends Error {
@@ -58,7 +62,7 @@ export class Halt extends Error {
     readonly code: string,
     message: string,
     readonly outcome: Outcome,
-    readonly ledgerOutcome: 'blocked' | 'upstream_error' | 'timeout',
+    readonly ledgerOutcome: 'blocked' | 'upstream_error' | 'timeout' | 'pending',
     readonly extra: Record<string, unknown> = {},
   ) {
     super(message);
@@ -71,6 +75,7 @@ export function newCtx(actionType: Ctx['actionType'], target: string, headers: I
     requestId: newId('req'), started: now, lastMark: now, actionType, steps: [], rules: [], reasons: [], sessionId: '',
     callerUserId: typeof headers['x-signet-user'] === 'string' ? headers['x-signet-user'] : null,
     dlp: [], detectors: [], decision: 'allow', tokensIn: 0, tokensOut: 0, costUsd: 0, upstreamMs: 0, target, approverGroups: [], extra: {},
+    shadow: false, rollout: null, wouldBlock: [],
   };
 }
 
@@ -85,6 +90,15 @@ export function halt(ctx: Ctx, n: number, status: number, code: string, message:
   ctx.rules.push(...rules);
   ctx.decision = outcome;
   throw new Halt(status, code, message, outcome, ledgerOutcome, extra);
+}
+
+// In shadow mode only kill, circuit-breaker and secrets-exfiltration blocks are enforced (RB-INV-18);
+// every other refusal is recorded as would_block and the request continues.
+export function wouldBlock(ctx: Ctx, n: number, rules: string[], reason: string): boolean {
+  if (!ctx.shadow) return false;
+  ctx.wouldBlock.push({ step: n, rules, reason });
+  step(ctx, n, 'note', `would_block (${ctx.rollout}): ${reason}`);
+  return true;
 }
 
 // Automatic ladder action from a gateway rule (RB-INV-05: always cites the rule).
@@ -102,12 +116,14 @@ export async function ladder(ctx: Ctx, action: 'kill' | 'quarantine', ruleId: st
   }
 }
 
-export async function recordOutOfManifest(ctx: Ctx, what: string, rules: string[]): Promise<never> {
+export async function recordOutOfManifest(ctx: Ctx, what: string, rules: string[], shadowOk = false): Promise<void> {
   const n = limits.recordOutOfManifest(ctx.claims!.agent_id);
   if (n >= 3) {
     await ladder(ctx, 'kill', 'RB-KILL-04', `${n} out-of-manifest attempts in 10 minutes`, { last: what });
     halt(ctx, 7, 403, 'out_of_manifest', `${what}; ${n} out-of-manifest attempts in 10 minutes, the agent has been killed`, 'kill', [...rules, 'RB-KILL-04'], 'blocked', { attempts_in_window: n });
   }
+  // The repeat-violation kill is enforced even in shadow; a single attempt is only would_block there.
+  if (shadowOk && wouldBlock(ctx, 7, rules, what)) return;
   halt(ctx, 7, 403, 'out_of_manifest', what, 'deny', rules, 'blocked', { attempts_in_window: n });
 }
 
@@ -122,9 +138,14 @@ export function preflight(ctx: Ctx, headers: IncomingHttpHeaders) {
   } catch {
     halt(ctx, 1, 401, 'invalid_token', 'workload token signature is not valid', 'deny', ['BP-5.2-1']);
   }
+  // The signature proves who the agent is, so even a refused stale token is attributed to it in the ledger.
+  ctx.claims = claims;
+  const tenant = state.bundle?.tenant;
+  if (claims.aud !== TOKEN_AUDIENCE || !tenant || claims.tenant !== tenant || claims.iss !== tokenIssuer(tenant)) {
+    halt(ctx, 1, 401, 'invalid_token', 'workload token was not issued for this gateway', 'deny', ['BP-5.2-1']);
+  }
   if (claims.exp * 1000 < Date.now()) halt(ctx, 1, 401, 'token_expired', 'workload token has expired; refresh it', 'deny', ['BP-5.2-1']);
   if (state.isRevoked(claims.jti)) halt(ctx, 1, 401, 'token_revoked', 'workload token has been revoked', 'deny', ['BP-5.2-1']);
-  ctx.claims = claims;
   ctx.sessionId = typeof headers['x-signet-session'] === 'string' ? headers['x-signet-session'].slice(0, 80) : claims.jti;
   step(ctx, 1, 'pass', claims.sub);
 
@@ -140,6 +161,13 @@ export function preflight(ctx: Ctx, headers: IncomingHttpHeaders) {
   if (eff.blocked === 'quarantined') halt(ctx, 3, 403, 'agent_quarantined', 'this agent is quarantined', 'deny', ['BP-5.4']);
   ctx.cert = cert!;
   ctx.policy = policy!;
+  const rollout = state.rollouts.get(cert!.cert_id);
+  if (rollout && rollout.mode !== 'enforce') {
+    // Canary: a stable share of sessions is fully enforced, the rest run in shadow.
+    const bucket = parseInt(sha256(ctx.sessionId).slice(0, 8), 16) % 100;
+    ctx.shadow = rollout.mode === 'shadow' || bucket >= rollout.canary_pct;
+    ctx.rollout = rollout.mode === 'shadow' ? 'shadow' : `canary:${ctx.shadow ? 'shadow' : 'enforced'}`;
+  }
   step(ctx, 2, 'pass', `${cert!.cert_id} ${cert!.version}`);
   step(ctx, 3, 'pass', eff.stepUp || eff.throttleFactor < 1 ? `step-up ${eff.stepUp}, throttle ${eff.throttleFactor}` : 'active');
 
@@ -182,15 +210,19 @@ export async function finish(ctx: Ctx, err: Halt | null, okBody: unknown): Promi
     target: ctx.target,
     agent_version: ctx.cert?.version ?? ctx.claims?.ver ?? null,
     instance_id: ctx.claims?.ins ?? null,
+    auth_kind: ctx.claims?.kind ?? null, // bootstrap (self-hosted runtime) or client_credentials (vendor platform)
     session_id: ctx.sessionId || null,
     caller_user_id: ctx.callerUserId,
     args_digest: ctx.argsDigest ?? null,
+    rollout: ctx.rollout,
     prompt_hash: ctx.promptHash ?? null,
     response_hash: ctx.responseHash ?? null,
     data_classes_in: tags('in'),
     data_classes_out: tags('out'),
     dlp_actions: counts,
-    policy_decision: ctx.decision,
+    policy_decision: !err && ctx.wouldBlock.length ? 'would_block' : ctx.decision,
+    shadow_rule_ids: ctx.wouldBlock.length ? [...new Set(ctx.wouldBlock.flatMap((w) => w.rules))] : undefined,
+    would_block: ctx.wouldBlock.length ? ctx.wouldBlock : undefined,
     policy_rule_ids: [...new Set(ctx.rules)],
     approver_groups: ctx.approverGroups,
     reasons: ctx.reasons,
@@ -218,7 +250,7 @@ export async function finish(ctx: Ctx, err: Halt | null, okBody: unknown): Promi
   const headers: Record<string, string> = {
     'x-signet-request-id': ctx.requestId,
     'x-signet-record-id': recordId,
-    'x-signet-decision': err ? err.outcome : ctx.decision,
+    'x-signet-decision': err ? err.outcome : data.policy_decision,
     'x-signet-gateway-ms': String(data.latency_ms_gateway),
   };
   if (err) return errorDone(ctx, err, recordId, headers);
@@ -244,4 +276,78 @@ export function errorDone(ctx: Ctx, err: Halt, recordId: string | null, headers:
       },
     },
   };
+}
+
+// Session state (taint, pending detector verdicts) belongs to one agent's session: another agent
+// reusing the same session id must not inherit it.
+export const sessionKey = (ctx: Ctx) => `${ctx.claims?.agent_id ?? '-'}:${ctx.sessionId}`;
+
+// Arguments as shown to an approver: sensitive values replaced by their data class (BP 7.4).
+export function maskArgs(v: unknown): unknown {
+  if (typeof v === 'string') return rewrite(v, scan(v), (f) => `[${f.tag}]`);
+  if (Array.isArray(v)) return v.map(maskArgs);
+  if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, maskArgs(x)]));
+  return v;
+}
+
+// 10. Human in the loop (BP 5.2 step 10, 7.4). The gateway parks the action and waits for a person, up
+// to the tenant's hold time. With x-signet-hitl: async the agent gets 202 and resubmits the same call
+// with x-signet-approval: <approval_id>, which is single-use. A timeout is a rejection (RB-INV-11).
+export async function humanApproval(ctx: Ctx, headers: IncomingHttpHeaders, input: { actionKey: string; args: unknown; rules: string[]; groups: string[] }) {
+  const c = ctx.claims!;
+  const resubmitted = headers['x-signet-approval'];
+  if (typeof resubmitted === 'string') {
+    let approvers: string[] = [];
+    try {
+      const r = await state.internal<{ approvers: string[] }>(`/internal/hitl/${encodeURIComponent(resubmitted)}/consume`, { method: 'POST', body: JSON.stringify({ agent_id: c.agent_id, action_key: input.actionKey, session_id: ctx.sessionId }) });
+      approvers = r.approvers;
+    } catch (e) {
+      halt(ctx, 10, 403, 'approval_invalid', `approval ${resubmitted} cannot be used: ${(e as Error).message}`, 'deny', input.rules);
+    }
+    ctx.extra.approval_id = resubmitted;
+    ctx.extra.approved_by = approvers;
+    ctx.decision = 'allow';
+    step(ctx, 10, 'pass', `approved by ${approvers.join(', ')} (${resubmitted})`);
+    return;
+  }
+  const opened = await state.internal<{ status: string; approval_id: string; expires_at?: string; grant?: boolean }>('/internal/hitl', {
+    method: 'POST',
+    body: JSON.stringify({ agent_id: c.agent_id, cert_id: c.cert_id, session_id: ctx.sessionId, action_key: input.actionKey, args_masked: input.args, rule_ids: input.rules, approver_groups: input.groups, reasons: ctx.reasons, request_id: ctx.requestId, node_id: state.NODE_ID, caller_user_id: ctx.callerUserId }),
+  });
+  ctx.extra.approval_id = opened.approval_id;
+  if (opened.status === 'approved') {
+    ctx.decision = 'allow';
+    step(ctx, 10, 'pass', `session grant from ${opened.approval_id}`);
+    return;
+  }
+  if (headers['x-signet-hitl'] === 'async') {
+    halt(ctx, 10, 202, 'approval_pending', `waiting for ${input.groups.join(', ') || 'an approver'}; resubmit with x-signet-approval: ${opened.approval_id}`, 'require_approval', input.rules, 'pending', { approval_id: opened.approval_id, expires_at: opened.expires_at });
+  }
+  const out = await waitForDecision(opened.approval_id, Date.parse(opened.expires_at ?? '') || Date.now() + state.hitlWaitMs());
+  if (out.status === 'approved') {
+    ctx.decision = 'allow';
+    ctx.extra.approved_by = out.approvers;
+    step(ctx, 10, 'pass', `approved by ${out.approvers.join(', ')} (${opened.approval_id})`);
+    return;
+  }
+  if (out.status === 'expired' || out.status === 'pending') halt(ctx, 10, 403, 'approval_timeout', 'no decision within the hold time; rejected as on timeout', 'require_approval', [...input.rules, 'RB-INV-11']);
+  halt(ctx, 10, 403, 'approval_rejected', `rejected by ${out.approvers.join(', ') || 'an approver'}`, out.decision === 'reject_quarantine' ? 'quarantine' : 'deny', input.rules);
+}
+
+const waiters = new Map<string, () => void>();
+export const hitlDecided = (approvalId: string) => waiters.get(approvalId)?.();
+
+async function waitForDecision(id: string, until: number): Promise<{ status: string; decision: string | null; approvers: string[] }> {
+  const fetchStatus = () => state.internal<{ status: string; outcome: string | null; approvers: { approver: string; decision: string }[] }>(`/internal/hitl/${encodeURIComponent(id)}`);
+  for (;;) {
+    const s = await fetchStatus().catch(() => null);
+    if (s && s.status !== 'pending') return { status: s.status, decision: s.outcome, approvers: s.approvers.map((a) => a.approver) };
+    if (Date.now() > until + 3_000) return { status: s?.status ?? 'pending', decision: null, approvers: [] };
+    // Woken by the decision push from the control plane; polls every 2 s as a fallback.
+    await new Promise<void>((r) => {
+      const t = setTimeout(r, 2_000);
+      waiters.set(id, () => (clearTimeout(t), r()));
+    });
+    waiters.delete(id);
+  }
 }

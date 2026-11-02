@@ -1,9 +1,10 @@
 import {
-  Activity, BookLock, Boxes, ClipboardCheck, Cpu, FileSearch, Gauge, KeyRound, LayoutDashboard, LogOut, Plus, Radar, ScrollText, ShieldAlert, SlidersHorizontal, Users, Wrench,
+  Activity, Bell, BookLock, Boxes, Cable, ClipboardCheck, Cpu, FileSearch, Gauge, KeyRound, LayoutDashboard, LogOut, Plus, Radar, ScrollText, ShieldAlert, SlidersHorizontal, Users, Wrench,
 } from 'lucide-react';
-import type { ReactNode } from 'react';
-import { NavLink, Outlet } from 'react-router-dom';
-import { useApi } from '../lib/api';
+import { useEffect, useState, type ReactNode } from 'react';
+import { Link, NavLink, Outlet } from 'react-router-dom';
+import { api, useApi } from '../lib/api';
+import { ago } from '../lib/format';
 import { ROLE_LABEL, signOut, useMe } from '../lib/auth';
 import { Logo } from './Logo';
 
@@ -27,8 +28,8 @@ const NAV: { section: string; items: Item[] }[] = [
   {
     section: 'Governance',
     items: [
-      { to: '/approvals', label: 'My Approvals', icon: <ClipboardCheck size={16} />, phase: 'Phase 2' },
-      { to: '/controls', label: 'Control Library', icon: <BookLock size={16} />, phase: 'Phase 2' },
+      { to: '/approvals', label: 'My Approvals', icon: <ClipboardCheck size={16} /> },
+      { to: '/controls', label: 'Control Library', icon: <BookLock size={16} /> },
     ],
   },
   {
@@ -44,6 +45,7 @@ const NAV: { section: string; items: Item[] }[] = [
     items: [
       { to: '/policies', label: 'Policies & detectors', icon: <SlidersHorizontal size={16} /> },
       { to: '/tools', label: 'Tools & secrets', icon: <Wrench size={16} /> },
+      { to: '/connectors', label: 'Connectors', icon: <Cable size={16} /> },
       { to: '/tenant', label: 'Tenant & access', icon: <Users size={16} /> },
     ],
   },
@@ -103,6 +105,7 @@ export function Shell() {
             <FileSearch size={14} /> Every action here goes through the public API and is written to the admin ledger.
           </div>
           <div className="ml-auto flex items-center gap-3">
+            <Notifications />
             <span className="rounded-md border border-line px-2 py-1 text-xs text-ink-2">
               <Gauge size={12} className="mr-1 inline" />
               Environment: dev
@@ -123,6 +126,47 @@ export function Shell() {
           <Outlet />
         </main>
       </div>
+    </div>
+  );
+}
+
+// The bell: approvals waiting, lifecycle steps, reminders and escalations for me or my roles.
+function Notifications() {
+  const [open, setOpen] = useState(false);
+  const { data, reload } = useApi<any>('/notifications');
+  useEffect(() => {
+    const t = setInterval(() => void reload(), 15_000);
+    return () => clearInterval(t);
+  }, [reload]);
+  const toggle = async () => {
+    setOpen(!open);
+    if (!open && data?.unread) {
+      await api('/notifications/read', { method: 'POST' }).catch(() => {});
+      void reload();
+    }
+  };
+  return (
+    <div className="relative">
+      <button className="btn-ghost relative" onClick={() => void toggle()} title="Notifications">
+        <Bell size={15} />
+        {!!data?.unread && <span className="absolute -right-1 -top-1 rounded-full bg-bad px-1.5 text-[10px] font-semibold text-white">{data.unread}</span>}
+      </button>
+      {open && (
+        <div className="card absolute right-0 top-10 z-40 w-96 overflow-hidden" onMouseLeave={() => setOpen(false)}>
+          <div className="border-b border-line px-4 py-2 text-sm font-semibold">Notifications</div>
+          <ul className="max-h-96 divide-y divide-line overflow-y-auto">
+            {(data?.items ?? []).slice(0, 30).map((n: any) => (
+              <li key={n.id}>
+                <Link to={n.link ?? '#'} onClick={() => setOpen(false)} className={`block px-4 py-2.5 text-sm hover:bg-canvas ${n.read_at ? 'text-ink-2' : 'font-medium'}`}>
+                  {n.title}
+                  <div className="text-[11px] font-normal text-ink-3">{n.kind} · {ago(n.created_at)}</div>
+                </Link>
+              </li>
+            ))}
+            {!data?.items?.length && <li className="px-4 py-6 text-center text-sm text-ink-3">Nothing new.</li>}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

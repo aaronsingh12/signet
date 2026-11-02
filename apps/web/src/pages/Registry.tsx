@@ -4,6 +4,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Card, Empty, PageHeader, Pill, TierChip } from '../components/ui';
 import { useApi } from '../lib/api';
 import { ago, date } from '../lib/format';
+import { ConnectionPill } from './Connection';
 
 export function Registry() {
   const nav = useNavigate();
@@ -39,7 +40,7 @@ export function Registry() {
           <table className="w-full">
             <thead>
               <tr>
-                {['Agent', 'Model', 'Tier', 'Autonomy', 'Seal', 'Ladder', 'Valid to', 'Owner', 'Last activity'].map((h) => (
+                {['Agent', 'Type', 'Tier', 'Autonomy', 'Seal', 'Connection', 'Ladder', 'Valid to', 'Owner', 'Last activity'].map((h) => (
                   <th key={h} className="th">{h}</th>
                 ))}
               </tr>
@@ -51,10 +52,11 @@ export function Registry() {
                     <div className="font-medium">{a.name}</div>
                     <div className="mono text-ink-3">{a.handle}</div>
                   </td>
-                  <td className="td text-ink-2">gpt-oss (cloud LLM)</td>
+                  <td className="td text-xs text-ink-2">{a.kind === 'third_party' ? `third-party · ${a.vendor}` : [a.kind.replace('_', '-'), a.framework].filter(Boolean).join(' · ')}</td>
                   <td className="td"><TierChip tier={a.tier} /></td>
                   <td className="td">{a.autonomy_level}</td>
                   <td className="td">{a.cert_id ? <Pill value="sealed" label={`sealed ${a.version}`} /> : <Pill value={a.status} />}</td>
+                  <td className="td"><ConnectionPill state={a.connection} /></td>
                   <td className="td"><Pill value={a.enforcement} /></td>
                   <td className="td">{date(a.valid_to)}</td>
                   <td className="td text-ink-2">{a.owner}</td>

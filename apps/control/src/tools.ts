@@ -1,4 +1,4 @@
-import type { ToolAlias } from '@signet/core';
+import { DestinationBlocked, checkDestination, destinationPolicyFromEnv, type ToolAlias } from '@signet/core';
 import { db, nowIso, tx } from './db';
 import { PolicyError, invalid } from './errors';
 import * as ledger from './ledger';
@@ -36,7 +36,9 @@ export interface ToolInput {
   actions?: Record<string, { method: string; path: string }>;
 }
 
-export function registerTool(input: ToolInput, p: Principal): ToolAlias {
+// The address must resolve to somewhere tools may reach (no cloud metadata, no private networks unless
+// SIGNET_TOOL_PRIVATE_DESTINATIONS=allow). The gateway checks again on every connection.
+export async function registerTool(input: ToolInput, p: Principal): Promise<ToolAlias> {
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(input.alias ?? '')) throw invalid('alias must be kebab-case');
   if (!['mcp', 'http'].includes(input.kind)) throw invalid('kind must be mcp or http');
   let url: URL;
@@ -46,12 +48,19 @@ export function registerTool(input: ToolInput, p: Principal): ToolAlias {
     throw invalid('url is not a valid URL');
   }
   if (!['http:', 'https:'].includes(url.protocol)) throw invalid('url must be http or https');
+  try {
+    await checkDestination(url, destinationPolicyFromEnv());
+  } catch (e) {
+    if (e instanceof DestinationBlocked) throw new PolicyError('SSRF', e.message, 422);
+    throw e;
+  }
   const actions = input.actions ?? {};
   if (input.kind === 'http') {
     if (!Object.keys(actions).length) throw invalid('http tools need an actions map: { name: { method, path } }');
     for (const [name, a] of Object.entries(actions)) {
       if (!['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(a.method)) throw invalid(`action ${name}: unsupported method`);
       if (!a.path?.startsWith('/')) throw invalid(`action ${name}: path must start with /`);
+      if (/(^|\/)\.{1,2}(\/|$)|\/\/|[?#]/.test(a.path)) throw invalid(`action ${name}: path may not contain dot segments, //, ? or #`);
     }
   }
   const secretId = input.secret ? getSecretMeta(input.secret).id : null;

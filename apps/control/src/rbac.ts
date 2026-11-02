@@ -15,26 +15,26 @@ export const PERMISSIONS = [
   'ladder.step_up', 'ladder.throttle', 'ladder.quarantine', 'ladder.kill', 'ladder.release', 'circuit_breaker.arm',
   'ledger.read', 'ledger.verify', 'evidence.export', 'evidence.payload.read',
   'tools.manage', 'secrets.manage', 'discovery.read', 'discovery.write', 'detectors.manage',
-  'gateways.read', 'tenant.read', 'tenant.admin',
+  'gateways.read', 'tenant.read', 'tenant.admin', 'compliance.read', 'connectors.manage',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
 const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
-  tenant_admin: ['tenant.read', 'tenant.admin', 'agents.read', 'ledger.read', 'gateways.read'],
-  platform_admin: ['agents.read', 'identity.bootstrap', 'tools.manage', 'secrets.manage', 'discovery.read', 'discovery.write', 'detectors.manage', 'ledger.read', 'gateways.read', 'tenant.read'],
-  governance_board: ['agents.read', 'certificates.approve', 'ladder.quarantine', 'circuit_breaker.arm', 'ledger.read', 'ledger.verify', 'gateways.read', 'tenant.read'],
-  risk_officer: ['agents.read', 'certificates.approve', 'ladder.quarantine', 'ladder.release', 'ledger.read', 'ledger.verify', 'evidence.export', 'discovery.read', 'gateways.read', 'tenant.read'],
-  security_officer: [
+  tenant_admin: ['compliance.read', 'tenant.read', 'tenant.admin', 'agents.read', 'ledger.read', 'gateways.read'],
+  platform_admin: ['connectors.manage', 'compliance.read', 'agents.read', 'identity.bootstrap', 'tools.manage', 'secrets.manage', 'discovery.read', 'discovery.write', 'detectors.manage', 'ledger.read', 'gateways.read', 'tenant.read'],
+  governance_board: ['compliance.read', 'agents.read', 'certificates.approve', 'ladder.quarantine', 'circuit_breaker.arm', 'ledger.read', 'ledger.verify', 'gateways.read', 'tenant.read'],
+  risk_officer: ['compliance.read', 'agents.read', 'certificates.approve', 'ladder.quarantine', 'ladder.release', 'ledger.read', 'ledger.verify', 'evidence.export', 'discovery.read', 'gateways.read', 'tenant.read'],
+  security_officer: ['compliance.read', 
     'agents.read', 'certificates.approve', 'ladder.step_up', 'ladder.throttle', 'ladder.quarantine', 'ladder.kill', 'ladder.release',
     'circuit_breaker.arm', 'ledger.read', 'ledger.verify', 'evidence.export', 'evidence.payload.read', 'discovery.read', 'discovery.write',
     'detectors.manage', 'gateways.read', 'tenant.read',
   ],
   // Owners act on their own agents only; handlers check ownership (BP 14.2 "kill own agent").
-  agent_owner: ['agents.read', 'agents.write', 'identity.bootstrap', 'ladder.quarantine', 'ladder.kill', 'ledger.read'],
+  agent_owner: ['compliance.read', 'agents.read', 'agents.write', 'identity.bootstrap', 'ladder.quarantine', 'ladder.kill', 'ledger.read'],
   builder: ['agents.read', 'ledger.read'],
   approver: ['agents.read'],
-  auditor: ['agents.read', 'ledger.read', 'ledger.verify', 'evidence.export', 'gateways.read'],
-  viewer: ['agents.read'],
+  auditor: ['compliance.read', 'agents.read', 'ledger.read', 'ledger.verify', 'evidence.export', 'gateways.read'],
+  viewer: ['compliance.read', 'agents.read'],
   automation: ['agents.read', 'agents.write', 'identity.bootstrap', 'ledger.read', 'ledger.verify', 'evidence.export', 'discovery.write'],
 };
 
