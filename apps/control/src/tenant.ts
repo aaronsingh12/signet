@@ -8,6 +8,9 @@ export interface TenantSettings {
   group_roles: Record<string, Role>;
   require_mfa: boolean;
   baseline: { max_input_tokens: number; max_cost_per_request_usd: number }; // RB-BL-03, RB-BL-04
+  // Runtime approver groups named in seals (hitl[].approver_group) and tenant rules, mapped to roles.
+  approver_groups: Record<string, { roles: Role[]; count?: number; owner?: boolean }>;
+  hitl_wait_seconds: number; // BP 5.2 step 10: hold the connection up to this long (default 120 s)
 }
 
 // The one cloud LLM (Rulebook v0.2, D-17): gpt-oss-120b on Ollama's cloud. Region and price stay
@@ -28,6 +31,13 @@ const defaultSettings = (): TenantSettings => ({
   // MFA is enforced at the IdP; the dev realm has no authenticator enrolled, so dev does not require it.
   require_mfa: env('SIGNET_REQUIRE_MFA', 'false') === 'true',
   baseline: { max_input_tokens: 32_000, max_cost_per_request_usd: 5 },
+  approver_groups: {
+    'ops-supervisors': { roles: ['approver', 'security_officer'] },
+    'owner-approvers': { roles: ['approver', 'security_officer'], owner: true },
+    'security-approvers': { roles: ['security_officer'] },
+    'dual-control': { roles: ['approver', 'security_officer', 'risk_officer'], count: 2 },
+  },
+  hitl_wait_seconds: Number(env('SIGNET_HITL_WAIT_SECONDS', '120')),
 });
 
 // Phase 1 runs a single tenant; multi-tenancy arrives with the SaaS cells (Phase 4).

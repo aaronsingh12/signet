@@ -1,6 +1,6 @@
 import type { IncomingHttpHeaders } from 'node:http';
 import { canonicalize, combine, sha256, type Outcome, type ToolAlias } from '@signet/core';
-import { type Ctx, type Done, Halt, finish, halt, ladder, newCtx, preflight, recordOutOfManifest, step } from './ctx';
+import { type Ctx, type Done, Halt, finish, halt, humanApproval, ladder, maskArgs, newCtx, preflight, recordOutOfManifest, sessionKey, step, wouldBlock } from './ctx';
 import { detectInjection, notDeployed } from './detectors';
 import { evaluate } from './engine';
 import { appendRecord } from './ledgerclient';
@@ -46,18 +46,20 @@ async function run(ctx: Ctx, headers: IncomingHttpHeaders, req: ToolRequest): Pr
   const tool = state.tools.get(req.alias);
   if (!tool || tool.kind !== req.kind) await recordOutOfManifest(ctx, `tool ${req.kind}://${req.alias} is not registered`, ['BP-5.1']);
   const action = policy.actions[key];
-  if (!action) await recordOutOfManifest(ctx, `${key} is not in this agent's seal`, ['RB-PREC-01', 'SGC-TOOL-004']);
-  step(ctx, 7, 'pass', `${action!.impact}`);
+  if (!action) await recordOutOfManifest(ctx, `${key} is not in this agent's seal`, ['RB-PREC-01', 'SGC-TOOL-004'], true);
+  const impact = action?.impact ?? 'critical'; // an unknown action is treated as the highest impact
+  ctx.extra.impact = impact;
+  if (action) step(ctx, 7, 'pass', impact);
 
   // Hijack (RB-KILL-01): a privileged or critical attempt after DET-INJ scored High on a tool response
   // in this session. The deterministic part is the attempt itself; the signal is the taint. A
   // high-impact action first waits for any verdict still being computed for this session.
-  if (action!.impact === 'privileged' || action!.impact === 'critical') {
-    const settled = await settle(ctx.sessionId, 5_000);
+  if (impact === 'privileged' || impact === 'critical') {
+    const settled = await settle(sessionKey(ctx), 5_000);
     if (!settled) ctx.reasons.push('a DET-INJ verdict for this session was still pending after 5 s');
   }
-  const t = taintOf(ctx.sessionId);
-  if (t?.band === 'high' && (action!.impact === 'privileged' || action!.impact === 'critical')) {
+  const t = taintOf(sessionKey(ctx));
+  if (t?.band === 'high' && (impact === 'privileged' || impact === 'critical')) {
     const act = cert.tier === 'T1' || cert.tier === 'T2' ? 'kill' : 'quarantine';
     await ladder(ctx, act, 'RB-KILL-01', `privileged ${key} attempted after injection in a tool response`, { taint_source: t.source });
     halt(ctx, 7, 403, 'hijack_detected', `privileged action after injected content in this session; agent ${act === 'kill' ? 'killed' : 'quarantined'}`, act, ['RB-KILL-01']);
@@ -70,7 +72,7 @@ async function run(ctx: Ctx, headers: IncomingHttpHeaders, req: ToolRequest): Pr
     await ladder(ctx, 'kill', 'RB-KILL-02', `${di.exfiltration.tag} sent to ${key}, outside the tool's data scope`, { tag: di.exfiltration.tag });
     halt(ctx, 8, 403, 'data_exfiltration', `${di.exfiltration.tag} data may not be sent to ${key}; the agent has been killed`, 'kill', [di.exfiltration.rule, 'RB-KILL-02']);
   }
-  if (di.blocked) halt(ctx, 8, 403, 'data_blocked', `${di.blocked.tag} data is outside the data scope of ${key}`, 'deny', [di.blocked.rule]);
+  if (di.blocked && !wouldBlock(ctx, 8, [di.blocked.rule], `${di.blocked.tag} outside the data scope of ${key}`)) halt(ctx, 8, 403, 'data_blocked', `${di.blocked.tag} data is outside the data scope of ${key}`, 'deny', [di.blocked.rule]);
   step(ctx, 8, 'pass', di.events.length ? `${di.events.length} finding(s) within scope` : 'no sensitive data');
 
   // 9. Policy engine: manifest constraints, privileged-action rules, taint, step-up, seal HITL rules.
@@ -89,15 +91,17 @@ async function run(ctx: Ctx, headers: IncomingHttpHeaders, req: ToolRequest): Pr
   ctx.approverGroups = r.approver_groups;
   if (r.decision === 'deny') {
     if (r.rule_ids.includes('BP-4.3-constraint')) ctx.reasons.push(...r.details);
-    halt(ctx, 9, 403, 'policy_denied', r.details.join('; ') || 'denied by policy', 'deny', r.rule_ids);
+    if (!wouldBlock(ctx, 9, r.rule_ids, r.details.join('; ') || 'denied by policy')) halt(ctx, 9, 403, 'policy_denied', r.details.join('; ') || 'denied by policy', 'deny', r.rule_ids);
   }
   step(ctx, 9, 'pass', `${r.decision}${r.rule_ids.length ? ` (${r.rule_ids.join(', ')})` : ''}`);
 
-  // 10. Human in the loop: rejected until the approvals engine ships (Phase 2), as on timeout (RB-INV-11).
-  if (combined.outcome === 'require_approval') {
-    halt(ctx, 10, 403, 'approval_required', `${key} needs approval by ${r.approver_groups.join(', ') || 'an approver'}; the approvals engine is not deployed yet, so it is rejected as on timeout`, 'require_approval', ['RB-INV-11']);
-  }
-  step(ctx, 10, 'pass', 'not required');
+  // 10. Human in the loop: the action waits for a person (or would_block in shadow).
+  const approvalRules = [...r.rule_ids, ...(di.approval ? [di.approval.rule] : [])];
+  if (combined.outcome === 'require_approval' && r.decision !== 'deny') {
+    if (!wouldBlock(ctx, 10, approvalRules, `needs approval by ${r.approver_groups.join(', ') || 'an approver'}`)) {
+      await humanApproval(ctx, headers, { actionKey: key, args: maskArgs(req.args), rules: approvalRules, groups: r.approver_groups });
+    }
+  } else step(ctx, 10, 'pass', 'not required');
 
   // 11. Credential injection from the Secrets Broker; the agent never sees it.
   let credential: string | null = null;
@@ -138,12 +142,12 @@ async function run(ctx: Ctx, headers: IncomingHttpHeaders, req: ToolRequest): Pr
     const scoring = detectInjection(text, cert.tier, 'tool').then(async (inj) => {
       let applied: string | null = null;
       if (inj.status === 'ok' && inj.band && inj.band !== 'low') {
-        taint(ctx.sessionId, inj.band, `${key} response (${requestId})`);
+        taint(sessionKey(ctx), inj.band, `${key} response (${requestId})`);
         applied = `session tainted ${inj.band} for 60 minutes (RB-BL-12)`;
       }
       await appendRecord({ kind: 'transaction', agent_id: claims.agent_id, cert_id: cert.cert_id, data: { action_type: 'detector_score', request_id: requestId, target: key, session_id: ctx.sessionId, node_id: state.NODE_ID, detector: inj, applied, policy_decision: applied ? 'taint' : inj.status === 'shadow' ? 'would_taint' : 'none' } }).catch(() => {});
     });
-    trackPending(ctx.sessionId, scoring);
+    trackPending(sessionKey(ctx), scoring);
     ctx.detectors = [{ id: 'DET-INJ', version: cfg.version, status: 'pending' }, ...notDeployed()];
   } else ctx.detectors = [{ id: 'DET-INJ', version: cfg?.version ?? 'unknown', status: 'unavailable' }, ...notDeployed()];
   const cleaned = cleanJson(result, ctx.dlp);

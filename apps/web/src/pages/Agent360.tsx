@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { Card, Empty, ErrorNote, KV, LEVEL_LABEL, Modal, Mono, PageHeader, Pill, Tabs, TierChip } from '../components/ui';
 import { ApiError, api, useApi } from '../lib/api';
 import { useCan, useMe } from '../lib/auth';
 import { ago, date, daysLeft, dlpSummary, time } from '../lib/format';
+import { ConnectionPill, ConnectionTab } from './Connection';
+import { LifecycleTab } from './Lifecycle';
 
 type Ladder = 'step_up' | 'throttle' | 'quarantine' | 'kill' | 'release';
 
@@ -12,9 +14,9 @@ export function Agent360() {
   const me = useMe();
   const can = useCan();
   const { data, reload, error } = useApi<any>(`/agents/${id}`);
-  const [tab, setTab] = useState('overview');
+  const [params] = useSearchParams();
+  const [tab, setTab] = useState(params.get('tab') ?? 'overview');
   const [ladder, setLadder] = useState<Ladder | null>(null);
-  const [boot, setBoot] = useState<any>(null);
   if (error) return <ErrorNote error={error} />;
   if (!data) return null;
   const { agent, certificate: cert, enforcement } = data;
@@ -22,7 +24,6 @@ export function Agent360() {
   const ladderAllowed = (a: Ladder) => can(`ladder.${a}`) && (own || !me.principal.roles.every((r) => r === 'agent_owner'));
   const killed = enforcement.level === 'killed' || agent.status === 'killed';
   const left = daysLeft(cert?.valid_to);
-  const issueBootstrap = async () => setBoot(await api(`/agents/${agent.id}/bootstrap`, { method: 'POST', body: { environment: 'dev' } }).catch((e) => ({ error: e })));
 
   return (
     <>
@@ -36,15 +37,15 @@ export function Agent360() {
             {cert ? <Pill value="sealed" label={`Sealed · valid to ${date(cert.valid_to)}`} /> : <Pill value={agent.status} />}
             <Pill value={enforcement.level} label={enforcement.level === 'active' ? 'ladder: active' : LEVEL_LABEL[enforcement.level] ?? enforcement.level} />
             <TierChip tier={agent.tier} />
-            <span className="text-xs">{agent.autonomy_level}</span>
+            <ConnectionPill state={data.connection.state} />
+            <span className="text-xs">{agent.autonomy_level} · {agent.kind === 'third_party' ? `third-party (${agent.vendor})` : agent.kind.replace('_', '-')}</span>
             <Mono>{agent.id}</Mono>
-            {cert && <span className="text-xs">version {cert.version} · gpt-oss (cloud LLM) · keyless</span>}
+            {cert && <span className="text-xs">version {cert.version}{agent.kind === 'third_party' ? ' · tools only (vendor model not intercepted)' : ` · ${cert.models.map((m: any) => m.model).join(', ')}`}</span>}
           </span>
         }
         actions={
           !killed && (
             <>
-              {can('identity.bootstrap') && cert && <button className="btn-ghost" onClick={() => void issueBootstrap()}>Bootstrap credential</button>}
               {ladderAllowed('step_up') && <button className="btn-ghost" onClick={() => setLadder('step_up')}>Step-up</button>}
               {ladderAllowed('throttle') && <button className="btn-ghost" onClick={() => setLadder('throttle')}>Throttle</button>}
               {ladderAllowed('release') && enforcement.level !== 'active' && <button className="btn-ghost" onClick={() => setLadder('release')}>Release</button>}
@@ -60,11 +61,12 @@ export function Agent360() {
         onChange={setTab}
         tabs={[
           { id: 'overview', label: 'Overview' },
+          { id: 'connection', label: 'Connection' },
+          { id: 'lifecycle', label: data.lifecycle?.lifecycle.status === 'in_progress' ? `Lifecycle · ${data.lifecycle.lifecycle.stage}` : 'Lifecycle' },
           { id: 'seal', label: 'Seal' },
           { id: 'manifest', label: 'Manifest' },
           { id: 'instances', label: `Instances ${data.instances.length}` },
           { id: 'ledger', label: 'Ledger' },
-          ...(can('certificates.approve') && !killed ? [{ id: 'approve', label: cert ? 'Re-issue seal' : 'Approve & seal' }] : []),
         ]}
       />
       {tab === 'overview' && (
@@ -92,7 +94,7 @@ export function Agent360() {
                 ]}
               />
             ) : (
-              <Empty>Not sealed yet. An approver outside the build team defines the manifest and signs it.</Empty>
+              <Empty>Not sealed yet. The seal is signed when the lifecycle reaches Approve and every slot of the approval matrix has signed.</Empty>
             )}
           </Card>
           <Card title="Ladder state">
@@ -136,21 +138,9 @@ export function Agent360() {
         </Card>
       )}
       {tab === 'ledger' && <AgentLedger agentId={agent.id} />}
-      {tab === 'approve' && <SealEditor agent={agent} current={cert} onDone={() => (void reload(), setTab('seal'))} />}
+      {tab === 'lifecycle' && <LifecycleTab data={data} onChange={() => void reload()} />}
+      {tab === 'connection' && <ConnectionTab data={data} onChange={() => void reload()} />}
       {ladder && <LadderModal agent={agent} instances={data.instances} action={ladder} onClose={() => setLadder(null)} onDone={() => void reload()} />}
-      {boot && (
-        <Modal title="Bootstrap credential" onClose={() => setBoot(null)}>
-          {boot.error ? (
-            <ErrorNote error={boot.error} />
-          ) : (
-            <>
-              <p className="text-sm text-ink-2">Give this to the deployment pipeline. It works once, within 15 minutes, and is exchanged at <Mono>POST /api/v1/identity/token</Mono> for a workload token. It is not shown again.</p>
-              <pre className="mono mt-3 break-all rounded-md bg-canvas p-3">{boot.bootstrap_credential}</pre>
-              <p className="mt-2 text-xs text-ink-3">Expires {new Date(boot.expires_at).toLocaleTimeString()} · environment {boot.environment}</p>
-            </>
-          )}
-        </Modal>
-      )}
     </>
   );
 }
@@ -312,7 +302,13 @@ function LadderModal({ agent, instances, action, onClose, onDone }: { agent: any
     <Modal title={title} onClose={onClose}>
       {result ? (
         <div className="space-y-2 text-sm">
+          {result.type === 'quarantine_release' ? (
+            <div className="rounded-md bg-royal-50 px-3 py-2 text-royal">
+              Release request sent for approval: {result.slots.map((s: any) => s.label).join(' + ')}. <Link className="underline" to={`/approvals?id=${result.id}`}>Open it</Link>
+            </div>
+          ) : (
           <div className="rounded-md bg-ok-50 px-3 py-2 text-ok">Applied: {LEVEL_LABEL[result.level] ?? result.level} · {result.tokens_revoked ?? 0} tokens revoked{result.credentials_flagged_for_rotation?.length ? ` · ${result.credentials_flagged_for_rotation.length} credential(s) flagged for rotation` : ''}</div>
+          )}
           {acks && (
             <div>
               <div className="font-medium">Propagation: {acks.acks.length}/{acks.event.nodes_expected} gateway nodes acknowledged</div>
@@ -331,7 +327,7 @@ function LadderModal({ agent, instances, action, onClose, onDone }: { agent: any
               <li className="font-medium text-bad">This cannot be undone. Re-entry only through a new seal from Assess.</li>
             </ul>
           )}
-          {action === 'release' && <p className="text-sm text-ink-2">Lifting a ladder state is human-only and written to the ledger (RB-INV-10). The agent's revoked tokens stay revoked; it redeploys with a new bootstrap credential.</p>}
+          {action === 'release' && <p className="text-sm text-ink-2">Lifting a ladder state is human-only and written to the ledger (RB-INV-10). Releasing a quarantine opens an approval (Owner + Security; T1 adds Risk). The agent's revoked tokens stay revoked; it redeploys with a new bootstrap credential.</p>}
           {scoped && (
             <div>
               <label className="label">Scope</label>
@@ -369,61 +365,5 @@ function LadderModal({ agent, instances, action, onClose, onDone }: { agent: any
         </div>
       )}
     </Modal>
-  );
-}
-
-function SealEditor({ agent, current, onDone }: { agent: any; current: any; onDone: () => void }) {
-  const { data: tools } = useApi<any>('/tools');
-  const { data: cat } = useApi<any>('/catalogue');
-  const [text, setText] = useState('');
-  const [error, setError] = useState<ApiError | { rule: string; message: string } | null>(null);
-  useEffect(() => {
-    if (text || !cat) return;
-    const base = current
-      ? { models: current.models, tools: current.tools, data_classes: current.data_classes, hitl: current.hitl, limits: current.limits, environments: current.environments, tags: current.tags }
-      : {
-          models: [{ model: cat.catalogue[0].model, region: cat.catalogue[0].region, max_tokens: 800 }],
-          tools: (tools?.items ?? []).map((t: any) => ({ server: `${t.kind}://${t.alias}`, data_scopes: ['personal'], actions: t.kind === 'http' ? Object.keys(t.actions).map((name) => ({ name, impact: 'read' })) : [{ name: 'lookup_order', impact: 'read' }] })),
-          data_classes: { prompt: ['personal'], forbidden: ['payment_card', 'special_category'] },
-          hitl: [],
-          limits: { rpm: 60, tokens_per_day: 200000, usd_per_day: 50, tool_calls_per_session: 40 },
-          environments: ['dev'],
-          tags: [],
-        };
-    setText(JSON.stringify(base, null, 2));
-  }, [cat, tools, current, text]);
-  const submit = async () => {
-    let body: unknown;
-    try {
-      body = JSON.parse(text);
-    } catch {
-      return setError({ rule: 'JSON', message: 'the manifest is not valid JSON' });
-    }
-    try {
-      await api(`/agents/${agent.id}/certificates`, { method: 'POST', body });
-      onDone();
-    } catch (e) {
-      setError(e as ApiError);
-    }
-  };
-  return (
-    <div className="grid gap-4 xl:grid-cols-[1fr_340px]">
-      <Card title={`Manifest for ${agent.handle} · ${agent.tier} · ${agent.autonomy_level}`}>
-        <textarea className="input mono min-h-[440px]" value={text} onChange={(e) => setText(e.target.value)} spellCheck={false} />
-        <div className="mt-3 flex items-center gap-3">
-          <button className="btn-primary" onClick={() => void submit()}>Approve and sign seal</button>
-          <ErrorNote error={error as any} />
-        </div>
-      </Card>
-      <Card title="What happens when you sign">
-        <ul className="list-disc space-y-1.5 pl-5 text-sm text-ink-2">
-          <li>Signet checks separation of duties: you are not the owner, proposer or on the build team (RB-INV-09).</li>
-          <li>Every check cites its rule: model is the cloud LLM (RB-INV-19), every action has an impact label (RB-PRIV-01), no secrets to models (RB-INV-16), T4 has no privileged actions (RB-INV-17).</li>
-          <li>The manifest is compiled into the gateway policy; the seal carries the policy hash and is signed with the tenant CA key (Ed25519).</li>
-          <li>Both gateway nodes receive the new bundle within a second. The decision is written to the lifecycle ledger.</li>
-        </ul>
-        <div className="mt-3 text-xs text-ink-3">Registered tools: {(tools?.items ?? []).map((t: any) => `${t.kind}://${t.alias}`).join(', ') || 'none'}</div>
-      </Card>
-    </div>
   );
 }

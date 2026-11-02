@@ -33,12 +33,13 @@ export function CommandCenter() {
           </Link>
         }
       />
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7">
         <Stat label="Governed agents" value={num(total)} hint={`${count('T1') + count('T2')} at T1/T2`} />
         <Stat label="Transactions · 24 h" value={num(s?.transactions_24h)} hint="model and tool calls" />
         <Stat label="Blocks · 24 h" value={num(s?.blocks_24h)} hint={s?.transactions_24h ? `${((s.blocks_24h / s.transactions_24h) * 100).toFixed(1)}% of requests` : undefined} />
         <Stat label="Kills · 24 h" value={num(s?.kills_24h)} hint={s?.max_kill_propagation_ms ? `max propagation ${(s.max_kill_propagation_ms / 1000).toFixed(2)} s` : 'none'} tone={s?.kills_24h ? 'bad' : undefined} />
-        <Stat label="Keyless agents" value={s ? '100%' : '—'} hint={`${s?.keyless?.unmanaged_keys_open ?? 0} unmanaged keys open`} tone={s?.keyless?.unmanaged_keys_open ? 'warn' : 'ok'} />
+        <Stat label="Keyless, verified" value={s ? `${s.keyless.keyless_verified}/${s.keyless.sealed_agents}` : '—'} hint={s ? `${s.keyless.bypass_risk_agents} with bypass risk · ${s.keyless.unverified_agents} not reported · ${s.keyless.unmanaged_keys_open} unmanaged keys` : ''} tone={s?.keyless?.bypass_risk_agents || s?.keyless?.unmanaged_keys_open ? 'warn' : undefined} />
+        <Stat label="Cloud LLM" value={!s ? '—' : s.cloud_llm.state === 'ok' ? 'Reachable' : s.cloud_llm.state === 'unknown' ? 'Unknown' : 'Problem'} hint={s ? `${s.cloud_llm.detail}${s.cloud_llm.checked_at ? ` · checked ${new Date(s.cloud_llm.checked_at).toLocaleTimeString()}` : ''}${s.cloud_llm.credential ? ` · key from ${s.cloud_llm.credential}` : ''}` : ''} tone={!s ? undefined : s.cloud_llm.state === 'ok' ? 'ok' : s.cloud_llm.state === 'unknown' ? 'warn' : 'bad'} />
         <Stat label="Gateway p95 · 24 h" value={s?.gateway_p95_ms_24h !== null && s?.gateway_p95_ms_24h !== undefined ? `${s.gateway_p95_ms_24h} ms` : '—'} hint="budget 50 ms (BP 2)" tone={s?.gateway_p95_ms_24h > 50 ? 'bad' : 'ok'} />
       </div>
 

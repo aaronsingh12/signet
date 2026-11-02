@@ -95,6 +95,9 @@ export async function detectInjection(text: string, tier: Tier, where: 'prompt' 
   const base = { id: 'DET-INJ', version: cfg?.version ?? 'unknown' };
   if (!cfg || cfg.mode === 'off') return { ...base, status: 'unavailable', reason: 'off' };
   if (!text.trim()) return { ...base, status: cfg.mode === 'active' ? 'ok' : 'shadow', score: 0, band: 'low' };
+  // An instruction needs words. Identifiers, numbers and status codes ("C-1", "delivered") cannot
+  // carry one, and the classifier is unreliable on them, so they are not scored.
+  if ((text.match(/\p{L}{2,}/gu)?.length ?? 0) < 3) return { ...base, status: cfg.mode === 'active' ? 'ok' : 'shadow', score: 0, band: 'low', reason: 'fewer than 3 words' };
   const r = await score(text, CAP_MS);
   if (r.error || r.score === undefined) return { ...base, status: 'unavailable', reason: r.error ?? 'no score', ms: r.ms };
   return { ...base, status: cfg.mode === 'active' ? 'ok' : 'shadow', score: Math.round(r.score * 1000) / 1000, band: band(r.score, (where === 'prompt' ? INJ_PROMPT : INJ_TOOL)[tier]), ms: r.ms, within_da_budget: (r.ms ?? 0) <= DA_BUDGET_MS };

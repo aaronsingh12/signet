@@ -1,5 +1,6 @@
 export * from './canonical';
 export * from './crypto';
+export * from './datamatrix';
 export * from './decision';
 export * from './devauth';
 export * from './dlp';
@@ -9,4 +10,6 @@ export * from './ids';
 export * from './jwt';
 export * from './ledger';
 export * from './merkle';
+export * from './netguard';
+export * from './policyeval';
 export * from './types';

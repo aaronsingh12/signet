@@ -1,6 +1,6 @@
 import type { IncomingHttpHeaders } from 'node:http';
 import { canonicalize, combine, sha256, strictest, type Outcome } from '@signet/core';
-import { type Ctx, type Done, Halt, finish, halt, ladder, newCtx, preflight, recordOutOfManifest, step } from './ctx';
+import { type Ctx, type Done, Halt, finish, halt, humanApproval, ladder, maskArgs, newCtx, preflight, recordOutOfManifest, sessionKey, step, wouldBlock } from './ctx';
 import { detectInjection, notDeployed } from './detectors';
 import { evaluate } from './engine';
 import * as limits from './limits';
@@ -46,12 +46,14 @@ async function run(ctx: Ctx, headers: IncomingHttpHeaders, body: Record<string, 
   // 7. Manifest: the model must be in the tenant catalogue and in the seal.
   const model = state.bundle!.catalogue.find((c) => c.model === body.model);
   const grant = cert.models.find((g) => new RegExp(`^${g.model.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}$`).test(String(body.model)));
-  if (!model || !grant) await recordOutOfManifest(ctx, `model ${body.model} is not in this agent's seal`, [model ? 'RB-PREC-01' : 'RB-INV-19']);
+  // A model outside the catalogue is never forwarded (RB-INV-19); one in the catalogue but not in this
+  // seal is would_block in shadow.
+  if (!model || !grant) await recordOutOfManifest(ctx, `model ${body.model} is not in this agent's seal`, [model ? 'RB-PREC-01' : 'RB-INV-19'], !!model);
   const upstreamBody: Record<string, unknown> = { ...body };
   delete upstreamBody.stream;
   let capped = false;
-  if (grant!.max_tokens && (typeof body.max_tokens !== 'number' || body.max_tokens > grant!.max_tokens)) {
-    upstreamBody.max_tokens = grant!.max_tokens;
+  if (grant?.max_tokens && (typeof body.max_tokens !== 'number' || body.max_tokens > grant.max_tokens)) {
+    upstreamBody.max_tokens = grant.max_tokens;
     capped = true;
   }
   step(ctx, 7, 'pass', `${model!.model} (${model!.family})`);
@@ -65,14 +67,14 @@ async function run(ctx: Ctx, headers: IncomingHttpHeaders, body: Record<string, 
     await ladder(ctx, 'kill', 'RB-KILL-02', `${x.tag} sent towards the cloud LLM, which this seal does not allow`, { tag: x.tag, recogniser: x.recogniser });
     halt(ctx, 8, 403, 'data_exfiltration', `${x.tag} data may not be sent to the model; the agent has been killed`, 'kill', [x.rule, 'RB-KILL-02']);
   }
-  if (inspection.blocked) halt(ctx, 8, 403, 'data_blocked', `${inspection.blocked.tag} data may not be sent to the model`, 'deny', [inspection.blocked.rule]);
+  if (inspection.blocked && !wouldBlock(ctx, 8, [inspection.blocked.rule], `${inspection.blocked.tag} may not be sent to the model`)) halt(ctx, 8, 403, 'data_blocked', `${inspection.blocked.tag} data may not be sent to the model`, 'deny', [inspection.blocked.rule]);
   upstreamBody.messages = inspection.messages;
   // DET-INJ scores the new text while the model call is in flight; its verdict is applied before the
   // answer is released (see after step 12). Tool results inside the conversation can taint the session.
   const fresh = newTextOf(messages);
   const injCfg = state.detectors.get('DET-INJ');
   const scoring = injCfg && injCfg.mode !== 'off' ? Promise.all([detectInjection(fresh.user, cert.tier, 'prompt'), fresh.tool ? detectInjection(fresh.tool, cert.tier, 'tool') : null]) : null;
-  if (scoring) trackPending(ctx.sessionId, scoring);
+  if (scoring) trackPending(sessionKey(ctx), scoring);
   ctx.detectors = [{ id: 'DET-INJ', version: injCfg?.version ?? 'unknown', status: scoring ? 'pending' : 'unavailable' }, ...notDeployed()];
   step(ctx, 8, 'pass', `${inspection.tokenised ? `${inspection.tokenised} value(s) tokenised` : 'no sensitive data'}; DET-INJ ${scoring ? 'scoring in parallel' : 'off'}`);
 
@@ -87,17 +89,23 @@ async function run(ctx: Ctx, headers: IncomingHttpHeaders, body: Record<string, 
   ctx.decision = combined.outcome;
   ctx.rules.push(...r.rule_ids);
   ctx.reasons.push(...r.details, ...combined.reasons, ...r.obligations.map((o) => `obligation: ${o}`));
-  if (combined.outcome === 'deny') halt(ctx, 9, 403, 'policy_denied', r.details.join('; ') || 'denied by policy', 'deny', r.rule_ids);
+  if (combined.outcome === 'deny' && !wouldBlock(ctx, 9, r.rule_ids, r.details.join('; ') || 'denied by policy')) halt(ctx, 9, 403, 'policy_denied', r.details.join('; ') || 'denied by policy', 'deny', r.rule_ids);
   step(ctx, 9, 'pass', `${r.decision} -> ${combined.outcome}`);
 
-  // 10. Human in the loop. The approvals engine ships in Phase 2; until then a hold is rejected,
-  //     which is what a timeout does (RB-INV-11).
-  if (combined.outcome === 'require_approval' || combined.outcome === 'quarantine') {
-    if (combined.outcome === 'quarantine') await ladder(ctx, 'quarantine', 'DA-4', combined.reasons.join('; '));
-    ctx.approverGroups = r.approver_groups;
-    halt(ctx, 10, 403, 'approval_required', 'this action needs human approval and the approvals engine is not deployed yet; rejected as on timeout', strictest(combined.outcome), ['RB-INV-11', ...(combined.reasons.some((x) => x.includes('RB-INV-06')) ? ['RB-INV-06'] : [])]);
+  // 10. Human in the loop: the call waits for a person (RB-INV-06 holds for T1/T2 without detectors,
+  //     RB-BL-04 cost cap), or would_block in shadow.
+  if (combined.outcome === 'quarantine') {
+    await ladder(ctx, 'quarantine', 'DA-4', combined.reasons.join('; '));
+    halt(ctx, 10, 403, 'agent_quarantined', combined.reasons.join('; '), 'quarantine', ['DA-4']);
   }
-  step(ctx, 10, 'pass', 'not required');
+  if (combined.outcome === 'require_approval') {
+    const rules = [...r.rule_ids, ...(combined.reasons.some((x) => x.includes('RB-INV-06')) ? ['RB-INV-06'] : [])];
+    ctx.approverGroups = r.approver_groups.length ? r.approver_groups : ['owner-approvers'];
+    if (!wouldBlock(ctx, 10, rules, 'needs human approval')) {
+      const last = [...messages].reverse().find((m) => m.role === 'user');
+      await humanApproval(ctx, headers, { actionKey: 'llm', args: { model: body.model, prompt_sha256: ctx.promptHash, last_user_message: maskArgs(textOf(last ? [last] : []).slice(0, 400)) }, rules, groups: ctx.approverGroups });
+    }
+  } else step(ctx, 10, 'pass', 'not required');
 
   // 11. Credential injection happens inside the provider adapter.
   step(ctx, 11, 'pass', credentialAttached() ? 'brokered credential attached' : 'no provider credential configured');
@@ -134,7 +142,7 @@ async function run(ctx: Ctx, headers: IncomingHttpHeaders, body: Record<string, 
     const [injUser, injTool] = await scoring;
     ctx.detectors = [injUser, ...(injTool ? [{ ...injTool, id: 'DET-INJ.tool' }] : []), ...notDeployed()];
     if (injTool?.status === 'ok' && injTool.band && injTool.band !== 'low') {
-      taint(ctx.sessionId, injTool.band, `tool result in llm_call ${ctx.requestId}`);
+      taint(sessionKey(ctx), injTool.band, `tool result in llm_call ${ctx.requestId}`);
       ctx.reasons.push(`DET-INJ ${injTool.band} on tool content in the conversation: session tainted (RB-BL-12)`);
     }
     const high = cert.tier === 'T1' || cert.tier === 'T2';

@@ -70,6 +70,7 @@ interface IdClaims {
   acr?: string;
   amr?: string[];
   auth_time?: number;
+  iat?: number;
   nonce?: string;
   exp: number;
   client_id?: string;
@@ -97,7 +98,8 @@ function principalFromClaims(c: IdClaims, auth: Principal['auth']): Principal {
     groups,
     mfa: c.acr === 'mfa' || (c.amr ?? []).some((m) => ['mfa', 'otp', 'hwk', 'swk'].includes(m)),
     auth,
-    auth_time: c.auth_time ?? null,
+    // Access tokens may omit auth_time; for them the issue time is the latest sign-in we can prove.
+    auth_time: c.auth_time ?? (auth === 'bearer' ? (c.iat ?? null) : null),
   };
 }
 

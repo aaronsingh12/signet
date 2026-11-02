@@ -82,6 +82,8 @@ export interface CertificateBody {
   environments: string[];
   tags: string[];
   ai_disclosure: boolean;
+  regulatory_category?: string; // BP 6 Stage 2, e.g. eu_ai_act:high_risk
+  evidence_refs?: Record<string, string>; // hashes of test report, approval pack, classification (BP 4.3)
   policy_sha256: string; // hash of the compiled policy the gateway enforces
   valid_from: string;
   valid_to: string;
@@ -114,7 +116,13 @@ export interface CompiledPolicy {
 }
 
 // Workload token claims (BP 4.2).
+// Workload token claims. iss names the tenant's control plane, aud the gateway tier; both are checked.
+export const TOKEN_AUDIENCE = 'signet-gateway';
+export const tokenIssuer = (tenant: string) => `signet-control:${tenant}`;
+
 export interface WorkloadClaims {
+  iss: string;
+  aud: string;
   sub: string;
   agent_id: string;
   ver: string;
@@ -122,6 +130,7 @@ export interface WorkloadClaims {
   ins: string;
   tier: Tier;
   tenant: string;
+  kind?: 'bootstrap' | 'client_credentials'; // how the instance proved itself; third-party clients use client_credentials
   iat: number;
   exp: number;
   jti: string;
@@ -166,6 +175,10 @@ export interface PolicyBundle {
   catalogue: CatalogueModel[];
   tools: ToolAlias[];
   detectors: DetectorConfig[];
+  rollouts: Record<string, Rollout>; // by cert_id (BP 6 Stage 6)
+  hitl_wait_seconds: number;
+  // The cloud LLM credential in the Secrets Broker (kind llm_provider); null if none is stored.
+  llm_credential?: { secret_id: string; version: number } | null; // how long a gateway holds a request for a human decision (BP 5.2 step 10)
 }
 
 export const scopeKey = {
@@ -173,3 +186,11 @@ export const scopeKey = {
   version: (agentId: string, version: string) => `version:${agentId}@${version}`,
   instance: (instanceId: string) => `instance:${instanceId}`,
 };
+
+// Deploy stage rollout (BP 6 Stage 6). shadow: every decision is evaluated and logged as would_block,
+// but only kill, circuit breaker and secrets-exfiltration blocks are enforced (RB-INV-18).
+// canary: full enforcement for a share of sessions, shadow for the rest. enforce: full enforcement.
+export interface Rollout {
+  mode: 'shadow' | 'canary' | 'enforce';
+  canary_pct: number;
+}

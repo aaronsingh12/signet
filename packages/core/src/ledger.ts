@@ -4,7 +4,8 @@ import { sha256 } from './crypto';
 // Hash-chained evidence ledger (BP 8.3):
 // record_hash = SHA-256(canonical_json(record without record_hash) || prev_hash).
 
-export type LedgerKind = 'transaction' | 'enforcement' | 'lifecycle' | 'admin';
+// BP 8.1 ledgers: transactions, lifecycle stages, human decisions, ladder events, admin audit.
+export type LedgerKind = 'transaction' | 'enforcement' | 'lifecycle' | 'decision' | 'admin';
 
 export interface LedgerRecord {
   record_id: string;

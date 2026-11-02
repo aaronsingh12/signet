@@ -24,7 +24,20 @@ export interface AgentRow {
   status: string;
   created_at: string;
   created_by: string;
+  kind: AgentKind;
+  runtime: string | null;
+  framework: string | null;
+  model_provider: string | null;
+  vendor: string | null;
+  vendor_details: string; // JSON
 }
+
+// How an agent reaches Signet. Self-hosted, framework and no-code agents send their model and tool
+// calls through the gateway. Third-party (vendor-hosted) agents keep their vendor's model, which
+// Signet cannot see; only the company tools they call through the gateway are governed.
+export type AgentKind = 'self_hosted' | 'framework' | 'no_code' | 'third_party';
+export const AGENT_KINDS: AgentKind[] = ['self_hosted', 'framework', 'no_code', 'third_party'];
+const shortText = (v: unknown, max = 80) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null);
 
 const TIERS: Tier[] = ['T1', 'T2', 'T3', 'T4'];
 const AUTONOMY: Autonomy[] = ['L0', 'L1', 'L2', 'L3', 'L4'];
@@ -53,17 +66,28 @@ export interface RegisterInput {
   purpose: string;
   owner?: string;
   sponsor: string;
-  tier: Tier;
+  tier?: Tier; // provisional; the Classify stage sets the real tier
   autonomy_level: Autonomy;
   team?: { user: string; role: 'builder' | 'operator' }[];
+  kind?: AgentKind;
+  runtime?: string;
+  framework?: string;
+  model_provider?: string;
+  vendor?: string;
+  vendor_details?: Record<string, string>;
 }
 
-// Phase 1 registry: the proposer states the tier. The Classify stage (risk score) replaces this in Phase 2.
+// Stage 1 Propose: the agent gets its permanent ID; the tier is provisional until Classify (BP 6).
 export function registerAgent(input: RegisterInput, p: Principal): AgentRow {
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(input.handle ?? '') || input.handle.length > 63) throw invalid('handle must be kebab-case, at most 63 characters');
   for (const f of ['name', 'purpose', 'sponsor'] as const) if (!String(input[f] ?? '').trim()) throw invalid(`${f} is required`);
-  if (!TIERS.includes(input.tier)) throw invalid('tier must be T1-T4');
+  const tier: Tier = input.tier ?? 'T3';
+  if (!TIERS.includes(tier)) throw invalid('tier must be T1-T4');
   if (!AUTONOMY.includes(input.autonomy_level)) throw invalid('autonomy_level must be L0-L4');
+  const kind: AgentKind = input.kind ?? 'self_hosted';
+  if (!AGENT_KINDS.includes(kind)) throw invalid(`kind must be one of ${AGENT_KINDS.join(', ')}`);
+  if (kind === 'third_party' && !shortText(input.vendor)) throw invalid('a third-party agent needs its vendor');
+  const vendorDetails = Object.fromEntries(Object.entries(input.vendor_details ?? {}).filter(([k, v]) => /^[a-z_]{1,40}$/.test(k) && typeof v === 'string').map(([k, v]) => [k, String(v).slice(0, 500)]));
   const owner = (input.owner ?? p.id).toLowerCase();
   if (p.kind === 'human' && !can(p, 'certificates.approve') && owner !== p.id) throw forbidden('RBAC', 'agent owners can only propose agents they own');
   const id = newId('agt');
@@ -72,10 +96,13 @@ export function registerAgent(input: RegisterInput, p: Principal): AgentRow {
       throw new PolicyError('VALIDATION', `handle ${input.handle} is taken`, 409);
     }
     db.prepare(
-      'INSERT INTO agent (id, tenant_id, handle, name, purpose, owner, sponsor, tier, autonomy_level, status, created_at, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    ).run(id, tenant.id, input.handle, input.name.trim(), input.purpose.trim(), owner, input.sponsor.toLowerCase(), input.tier, input.autonomy_level, 'proposed', nowIso(), p.id);
+      'INSERT INTO agent (id, tenant_id, handle, name, purpose, owner, sponsor, tier, autonomy_level, status, created_at, created_by, kind, runtime, framework, model_provider, vendor, vendor_details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    ).run(
+      id, tenant.id, input.handle, input.name.trim(), input.purpose.trim(), owner, input.sponsor.toLowerCase(), tier, input.autonomy_level, 'proposed', nowIso(), p.id,
+      kind, shortText(input.runtime), shortText(input.framework), shortText(input.model_provider), kind === 'third_party' ? shortText(input.vendor) : null, JSON.stringify(vendorDetails),
+    );
     for (const m of input.team ?? []) db.prepare('INSERT INTO agent_team_member (agent_id, user, role) VALUES (?, ?, ?)').run(id, m.user.toLowerCase(), m.role);
-    ledger.append({ kind: 'lifecycle', agent_id: id, data: { event: 'agent.registered', handle: input.handle, tier: input.tier, autonomy_level: input.autonomy_level, owner, actor: p.id } });
+    ledger.append({ kind: 'lifecycle', agent_id: id, data: { event: 'agent.registered', handle: input.handle, agent_kind: kind, vendor: input.vendor ?? null, provisional_tier: tier, autonomy_level: input.autonomy_level, owner, actor: p.id } });
     return getAgent(id);
   });
 }
@@ -95,8 +122,12 @@ export interface SealInput {
 }
 
 // Seal validation: every check cites the rule it enforces.
-function validateSeal(agent: AgentRow, input: SealInput) {
-  if (!input.models?.length) throw new PolicyError('RB-BL-01', 'a seal needs at least one model');
+export function validateSeal(agent: Pick<AgentRow, 'tier'> & { kind?: AgentKind }, input: SealInput) {
+  if (agent.kind === 'third_party') {
+    // The vendor's model runs outside Signet; a model grant would claim coverage Signet does not have.
+    if (input.models?.length) throw new PolicyError('VALIDATION', 'a third-party agent uses its vendor\'s model, which Signet cannot route; list no models, only the company tools it may call');
+    if (!input.tools?.length) throw new PolicyError('VALIDATION', 'a third-party agent is governed through the company tools it calls; list at least one');
+  } else if (!input.models?.length) throw new PolicyError('RB-BL-01', 'a seal needs at least one model');
   for (const m of input.models) {
     if (!tenant.settings.catalogue.some((c) => globMatch(m.model, c.model))) {
       throw new PolicyError('RB-INV-19', `model ${m.model} is not the tenant's cloud LLM (${tenant.settings.catalogue.map((c) => c.model).join(', ')})`);
@@ -147,31 +178,35 @@ function validateSeal(agent: AgentRow, input: SealInput) {
   if (!input.environments?.length) throw invalid('environments[] is required');
 }
 
-// Simplified approve-and-certify (Phase 1, BP 20.2). The 8-stage lifecycle and approval matrix
-// replace it in Phase 2; separation of duties already applies (RB-INV-09).
-export function issueSeal(agentRef: string, input: SealInput, p: Principal) {
+// Seal signing (BP 4.3, 6 Stage 5). Called only by the lifecycle once the approval matrix is
+// satisfied (or automatically for T4 on passing tests); approvers and evidence go into the seal.
+export interface SealContext {
+  approvers: { user: string; at: string }[];
+  evidence_refs: Record<string, string>;
+  regulatory_category: string;
+  minor: boolean;
+  actor: string;
+}
+
+export function signSeal(agentRef: string, input: SealInput, ctx: SealContext) {
   const agent = getAgent(agentRef);
-  if (!can(p, 'certificates.approve')) throw forbidden('RBAC', 'needs permission certificates.approve');
-  if (p.kind !== 'human') throw forbidden('RB-INV-10', 'seals are approved by people, not service accounts');
   if (agent.status === 'killed') throw new PolicyError('RB-INV-08', 'a killed agent re-enters only through a new lifecycle from Assess', 409);
   if (agent.status === 'retired') throw new PolicyError('VALIDATION', 'agent is retired', 409);
-  const team = teamOf(agent.id).map((m) => m.user);
-  if ([agent.created_by, agent.owner, ...team].includes(p.id)) {
-    throw forbidden('RB-INV-09', `${p.id} proposed, owns or builds this agent and cannot approve it`);
-  }
   validateSeal(agent, input);
-
   const issued = new Date();
-  const count = (db.prepare('SELECT COUNT(*) AS n FROM certificate WHERE agent_id = ?').get(agent.id) as { n: number }).n;
+  const prev = db.prepare("SELECT version FROM certificate WHERE agent_id = ? ORDER BY issued_at DESC LIMIT 1").get(agent.id) as { version: string } | undefined;
+  const [maj, min] = (prev?.version ?? 'v0.0').slice(1).split('.').map(Number) as [number, number];
+  const version = !prev ? 'v1.0' : ctx.minor ? `v${maj}.${min + 1}` : `v${maj + 1}.0`;
   const draft: Omit<CertificateBody, 'policy_sha256'> = {
     cert_id: newId('crt'),
     agent_id: agent.id,
-    version: `v${count + 1}.0`,
+    version,
     tenant: tenant.id,
     owner: agent.owner,
-    approvers: [{ user: p.id, at: issued.toISOString() }],
+    approvers: ctx.approvers,
     tier: agent.tier,
     autonomy_level: agent.autonomy_level,
+    regulatory_category: ctx.regulatory_category,
     models: input.models,
     tools: input.tools ?? [],
     data_classes: { prompt: input.data_classes?.prompt ?? [], forbidden: input.data_classes?.forbidden ?? [] },
@@ -180,6 +215,7 @@ export function issueSeal(agentRef: string, input: SealInput, p: Principal) {
     environments: input.environments,
     tags: input.tags ?? [],
     ai_disclosure: input.ai_disclosure ?? true,
+    evidence_refs: ctx.evidence_refs,
     valid_from: issued.toISOString(),
     valid_to: new Date(issued.getTime() + VALIDITY_DAYS[agent.tier] * 86_400_000).toISOString(),
     issued_at: issued.toISOString(),
@@ -197,7 +233,7 @@ export function issueSeal(agentRef: string, input: SealInput, p: Principal) {
       kind: 'lifecycle',
       agent_id: agent.id,
       cert_id: body.cert_id,
-      data: { event: 'certificate.issued', version: body.version, cert_sha256: sha256(canonicalize(body)), policy_sha256: body.policy_sha256, approver: p.id, valid_to: body.valid_to },
+      data: { event: 'certificate.issued', version: body.version, cert_sha256: sha256(canonicalize(body)), policy_sha256: body.policy_sha256, approvers: ctx.approvers.map((a) => a.user), evidence_refs: ctx.evidence_refs, valid_to: body.valid_to, actor: ctx.actor },
     });
   });
   return { certificate: body, jws, policy };
