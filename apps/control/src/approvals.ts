@@ -94,6 +94,7 @@ export async function create(input: CreateInput): Promise<ApprovalRequest> {
     (await ledger.append({ kind: 'decision', agent_id: input.agent_id, data: { event: 'approval.requested', approval_id: id, type: input.type, subject_ref: input.subject_ref, pack_sha256: packHash, slots: input.slots.map((s) => `${s.slot}×${s.count}`), sla_due: new Date(now + input.sla_ms).toISOString(), requested_by: input.created_by } }));
   }));
   const link = input.type === 'runtime_hitl' ? `/m/approvals/${id}` : `/approvals?id=${id}`;
+  if (input.type === 'certificate') await notifyRoles(['tenant_admin', 'platform_admin'], 'approval', input.title, link);
   for (const s of input.slots) {
     if (s.owner_only) {
       const owner = input.agent_id ? ((await db.prepare('SELECT owner FROM agent WHERE id = ?').get(input.agent_id)) as { owner: string } | undefined)?.owner : undefined;
@@ -132,12 +133,16 @@ function filled(req: ApprovalRequest) {
 }
 
 // Slots this person may fill now. Separation of duties (RB-INV-09): the proposer, owner and build
-// team can never fill an independent slot; the owner fills only the owner slot.
+// team cannot fill an independent slot; administrators may complete certificate approval directly.
 export async function eligibleSlots(req: ApprovalRequest, p: Principal): Promise<Slot[]> {
   if (req.status !== 'pending' || p.kind !== 'human') return [];
+  // Single-operator mode first: the one administrator fills the real slots, so the ledger shows each.
   if (singleOperator(p)) {
     const done = filled(req);
     return req.slots.filter((s) => (done[s.slot] ?? 0) < s.count);
+  }
+  if (req.type === 'certificate' && p.roles.some((role) => role === 'tenant_admin' || role === 'platform_admin')) {
+    return [{ slot: 'admin', label: 'Administrator approval', roles: [], count: 1 }];
   }
   if ((req.decisions ?? []).some((d) => d.approver === p.id)) return [];
   const facts = (await agentFacts(req.agent_id));
@@ -188,7 +193,9 @@ export async function decide(id: string, p: Principal, input: DecideInput): Prom
     throw new PolicyError('AUTH-STEP-UP', 'this decision needs a fresh sign-in (within 5 minutes) for a T1/T2 agent', 401, { reauth: true });
   }
   const solo = singleOperator(p);
-  const auth = { method: p.auth, mfa: p.mfa, auth_age_s: age, step_up_required: stepUp, ...(solo ? { separation_of_duties: 'waived_single_operator' } : {}) };
+  // An administrator may complete a certificate approval directly (audited as admin_override).
+  const adminOverride = req.type === 'certificate' && slot.slot === 'admin';
+  const auth = { method: p.auth, mfa: p.mfa, auth_age_s: age, step_up_required: stepUp, admin_override: adminOverride, ...(solo ? { separation_of_duties: 'waived_single_operator' } : {}) };
   // The single operator approves every open slot at once (quorums included); each slot gets its own row.
   const fills = solo && (input.decision === 'approve' || input.decision === 'approve_session')
     ? slots.flatMap((sl) => Array.from({ length: sl.count - (filled(req)[sl.slot] ?? 0) }, () => sl))
@@ -207,7 +214,7 @@ export async function decide(id: string, p: Principal, input: DecideInput): Prom
     else if (input.decision === 'send_back') outcome = 'sent_back';
     else {
       const counts = filled(after);
-      if (after.slots.every((s) => (counts[s.slot] ?? 0) >= s.count)) outcome = 'approved';
+      if (adminOverride || after.slots.every((s) => (counts[s.slot] ?? 0) >= s.count)) outcome = 'approved';
     }
     (await ledger.append({
       kind: 'decision',

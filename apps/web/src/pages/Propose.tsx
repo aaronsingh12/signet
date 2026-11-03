@@ -18,7 +18,7 @@ const DATA = ['personal', 'financial_account', 'confidential_doc', 'source_code'
 const DOMAINS = ['credit', 'employment', 'insurance', 'healthcare', 'education', 'essential_services', 'other'];
 
 const KINDS = [
-  ['self_hosted', 'Self-hosted', 'Your code on your servers, RunPod, EC2, Docker. Connects with the SDK.'],
+  ['self_hosted', 'Self-hosted', 'Your code on your servers, RunPod, EC2, Docker. Connect using HTTP or the SDK.'],
   ['framework', 'Framework-based', 'LangChain, LangGraph, CrewAI... Connects with the SDK.'],
   ['no_code', 'No-code hosted', 'n8n, Flowise, Dify. Connects through the Signet sidecar.'],
   ['third_party', 'Third-party / vendor', 'Copilot, Agentforce, ChatGPT, Amazon. Only its calls to company tools are governed.'],
@@ -50,7 +50,7 @@ export function Propose() {
   const [error, setError] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
   const [step, setStep] = useState(0);
-  const [method, setMethod] = useState<ConnectionMethod>('oauth');
+  const [method, setMethod] = useState<ConnectionMethod>('rest');
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
   const pick = (t: TemplateOption) => {
     setTemplate(t.id);
@@ -101,7 +101,7 @@ export function Propose() {
           <Card title="How would you like to connect?">
             <div className="grid gap-3 md:grid-cols-2">{CONNECTION_METHODS.map((item) => <button key={item.id} data-testid={`connect-method-${item.id}`} aria-pressed={method === item.id} disabled={kind === 'third_party' && (item.id === 'bootstrap' || item.id === 'hybrid')} onClick={() => setMethod(item.id)} className={`rounded-lg border p-4 text-left disabled:opacity-40 ${method === item.id ? 'border-royal bg-royal-50' : 'border-line hover:bg-canvas'}`}><div className="font-semibold">{item.label}</div><p className="mt-1 text-sm text-ink-2">{item.description}</p></button>)}</div>
           </Card>
-          <Card title="Agent type">
+          <Card title="Agent type (optional for REST)">
             <select data-testid="agent-kind" aria-label="Agent hosting" className="input" value={kind} onChange={(event) => { setKind(event.target.value); if (event.target.value === 'third_party') setMethod('oauth'); }}>{KINDS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
             <p className="mt-2 text-xs text-ink-3">{KINDS.find(([value]) => value === kind)?.[2]}</p>
             {kind === 'third_party' ? (
@@ -160,7 +160,7 @@ export function Propose() {
                 <input data-testid="agent-sponsor" className="input" value={f.sponsor} onChange={set('sponsor')} placeholder="Business sponsor's identity" />
               </div>
               <div className="md:col-span-2">
-                <label className="label">Build team (comma-separated emails; they can never approve this agent)</label>
+                <label className="label">Build team (comma-separated emails; independent approval requires a reviewer or administrator)</label>
                 <input className="input" value={f.team} onChange={set('team')} placeholder="arjun.mehta@northwind.example" />
               </div>
             </div>
@@ -178,7 +178,7 @@ export function Propose() {
           </Card>
           </>}
           {step === 2 && <>
-          <Card title="Review your agent"><p className="text-sm"><strong>{f.name}</strong> · {CONNECTION_METHODS.find((item) => item.id === method)?.label} · <span className="mono">{f.handle}</span></p><p className="mt-2 text-xs text-ink-3">Registering creates a pending proposal. Complete the approval lifecycle before generating credentials.</p></Card>
+          <Card title="Review your agent"><p className="text-sm"><strong>{f.name}</strong> · {CONNECTION_METHODS.find((item) => item.id === method)?.label} · <span className="mono">{f.handle}</span></p><p className="mt-2 text-xs text-ink-3">Registering creates a proposal. Complete the lifecycle checks, then an administrator can approve it from My Approvals. Generate credentials after approval.</p></Card>
           <Card title="Intake (scored at Classify)">
             <div className="grid gap-4 md:grid-cols-2">
               <div>
@@ -224,7 +224,7 @@ export function Propose() {
             <ErrorNote error={error} />
           </div>
         </div>
-        <Card title="Exit gate" className="h-fit">
+        <Card title="Registration checklist" className="h-fit">
           <ul className="space-y-2 text-sm">
             {gate.map(([l, ok]) => (
               <li key={l} className="flex items-center gap-2">
@@ -233,7 +233,7 @@ export function Propose() {
               </li>
             ))}
           </ul>
-          <p className="mt-4 text-xs text-ink-3">Next, on the agent's Lifecycle tab: draft the manifest and submit. Signet scores the risk, you complete the assessments for the tier, tests run, and the approval matrix signs the seal.</p>
+          <p className="mt-4 text-xs text-ink-3">Approval routing: T4 needs no manual signature; T3 needs Owner + Security; T2 also needs Risk; T1 also needs two Governance Board members. An administrator can approve the certificate directly after lifecycle checks. Open My Approvals when the request is ready.</p>
         </Card>
       </div>
     </>

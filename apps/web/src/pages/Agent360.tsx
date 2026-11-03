@@ -81,7 +81,7 @@ export function Agent360() {
                 ['Sponsor', agent.sponsor],
                 ['Proposed by', agent.created_by],
                 ['Build team', data.team.length ? data.team.map((t: any) => `${t.user} (${t.role})`).join(', ') : '—'],
-                ['Separation of duties', 'Owner, proposer and build team can never approve this agent (RB-INV-09)'],
+                ['Separation of duties', 'Owner signs the owner slot; proposer and build team cannot fill independent slots. Administrators can approve the certificate directly.'],
               ]}
             />
           </Card>

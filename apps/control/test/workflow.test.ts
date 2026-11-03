@@ -145,3 +145,26 @@ test('single-operator mode: the one admin confirms and approves every slot, and 
     process.env.SIGNET_SINGLE_OPERATOR = 'false';
   }
 });
+
+test('administrator can approve an owned certificate after lifecycle checks with fresh authentication', async () => {
+  const { agent, lc } = await propose({ users_affected: ['customers'], data_touched: ['personal'], reversibility: 'partly', planned_tools: ['issue_refund (privileged)'] });
+  await workflow.classify(lc.id, risk, { confirm: true });
+  for (const a of await workflow.assessments(lc.id) as { type: string; content: { answers?: Record<string, string> } }[]) {
+    const content = a.type === 'questionnaire'
+      ? { ...a.content, answers: Object.fromEntries(Object.keys(a.content.answers ?? {}).map((key) => [key, { answer: 'yes' }])) }
+      : { summary: 'Assessment completed' };
+    await workflow.saveAssessment(lc.id, a.type, content, true, owner);
+  }
+  await workflow.submitAssess(lc.id, owner);
+  await workflow.runTests(lc.id, owner, { functional_score: 92 });
+  const id = (await workflow.get(lc.id)).data.approval_id!;
+  const administrator = person(owner.id, ['tenant_admin'], 10);
+  assert.deepEqual((await approvals.eligibleSlots(await approvals.get(id), administrator)).map((slot) => slot.slot), ['admin']);
+  await assert.rejects(() => approvals.decide(id, person(owner.id, ['tenant_admin'], 900), { decision: 'approve' }), /fresh sign-in/);
+  const approved = await approvals.decide(id, administrator, { decision: 'approve', slot: 'admin' });
+  assert.equal(approved.status, 'approved');
+  assert.equal(approved.decisions?.[0]?.approver, owner.id);
+  assert.equal(JSON.parse(approved.decisions![0]!.auth_strength).admin_override, true);
+  assert.ok(await registry.activeCertificate(agent.id));
+  assert.equal((await workflow.get(lc.id)).stage, 'deploy');
+});

@@ -34,7 +34,7 @@ export function Approvals() {
   const items = (data?.items ?? []).filter((r: any) => tab !== 'decided' || r.status !== 'pending');
   return (
     <>
-      <PageHeader title="My Approvals" subtitle="Each decision is signed over the approval pack's hash and written to the decision ledger. Owners, proposers and build teams never approve their own agents (RB-INV-09)." />
+      <PageHeader title="My Approvals" subtitle="Each decision is signed over the approval pack's hash and written to the decision ledger. Owners sign the owner slot; independent reviewers sign the remaining slots. Administrators can complete certificate approval directly, including for their own agent. Every decision is audited." />
       <Tabs active={tab} onChange={setTab} tabs={[{ id: 'mine', label: 'Waiting for me' }, { id: 'pending', label: 'All pending' }, { id: 'decided', label: 'Decided' }]} />
       <div className="grid gap-4 xl:grid-cols-[420px_1fr]">
         <Card pad={false}>
@@ -84,8 +84,10 @@ export function ApprovalDetail({ id, onDecided, compact = false }: { id: string;
         />
       </Card>
       <Card title="Who must sign" pad={false}>
+        {r.type === 'certificate' && <p className="px-4 py-3 text-sm text-ink-2">{r.my_slots.includes('admin') ? 'You are an administrator. Approve below to complete this request without collecting the individual signatures.' : 'An administrator can also complete this certificate approval directly.'}</p>}
         <table className="w-full">
           <tbody>
+            {filled('admin').map((d: { id: string; decision: string; approver: string; comment: string | null }) => <tr key={d.id}><td className="td font-medium">Administrator decision</td><td className="td text-xs">{d.approver}</td><td className="td text-xs"><Pill value={d.decision === 'approve' ? 'allow' : 'deny'} label={d.decision.replace('_', ' ')} />{d.comment && <p>{d.comment}</p>}</td></tr>)}
             {r.slots.map((s: any) => (
               <tr key={s.slot}>
                 <td className="td font-medium">{s.label}</td>
@@ -132,7 +134,7 @@ function DecisionForm({ r, onDone }: { r: any; onDone: () => void }) {
         <div className="mb-3">
           <label className="label">Sign as</label>
           <select className="input w-auto" value={slot} onChange={(e) => setSlot(e.target.value)}>
-            {r.my_slots.map((s: string) => <option key={s} value={s}>{r.slots.find((x: any) => x.slot === s)?.label ?? s}</option>)}
+            {r.my_slots.map((s: string) => <option key={s} value={s}>{r.slots.find((x: any) => x.slot === s)?.label ?? (s === 'admin' ? 'Administrator approval' : s)}</option>)}
           </select>
         </div>
       )}
@@ -140,7 +142,7 @@ function DecisionForm({ r, onDone }: { r: any; onDone: () => void }) {
       <textarea className="input min-h-16" value={comment} onChange={(e) => setComment(e.target.value)} />
       {(r.tier === 'T1' || r.tier === 'T2') && !runtime && <p className="mt-2 text-xs text-ink-3">{r.tier} decisions need a sign-in within the last 5 minutes (step-up, BP 7.3).</p>}
       <div className="mt-3 flex flex-wrap gap-2">
-        <button className="btn-primary" disabled={busy} onClick={() => void decide('approve')}>Approve{runtime ? ' once' : ''}</button>
+        <button className="btn-primary" disabled={busy} onClick={() => void decide('approve')}>Approve{runtime ? ' once' : r.my_slots.includes('admin') ? ' as administrator' : ''}</button>
         {runtime && <button className="btn-ghost" disabled={busy} onClick={() => void decide('approve_session')}>Approve for this session</button>}
         {r.type === 'certificate' && <button className="btn-ghost" disabled={busy || !comment.trim()} onClick={() => void decide('send_back')}>Send back to Assess</button>}
         <button className="btn-ghost text-bad" disabled={busy || !comment.trim()} onClick={() => void decide('reject')}>Reject</button>
