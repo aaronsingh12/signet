@@ -2,7 +2,7 @@ import { setTimeout } from 'node:timers/promises';
 import { devSecret } from '@signet/core';
 
 /** Vercel daemon keeps maintenance running while the HTTP services scale to zero. */
-const controlUrl = process.env.SIGNET_CONTROL_URL;
+const controlUrl = process.env.SIGNET_CONTROL_URL?.replace(/\/+$/, '');
 if (!controlUrl) throw new Error('SIGNET_CONTROL_URL service binding is required for the maintenance daemon');
 const token = devSecret('SIGNET_INTERNAL_TOKEN');
 const jobs: ReadonlyArray<{ name: string; interval: number }> = [

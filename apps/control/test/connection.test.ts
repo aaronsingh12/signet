@@ -91,7 +91,7 @@ test('OAuth and bootstrap identities reach a private API through a real outbound
   const controlUrl = `http://127.0.0.1:${controlPort}`;
   const gatewayUrl = `http://127.0.0.1:${gatewayPort}`;
   let logs = '';
-  const env: NodeJS.ProcessEnv = { ...process.env, SIGNET_CONTROL_PORT: String(controlPort), SIGNET_GATEWAY_PORT: String(gatewayPort), SIGNET_CONTROL_URL: controlUrl, SIGNET_NODE_ID: 'connect-test', SIGNET_AUTH_MODE: 'local', SIGNET_ADMIN_ID: 'connect-admin', SIGNET_ADMIN_PASSWORD: 'isolated-test-password', SIGNET_PUBLIC_URL: controlUrl, SIGNET_LLM_BASE_URL: 'http://127.0.0.1:1/v1', SIGNET_ENV: 'dev', SIGNET_EDGE_RUNNER_ID: runner.id, SIGNET_EDGE_RUNNER_SECRET: runner.runner_secret, SIGNET_EDGE_TOOLS_FILE: toolsFile, SIGNET_TEST_PRIVATE_TOKEN: 'local-only-test-token' };
+  const env: NodeJS.ProcessEnv = { ...process.env, SIGNET_CONTROL_PORT: String(controlPort), SIGNET_GATEWAY_PORT: String(gatewayPort), SIGNET_CONTROL_URL: controlUrl + '/', SIGNET_NODE_ID: 'connect-test', SIGNET_AUTH_MODE: 'local', SIGNET_ADMIN_ID: 'connect-admin', SIGNET_ADMIN_PASSWORD: 'isolated-test-password', SIGNET_PUBLIC_URL: controlUrl, SIGNET_LLM_BASE_URL: 'http://127.0.0.1:1/v1', SIGNET_ENV: 'dev', SIGNET_EDGE_RUNNER_ID: runner.id, SIGNET_EDGE_RUNNER_SECRET: runner.runner_secret, SIGNET_EDGE_TOOLS_FILE: toolsFile, SIGNET_TEST_PRIVATE_TOKEN: 'local-only-test-token' };
   const start = (entry: string): ChildProcess => {
     const child = spawn(process.execPath, ['--import', 'tsx', resolve(entry)], { env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     child.stdout?.on('data', (chunk: Buffer) => { logs = (logs + chunk.toString()).slice(-12_000); });
