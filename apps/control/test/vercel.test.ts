@@ -1,0 +1,41 @@
+import { strict as assert } from 'node:assert';
+import { randomBytes } from 'node:crypto';
+import { existsSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { after, test } from 'node:test';
+import { dropTestDatabase } from './database';
+
+const directory = mkdtempSync(join(tmpdir(), 'signet-vercel-'));
+process.env.SIGNET_DATA_DIR = directory;
+process.env.SIGNET_DB_SCHEMA = 'test_' + Date.now().toString(36) + '_' + randomBytes(4).toString('hex');
+after(dropTestDatabase);
+
+test('Vercel uses stable signing keys and stores signed evidence and erasures in PostgreSQL', async () => {
+  const { generateSigningKey, GENESIS_HASH, hashRecord } = await import('@signet/core');
+  process.env.SIGNET_SIGNING_KEYS = JSON.stringify({ ca: generateSigningKey('cloud-ca'), token: generateSigningKey('cloud-token'), ledger: generateSigningKey('cloud-ledger') });
+  process.env.VERCEL = '1';
+  process.env.SIGNET_INTERNAL_TOKEN = randomBytes(32).toString('base64url');
+  process.env.SIGNET_BROKER_KEY = randomBytes(32).toString('base64url');
+  const { db } = await import('../src/db');
+  const { keys } = await import('../src/keys');
+  const { tenant } = await import('../src/tenant');
+  const evidence = await import('../src/evidence');
+  const { eraseEvidenceFiles } = await import('../src/erasure-files');
+  assert.equal(keys.ledger.kid, 'cloud-ledger');
+  assert.equal(existsSync(join(directory, 'keys.json')), false);
+  const day = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+  const record = { record_id: 'rec_cloud', seq: 1, tenant_id: tenant.id, kind: 'admin' as const, ts: `${day}T12:00:00.000Z`, agent_id: null, cert_id: null, data: { event: 'cloud.integration' }, prev_hash: GENESIS_HASH };
+  await db.prepare('INSERT INTO ledger_record (seq, record_id, tenant_id, kind, ts, agent_id, cert_id, data, prev_hash, record_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(1, record.record_id, tenant.id, record.kind, record.ts, null, null, JSON.stringify(record.data), GENESIS_HASH, hashRecord(record));
+  const results = await Promise.all([evidence.sealDay(day), evidence.sealDay(day)]);
+  assert.deepEqual(results[0], results[1]);
+  const [root] = await evidence.roots(1);
+  assert.equal(root?.worm, true);
+  assert.equal(evidence.verifyRootJws(root!.jws).count, 1);
+  assert.equal(existsSync(join(directory, 'worm')), false);
+  await assert.rejects(db.prepare('UPDATE evidence_object SET content = ? WHERE path = ?').run('tampered', `roots/${day}.jws`), /append-only/);
+  await assert.rejects(db.prepare('DELETE FROM evidence_object WHERE path = ?').run(`roots/${day}.jws`), /append-only/);
+  await eraseEvidenceFiles([day]);
+  const segment = await db.prepare('SELECT content FROM evidence_object WHERE tenant_id = ? AND path = ?').get(tenant.id, `segments/${day}.jsonl`);
+  assert.equal(JSON.parse(String(segment?.content)).record_id, record.record_id);
+});

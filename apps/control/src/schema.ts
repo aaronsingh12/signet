@@ -274,6 +274,22 @@ CREATE OR REPLACE TRIGGER root_no_update BEFORE UPDATE ON daily_root FOR EACH RO
 CREATE OR REPLACE TRIGGER root_no_delete BEFORE DELETE ON daily_root FOR EACH ROW EXECUTE FUNCTION signet_append_only();
 CREATE OR REPLACE TRIGGER root_no_truncate BEFORE TRUNCATE ON daily_root FOR EACH STATEMENT EXECUTE FUNCTION signet_append_only();
 
+CREATE TABLE IF NOT EXISTS evidence_object (
+  tenant_id TEXT NOT NULL,
+  path TEXT NOT NULL,
+  content TEXT NOT NULL,
+  PRIMARY KEY (tenant_id, path)
+);
+CREATE OR REPLACE FUNCTION signet_evidence_root_immutable() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF OLD.path LIKE 'roots/%' THEN RAISE EXCEPTION 'evidence roots are append-only'; END IF;
+  RETURN NEW;
+END;
+$$;
+CREATE OR REPLACE TRIGGER evidence_no_root_update BEFORE UPDATE ON evidence_object FOR EACH ROW EXECUTE FUNCTION signet_evidence_root_immutable();
+CREATE OR REPLACE TRIGGER evidence_no_delete BEFORE DELETE ON evidence_object FOR EACH ROW EXECUTE FUNCTION signet_append_only();
+CREATE OR REPLACE TRIGGER evidence_no_truncate BEFORE TRUNCATE ON evidence_object FOR EACH STATEMENT EXECUTE FUNCTION signet_append_only();
+
 
 -- One lifecycle per agent version being onboarded (BP 6). data holds intake, manifest draft and deploy plan.
 CREATE TABLE IF NOT EXISTS lifecycle (

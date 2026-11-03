@@ -12,6 +12,7 @@ const entries = {
   'signet-keysweep': 'apps/cli/src/keysweep.ts',
   'signet-sidecar': 'apps/sidecar/src/index.ts',
   'signet-edge': 'apps/edge/src/index.ts',
+  maintenance: 'apps/control/src/maintenance.ts',
 };
 
 rmSync('dist', { recursive: true, force: true });

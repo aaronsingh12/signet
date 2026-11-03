@@ -5,6 +5,7 @@ import { DATA_DIR, REPO_ROOT, sha256, signJws, type LedgerRecord } from '@signet
 import { keys } from './keys';
 import * as ledger from './ledger';
 import { tenant } from './tenant';
+import { db } from './db';
 
 interface DeploymentArtifact { agent_id: string; deployment_credential: string }
 interface WorkloadArtifact { agent_id?: string; claims?: { agent_id: string } }
@@ -15,9 +16,13 @@ export async function eraseEvidenceFiles(days: string[]): Promise<void> {
   const records = [...(await ledger.all())];
   for (const day of days) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new TypeError(`Invalid evidence day: ${day}`);
+    const segment = records.filter((record) => record.ts.startsWith(day)).map((record) => JSON.stringify(record)).join('\n') + '\n';
+    if (process.env.VERCEL) {
+      await db.prepare('UPDATE evidence_object SET content = ? WHERE tenant_id = ? AND path = ?').run(segment, tenant.id, `segments/${day}.jsonl`);
+      continue;
+    }
     const file = join(DATA_DIR, 'worm', tenant.id, 'segments', `${day}.jsonl`);
     if (!existsSync(file)) continue;
-    const segment = records.filter((record) => record.ts.startsWith(day)).map((record) => JSON.stringify(record)).join('\n') + '\n';
     chmodSync(file, 0o600);
     writeFileSync(file, segment);
     chmodSync(file, 0o444);

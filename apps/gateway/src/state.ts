@@ -15,7 +15,7 @@ import { eraseAgentLedgerQueue } from './ledgerclient';
 
 export const CONTROL_URL = env('SIGNET_CONTROL_URL', 'http://localhost:4100');
 const INTERNAL_TOKEN = devSecret('SIGNET_INTERNAL_TOKEN');
-export const PORT = Number(env('SIGNET_GATEWAY_PORT', '8100'));
+export const PORT = Number(process.env.PORT ?? env('SIGNET_GATEWAY_PORT', '8100'));
 export const NODE_ID = env('SIGNET_NODE_ID', `gw-${hostname().toLowerCase()}-${PORT}`);
 const POLL_MS = 5_000; // BP 5.4 fallback poll
 const SECRET_TTL_MS = 60_000;

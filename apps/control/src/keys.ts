@@ -8,10 +8,15 @@ import { DATA_DIR, generateSigningKey, loadSigningKey, toJwk, ulid, type Signing
 type KeyRole = 'ca' | 'token' | 'ledger';
 
 const file = join(DATA_DIR, 'keys.json');
-const stored: Record<KeyRole, StoredKey> = existsSync(file)
+const configuredKeys = process.env.SIGNET_SIGNING_KEYS;
+if (process.env.VERCEL && !configuredKeys) throw new Error('SIGNET_SIGNING_KEYS is required in Vercel Environment Variables so signing keys survive restarts');
+const stored: Record<KeyRole, StoredKey> = configuredKeys ? JSON.parse(configuredKeys) as Record<KeyRole, StoredKey> : existsSync(file)
   ? JSON.parse(readFileSync(file, 'utf8'))
   : { ca: generateSigningKey(`ca-${ulid()}`), token: generateSigningKey(`tok-${ulid()}`), ledger: generateSigningKey(`ldg-${ulid()}`) };
-if (!existsSync(file)) writeFileSync(file, JSON.stringify(stored, null, 2), { mode: 0o600 });
+for (const role of ['ca', 'token', 'ledger'] as const) {
+  if (!stored?.[role] || typeof stored[role].kid !== 'string' || !stored[role].kid || typeof stored[role].privatePem !== 'string' || !stored[role].privatePem) throw new TypeError(`SIGNET_SIGNING_KEYS must contain ${role}.kid and ${role}.privatePem`);
+}
+if (!configuredKeys && !existsSync(file)) writeFileSync(file, JSON.stringify(stored, null, 2), { mode: 0o600 });
 
 export const keys: Record<KeyRole, SigningKey> = {
   ca: loadSigningKey(stored.ca),
