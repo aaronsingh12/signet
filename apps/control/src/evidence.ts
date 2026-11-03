@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { createGzip } from 'node:zlib';
 import type { Writable } from 'node:stream';
 import { DATA_DIR, canonicalize, inclusionProof, merkleRoot, signJws, toJwk, verifyJws } from '@signet/core';
-import { db, nowIso } from './db';
+import { db, nowIso, tx } from './db';
 import { notFound } from './errors';
 import { keys } from './keys';
 import * as ledger from './ledger';
@@ -12,8 +12,8 @@ import { tenant } from './tenant';
 
 // Evidence store (BP 8.3, E05, E31). Each UTC day's records are rolled into a Merkle tree; the root is
 // signed with the tenant ledger key and written, with the day's records, to write-once storage.
-// Dev backend: files under data/worm made read-only after one write. Production backend: S3 Object
-// Lock in compliance mode (same interface).
+// Local copies use read-only files. Vercel copies use PostgreSQL with append-only signed roots;
+// this is application-enforced retention, not independently administered S3 Object Lock.
 
 const WORM_DIR = join(DATA_DIR, 'worm', tenant.id);
 
@@ -29,7 +29,13 @@ export interface RootPayload {
   signed_at: string;
 }
 
-function writeOnce(rel: string, content: string) {
+async function writeOnce(rel: string, content: string): Promise<void> {
+  if (process.env.VERCEL) {
+    await db.prepare('INSERT INTO evidence_object (tenant_id, path, content) VALUES (?, ?, ?) ON CONFLICT DO NOTHING').run(tenant.id, rel, content);
+    const stored = await db.prepare('SELECT content FROM evidence_object WHERE tenant_id = ? AND path = ?').get(tenant.id, rel);
+    if (stored?.content !== content) throw new Error(`Evidence object ${rel} exists with different content`);
+    return;
+  }
   const file = join(WORM_DIR, rel);
   if (existsSync(file)) {
     if (readFileSync(file, 'utf8') !== content) throw new Error(`WORM object ${rel} exists with different content`);
@@ -56,6 +62,15 @@ export async function sealFinishedDays(): Promise<string[]> {
 }
 
 export async function sealDay(day: string) {
+  return tx(async () => {
+    await db.prepare('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))').get(`${db.schema}:daily-root:${day}`);
+    const existing = await db.prepare('SELECT jws FROM daily_root WHERE day = ?').get(day);
+    if (existing) return verifyRootJws(String(existing.jws));
+    return sealDayRecords(day);
+  });
+}
+
+async function sealDayRecords(day: string) {
   const recs = (await recordsOfDay(day));
   if (!recs.length) return null;
   const payload: RootPayload = {
@@ -71,13 +86,14 @@ export async function sealDay(day: string) {
   };
   const jws = signJws(payload, keys.ledger, 'signet-root');
   (await db.prepare('INSERT INTO daily_root (day, first_seq, last_seq, count, merkle_root, jws, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(day, payload.first_seq, payload.last_seq, payload.count, payload.merkle_root, jws, nowIso()));
-  writeOnce(`roots/${day}.jws`, jws);
-  writeOnce(`segments/${day}.jsonl`, [...(await ledger.range(payload.first_seq, payload.last_seq))].map((r) => JSON.stringify(r)).join('\n') + '\n');
+  await writeOnce(`roots/${day}.jws`, jws);
+  await writeOnce(`segments/${day}.jsonl`, [...(await ledger.range(payload.first_seq, payload.last_seq))].map((r) => JSON.stringify(r)).join('\n') + '\n');
   (await ledger.append({ kind: 'admin', data: { event: 'ledger.daily_root', day, count: payload.count, merkle_root: payload.merkle_root, key: keys.ledger.kid } }));
   return payload;
 }
 
 export async function roots(limit = 30) {
+  if (process.env.VERCEL) return await db.prepare("SELECT day, first_seq, last_seq, count, merkle_root, jws, created_at, EXISTS (SELECT 1 FROM evidence_object WHERE tenant_id = ? AND path = 'roots/' || daily_root.day || '.jws') AS worm FROM daily_root ORDER BY day DESC LIMIT ?").all(tenant.id, limit) as { day: string; jws: string; worm: boolean }[];
   return ((await db.prepare('SELECT day, first_seq, last_seq, count, merkle_root, jws, created_at FROM daily_root ORDER BY day DESC LIMIT ?').all(limit)) as { jws: string }[]).map((r) => ({
     ...r,
     worm: existsSync(join(WORM_DIR, `roots/${(r as unknown as { day: string }).day}.jws`)),

@@ -1,0 +1,19 @@
+# Vercel Services selects the process explicitly; the private edge runner is never the web entrypoint.
+FROM node:24-slim AS build
+WORKDIR /src
+COPY package.json package-lock.json ./
+COPY packages ./packages
+COPY apps ./apps
+COPY scripts ./scripts
+COPY policy ./policy
+RUN npm ci --ignore-scripts && npm run build
+
+FROM node:24-slim
+ENV NODE_ENV=production VERCEL=1 SIGNET_HOME=/app SIGNET_DATA_DIR=/tmp/signet
+WORKDIR /app
+RUN npm init -y >/dev/null && npm install --omit=dev --ignore-scripts express@4.21.2 pg@8.23.1 @open-policy-agent/opa-wasm@1.10.0 && npm cache clean --force
+COPY --from=build /src/dist/control.mjs /src/dist/gateway.mjs /src/dist/maintenance.mjs /src/dist/detector-worker.mjs ./
+COPY --from=build /src/dist/policy ./policy
+USER node
+EXPOSE 3000
+CMD ["node", "control.mjs"]

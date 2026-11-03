@@ -42,6 +42,7 @@ function readDevSecrets(file: string): Record<string, string> {
 export function devSecret(name: string): string {
   const fromEnv = process.env[name];
   if (fromEnv) return fromEnv;
+  if (process.env.VERCEL) throw new Error(`${name} is required in Vercel Environment Variables; per-instance generated secrets are not supported`);
   mkdirSync(DATA_DIR, { recursive: true });
   const file = join(DATA_DIR, 'dev-secrets.json');
   if (!existsSync(file)) {

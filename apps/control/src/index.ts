@@ -36,7 +36,7 @@ import * as connectivity from './connectivity';
 import * as edge from './edge';
 
 const INTERNAL_TOKEN = devSecret('SIGNET_INTERNAL_TOKEN');
-const PORT = Number(env('SIGNET_CONTROL_PORT', '4100'));
+const PORT = Number(process.env.PORT ?? env('SIGNET_CONTROL_PORT', '4100'));
 
 const app = express();
 app.disable('x-powered-by');
@@ -412,6 +412,14 @@ int.post('/outage', route(async (req) => {
   const r = (await ledger.append({ kind: 'enforcement', data: { event: `provider.outage.${req.body?.state === 'ended' ? 'ended' : 'declared'}`, rule_id: 'RB-PROV-04', node_id: req.body?.node_id, stats: req.body?.stats ?? {} } }));
   return { record_id: r.record_id };
 }));
+// These routes remain private to service bindings; the public route table exposes only /api.
+int.post('/maintenance/ladder', route(async () => { await enforcement.sweepExpired(); return { ok: true }; }));
+int.post('/maintenance/approvals', route(async () => { await approvals.sweep(); return { ok: true }; }));
+int.post('/maintenance/lifecycle', route(async () => { await workflow.sweep(); return { ok: true }; }));
+int.post('/maintenance/controls', route(async () => { await controls.evaluate(); return { ok: true }; }));
+int.post('/maintenance/connectors', route(async () => { await servicenow.work(); return { ok: true }; }));
+int.post('/maintenance/edge', route(async () => { await edge.sweep(); return { ok: true }; }));
+int.post('/maintenance/roots', route(async () => ({ sealed: await evidence.sealFinishedDays() })));
 app.use('/internal', int);
 
 app.use(problemHandler);
@@ -420,6 +428,8 @@ app.use(problemHandler);
 // continuous control tests, connector outbox, daily roots.
 (await controls.seed());
 enforcement.setRolloutSource(workflow.rollouts);
+// Cloud maintenance runs in the dedicated daemon rather than request-scoped function timers.
+if (!process.env.VERCEL) {
 const every = (ms: number, name: string, fn: () => unknown) => {
   const run = () => {
     try {
@@ -448,6 +458,7 @@ const sealRoots = async () => {
 };
 (await sealRoots());
 setInterval(sealRoots, 10 * 60_000).unref();
+}
 
 app.listen(PORT, () => {
   console.log(`[control] Signet control plane on http://localhost:${PORT}  tenant=${tenant.id} (${tenant.name})`);
