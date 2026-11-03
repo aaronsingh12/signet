@@ -1,133 +1,34 @@
+import { ArrowRight, CalendarDays, CheckCheck, Plus, RefreshCw, ShieldCheck } from 'lucide-react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Card, Empty, LEVEL_LABEL, PageHeader, Pill, Stat, TierChip } from '../components/ui';
-import { useApi } from '../lib/api';
-import { useMe } from '../lib/auth';
-import { ago, daysLeft, num } from '../lib/format';
-
-const TIERS = [
-  ['T1', 'Critical'],
-  ['T2', 'High'],
-  ['T3', 'Moderate'],
-  ['T4', 'Low'],
-] as const;
+import { ActivityChart, AgentCard, AgentMetrics, OutcomeChart, UsageComparison } from '../components/AgentCharts';
+import { Empty, ErrorNote } from '../components/ui';
+import { agentState, money, useAgentAnalytics } from '../lib/analytics';
+import { useCan } from '../lib/auth';
 
 export function CommandCenter() {
-  const me = useMe();
-  const { data: s } = useApi<any>('/stats/command-center');
-  const { data: ev } = useApi<any>('/enforcement-events?limit=6');
-  const byTier = (tier: string) => (s?.agents_by_tier_status ?? []).filter((r: any) => r.tier === tier);
-  const count = (tier: string, status?: string) => byTier(tier).filter((r: any) => !status || r.status === status).reduce((a: number, r: any) => a + r.n, 0);
-  const total = (s?.agents_by_tier_status ?? []).reduce((a: number, r: any) => a + r.n, 0);
-  const dec = Object.fromEntries((s?.decisions_60m ?? []).map((d: any) => [d.d, d.n])) as Record<string, number>;
-  const decTotal = Object.values(dec).reduce((a, b) => a + b, 0) || 1;
-  const pct = (k: string[]) => `${((k.reduce((a, x) => a + (dec[x] ?? 0), 0) / decTotal) * 100).toFixed(1)}%`;
-  const hour = new Date().getHours();
-  return (
-    <>
-      <PageHeader
-        title="Command Center"
-        subtitle={`Good ${hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening'}, ${me.principal.name.split(' ')[0]}. Every agent, every decision, last 24 hours.`}
-        actions={
-          <Link className="btn-primary" to="/agents/new">
-            Propose agent
-          </Link>
-        }
-      />
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7">
-        <Stat label="Governed agents" value={num(total)} hint={`${count('T1') + count('T2')} at T1/T2`} />
-        <Stat label="Transactions · 24 h" value={num(s?.transactions_24h)} hint="model and tool calls" />
-        <Stat label="Blocks · 24 h" value={num(s?.blocks_24h)} hint={s?.transactions_24h ? `${((s.blocks_24h / s.transactions_24h) * 100).toFixed(1)}% of requests` : undefined} />
-        <Stat label="Kills · 24 h" value={num(s?.kills_24h)} hint={s?.max_kill_propagation_ms ? `max propagation ${(s.max_kill_propagation_ms / 1000).toFixed(2)} s` : 'none'} tone={s?.kills_24h ? 'bad' : undefined} />
-        <Stat label="Keyless, verified" value={s ? `${s.keyless.keyless_verified}/${s.keyless.sealed_agents}` : '—'} hint={s ? `${s.keyless.bypass_risk_agents} with bypass risk · ${s.keyless.unverified_agents} not reported · ${s.keyless.unmanaged_keys_open} unmanaged keys` : ''} tone={s?.keyless?.bypass_risk_agents || s?.keyless?.unmanaged_keys_open ? 'warn' : undefined} />
-        <Stat label="Cloud LLM" value={!s ? '—' : s.cloud_llm.state === 'ok' ? 'Reachable' : s.cloud_llm.state === 'unknown' ? 'Unknown' : 'Problem'} hint={s ? `${s.cloud_llm.detail}${s.cloud_llm.checked_at ? ` · checked ${new Date(s.cloud_llm.checked_at).toLocaleTimeString()}` : ''}${s.cloud_llm.credential ? ` · key from ${s.cloud_llm.credential}` : ''}` : ''} tone={!s ? undefined : s.cloud_llm.state === 'ok' ? 'ok' : s.cloud_llm.state === 'unknown' ? 'warn' : 'bad'} />
-        <Stat label="Gateway p95 · 24 h" value={s?.gateway_p95_ms_24h !== null && s?.gateway_p95_ms_24h !== undefined ? `${s.gateway_p95_ms_24h} ms` : '—'} hint="budget 50 ms (BP 2)" tone={s?.gateway_p95_ms_24h > 50 ? 'bad' : 'ok'} />
-      </div>
+  const { data, error, loading, reload } = useAgentAnalytics();
+  const [selected, setSelected] = useState('');
+  const can = useCan();
+  const agents = data?.agents ?? [];
+  const shown = selected ? agents.filter((agent) => agent.id === selected) : agents;
+  const attention = agents.filter((agent) => agentState(agent).tone !== 'ok');
+  return <>
+    <div className="flex flex-wrap items-center justify-between gap-5 dashboard-heading"><div><div className="eyebrow">YOUR AI WORKSPACE</div><h1>Your AI, at a glance.</h1><p>See what your AI agents are doing, and how Signet is keeping them in check.</p></div><div className="overview-toolbar"><span className="period-chip"><CalendarDays size={14} />Last 24 hours</span><button className="icon-button" data-testid="dashboard-refresh" aria-label="Refresh dashboard" disabled={loading} onClick={() => void reload()}><RefreshCw size={17} className={loading ? 'animate-spin' : ''} /></button>{can('agents.write') && <Link to="/agents/new" className="btn-primary"><Plus size={15} /> Add AI agent</Link>}</div></div>
+    <div className={`safety-banner ${attention.length ? 'attention' : ''}`}><span className="safety-banner-icon"><ShieldCheck size={21} /></span><div><strong>{!data ? 'Getting your workspace ready' : !agents.length ? 'Your AI workspace starts here' : attention.length ? `${attention.length} ${attention.length === 1 ? 'agent needs' : 'agents need'} your attention` : 'Your agents have active governance'}</strong><p>{!data ? 'Loading the latest approvals and request records.' : !agents.length ? 'Add your first agent to start tracking its activity and safety.' : attention.length ? 'Check paused, stopped or unapproved agents. Other agents keep their own safety settings.' : 'Each agent has its own approval. Every request is checked and recorded.'}</p></div><Link to="/agents">Review agents <ArrowRight size={14} /></Link></div>
+    <ErrorNote error={error} />
+    {!data && loading ? <div className="dashboard-loading" role="status">Loading your AI overview…</div> : data && <>
+      <AgentMetrics agents={agents} />
+      <div className="section-heading mb-0"><div><h2>What’s happening with your AI?</h2><p>Choose an agent to explore its own activity and request outcomes.</p></div><label className="sr-only" htmlFor="dashboard-agent-filter">Filter charts by agent</label><select id="dashboard-agent-filter" data-testid="dashboard-agent-filter" className="input dashboard-filter" value={selected} onChange={(event) => setSelected(event.target.value)}><option value="">All AI agents</option>{agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}</select></div>
+      <div className="chart-layout"><section className="chart-card"><div className="chart-heading"><div><h2>Agent activity</h2><p>Requests per hour · times shown in your local timezone</p></div><ActivityBadge /></div><ActivityChart agents={shown} /></section><section className="chart-card"><div className="chart-heading"><div><h2>Request outcomes</h2><p>What happened after Signet checked a request</p></div><CheckCheck size={17} className="text-ink-3" /></div><OutcomeChart agents={shown} /><p className="chart-note">A blocked request is an action Signet refused. Service errors are tracked separately.</p></section></div>
+      <div className="section-heading"><div><h2>Your AI agents <span className="ml-2 rounded-md bg-white px-2 py-1 text-xs text-ink-3">{agents.length}</span></h2><p>One card for each agent. Independent identity, approval and activity.</p></div><Link to="/agents">Manage agents <ArrowRight size={14} /></Link></div>
+      {agents.length ? <div className="agent-grid">{agents.map((agent) => <AgentCard key={agent.id} agent={agent} />)}</div> : <div className="card"><Empty>No AI agents yet. Add an agent to see its status and charts.</Empty></div>}
+      <div className="chart-layout"><section className="chart-card"><div className="chart-heading"><div><h2>Requests by agent</h2><p>Compare how much work each agent is handling</p></div></div><UsageComparison agents={shown} /></section><section className="chart-card"><div className="chart-heading"><div><h2>Usage & daily budget</h2><p>Recorded cost compared with each agent’s own limit</p></div></div><div className="mt-6 space-y-5">{shown.map((agent) => <div key={agent.id}><div className="mb-2 flex justify-between gap-3 text-[10px]"><Link to={`/agents/${agent.id}`} className="truncate text-ink-2">{agent.name}</Link><span className="whitespace-nowrap font-medium">{money(agent.cost_usd)} <span className="text-ink-3">/ {agent.daily_budget_usd === null ? 'No active budget' : money(agent.daily_budget_usd)}</span></span></div><div className="comparison-track" role="img" aria-label={`${agent.name}: ${money(agent.cost_usd)} used; ${agent.daily_budget_usd === null ? 'no active budget' : `${money(agent.daily_budget_usd)} daily budget`}`}><div className="comparison-fill" style={{ background: agent.color, width: `${agent.daily_budget_usd ? Math.min(100, agent.cost_usd / agent.daily_budget_usd * 100) : 0}%` }} /></div></div>)}</div><p className="chart-note">Costs use configured model prices. The chart covers a rolling 24 hours; enforced daily limits reset at UTC midnight.</p></section></div>
+      <p className="chart-note mt-5">Updated {new Date(data.to).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })} · Refreshes every 30 seconds · Charts include recorded model and tool requests only.</p>
+    </>}
+  </>;
+}
 
-      <div className="mt-4 grid gap-4 xl:grid-cols-2">
-        <Card title="Agents by tier and seal status" action={<Link className="text-xs text-royal hover:underline" to="/agents">Open registry</Link>}>
-          <div className="space-y-2">
-            {TIERS.map(([t, label]) => {
-              const n = count(t);
-              const sealed = count(t, 'sealed');
-              const bad = count(t, 'quarantined') + count(t, 'killed');
-              return (
-                <div key={t} className="flex items-center gap-3 text-sm">
-                  <TierChip tier={t} />
-                  <span className="w-20 text-ink-2">{label}</span>
-                  <div className="flex h-2.5 flex-1 overflow-hidden rounded-full bg-slate-100">
-                    <div className="bg-ok" style={{ width: `${n ? (sealed / n) * 100 : 0}%` }} />
-                    <div className="bg-slate-300" style={{ width: `${n ? ((n - sealed - bad) / n) * 100 : 0}%` }} />
-                    <div className="bg-bad" style={{ width: `${n ? (bad / n) * 100 : 0}%` }} />
-                  </div>
-                  <span className="w-8 text-right font-semibold">{n}</span>
-                </div>
-              );
-            })}
-          </div>
-          <div className="mt-3 flex gap-4 text-xs text-ink-3">
-            <span><span className="mr-1 inline-block h-2 w-2 rounded-full bg-ok" />Sealed</span>
-            <span><span className="mr-1 inline-block h-2 w-2 rounded-full bg-slate-300" />Proposed</span>
-            <span><span className="mr-1 inline-block h-2 w-2 rounded-full bg-bad" />Quarantined or killed</span>
-          </div>
-        </Card>
-
-        <Card title="Decisions · last 60 min" action={<Link className="text-xs text-royal hover:underline" to="/live">Open Live Traffic</Link>}>
-          <div className="grid grid-cols-4 gap-3 text-center">
-            {[
-              ['Allowed', pct(['allow']), 'text-ok'],
-              ['With obligations', pct(['allow_with_obligations', 'step_up']), 'text-royal'],
-              ['Needs approval', pct(['require_approval']), 'text-warn'],
-              ['Denied / killed', pct(['deny', 'kill', 'quarantine', 'throttle']), 'text-bad'],
-            ].map(([l, v, c]) => (
-              <div key={l} className="rounded-md bg-canvas px-2 py-3">
-                <div className={`text-xl font-semibold ${c}`}>{v}</div>
-                <div className="text-xs text-ink-3">{l}</div>
-              </div>
-            ))}
-          </div>
-          <div className="mt-3 text-xs text-ink-3">{num(Object.values(dec).reduce((a, b) => a + b, 0))} decisions in the last hour</div>
-        </Card>
-
-        <Card title="Certificates expiring in 30 days" pad={false}>
-          {s?.expiring_30d?.length ? (
-            <table className="w-full">
-              <thead>
-                <tr><th className="th">Agent</th><th className="th">Tier</th><th className="th">Expires</th></tr>
-              </thead>
-              <tbody>
-                {s.expiring_30d.map((c: any) => (
-                  <tr key={c.handle}>
-                    <td className="td mono">{c.handle}</td>
-                    <td className="td"><TierChip tier={c.tier} /></td>
-                    <td className="td">in {daysLeft(c.valid_to)} days</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : (
-            <Empty>No seal expires in the next 30 days.</Empty>
-          )}
-        </Card>
-
-        <Card title="Recent enforcement" action={<Link className="text-xs text-royal hover:underline" to="/enforcement">Open Enforcement Center</Link>} pad={false}>
-          {ev?.items?.length ? (
-            <ul className="divide-y divide-line">
-              {ev.items.map((e: any) => (
-                <li key={e.id} className="flex items-start gap-3 px-4 py-2.5 text-sm">
-                  <span className="w-14 shrink-0 text-xs text-ink-3">{ago(e.published_at)}</span>
-                  <Pill value={e.level} label={LEVEL_LABEL[e.level] ?? e.level} />
-                  <div className="min-w-0">
-                    <Link className="mono text-ink hover:underline" to={`/agents/${e.agent_id}`}>{e.agent_id}</Link>
-                    <div className="truncate text-xs text-ink-3">{e.rule_id ? `${e.rule_id} · ` : ''}{e.reason}</div>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <Empty>No ladder events yet.</Empty>
-          )}
-        </Card>
-      </div>
-    </>
-  );
+function ActivityBadge() {
+  return <span className="agent-status ok"><span className="status-dot ok" />Recorded activity</span>;
 }

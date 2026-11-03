@@ -10,6 +10,7 @@
   ],
   "scripts": {
     "up": "docker compose up -d keycloak",
+    "hospital:provision": "node --import tsx apps/e2e/src/hospital.ts",
     "dev": "concurrently -k -n control,gw-a1,gw-a2,web -c blue,magenta,magenta,green \"npm run start -w @signet/control\" \"npm run start -w @signet/gateway\" \"npm run start:a2 -w @signet/gateway\" \"npm run dev -w @signet/web\"",
     "dev:api": "concurrently -k -n control,gw-a1,gw-a2 -c blue,magenta,magenta \"npm run start -w @signet/control\" \"npm run start -w @signet/gateway\" \"npm run start:a2 -w @signet/gateway\"",
     "perf": "npm run perf -w @signet/e2e",

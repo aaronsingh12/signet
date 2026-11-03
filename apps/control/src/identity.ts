@@ -16,7 +16,7 @@ const assertCanRevoke = (p: Principal, agentId: string) => (can(p, 'ladder.quara
 const BOOTSTRAP_TTL_MS = 15 * 60_000; // BP 4.2: valid 15 minutes, single use
 const tokenTtlSeconds = (tier: string) => (tier === 'T1' || tier === 'T2' ? 600 : 1800);
 
-function mintToken(cert: CertificateBody, instanceId: string, kind: WorkloadClaims['kind'] = 'bootstrap') {
+export function mintToken(cert: CertificateBody, instanceId: string, kind: WorkloadClaims['kind']) {
   const now = Math.floor(Date.now() / 1000);
   const claims: WorkloadClaims = {
     iss: tokenIssuer(cert.tenant),
@@ -38,7 +38,7 @@ function mintToken(cert: CertificateBody, instanceId: string, kind: WorkloadClai
   return { token: signJws(claims, keys.token, 'JWT'), token_type: 'Bearer', expires_in: claims.exp - now, claims };
 }
 
-function usableCertificate(agentId: string, instanceId?: string) {
+export function usableCertificate(agentId: string, instanceId?: string) {
   const blocked = agentBlocked(agentId, instanceId);
   if (blocked) throw new PolicyError(blocked === 'killed' ? 'RB-INV-08' : 'BP-5.4', `agent is ${blocked}; new tokens are refused`, 403);
   const active = activeCertificate(agentId);
@@ -78,7 +78,7 @@ export function exchangeBootstrap(secret: string) {
     db.prepare('INSERT INTO agent_instance (id, agent_id, cert_id, version, env, first_seen, last_seen, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
       instanceId, cert.agent_id, cert.cert_id, cert.version, row.id.split(':')[1] ?? 'dev', nowIso(), nowIso(), 'running',
     );
-    return mintToken(cert, instanceId);
+    return mintToken(cert, instanceId, 'bootstrap');
   });
 }
 

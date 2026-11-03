@@ -54,3 +54,14 @@ export function combine(rule: Outcome, detectors: DetectorResult[], tier: 'T1' |
   }
   return { outcome, reasons };
 }
+
+/** Explicit seal exception: audit missing coverage while enforcing rules and available detector verdicts. */
+export function combineWithDetectorOutageAudit(rule: Outcome, detectors: DetectorResult[], tier: 'T1' | 'T2' | 'T3' | 'T4'): { outcome: Outcome; reasons: string[] } {
+  const observed = combine(rule, detectors.filter((detector) => detector.status === 'ok'), tier);
+  const missing = detectors.filter((detector) => detector.status !== 'ok');
+  if (!missing.length) return observed;
+  return {
+    outcome: strictest(observed.outcome, 'allow_with_obligations'),
+    reasons: [...observed.reasons, ...missing.map((detector) => `${detector.id} ${detector.status}: coverage gap audited under the seal's explicit exception`)],
+  };
+}

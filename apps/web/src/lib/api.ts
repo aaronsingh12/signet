@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 // Client for the public control API (/api/v1). The console holds no tokens: the HttpOnly session
 // cookie set at sign-in authenticates every call. Errors arrive as RFC 9457 problem details.
@@ -53,12 +53,15 @@ export function useApi<T = any>(path: string | null, deps: unknown[] = []) {
 
 // Server-sent events from the control plane (Live Traffic), with reconnect.
 export function useLive<T>(onEvent: (e: T) => void) {
+  const latestHandler = useRef(onEvent);
+  useEffect(() => { latestHandler.current = onEvent; }, [onEvent]);
   useEffect(() => {
     let es: EventSource | null = null;
     let closed = false;
     const open = () => {
       es = new EventSource('/api/v1/live');
-      es.addEventListener('record', (m) => onEvent(JSON.parse((m as MessageEvent).data) as T));
+      es.addEventListener('record', (m) => latestHandler.current(JSON.parse((m as MessageEvent).data) as T));
+      es.addEventListener('reset', () => window.location.reload());
       es.onerror = () => {
         es?.close();
         if (!closed) setTimeout(open, 2000);

@@ -12,6 +12,19 @@ const app = express();
 app.disable('x-powered-by');
 app.use(express.json({ limit: '2mb' }));
 
+// A deployment credential can obtain only its own agent's token; no control-plane login is exposed.
+app.post('/v1/identity/token', async (req, res, next) => {
+  try {
+    const upstream = await request(`${state.CONTROL_URL}/api/v1/identity/deployment-token`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ deployment_credential: req.body?.deployment_credential }), timeoutMs: 5000,
+    });
+    res.status(upstream.status).set('cache-control', 'no-store').type('application/json').send(upstream.text());
+  } catch (error) {
+    next(error);
+  }
+});
+
 const send = (res: Response, d: Done) => res.status(d.status).set(d.headers).json(d.body);
 
 // Streaming clients get the checked answer as chat.completion.chunk events. The answer is complete

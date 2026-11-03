@@ -1,7 +1,7 @@
 {
   "realm": "signet",
   "enabled": true,
-  "displayName": "Northwind Financial (dev)",
+  "displayName": "Signet",
   "sslRequired": "none",
   "loginWithEmailAllowed": true,
   "duplicateEmailsAllowed": false,
@@ -46,168 +46,13 @@
       "name": "signet-automation"
     }
   ],
-  "users": [
-    {
-      "username": "ananya.rao",
-      "email": "ananya.rao@northwind.example",
-      "firstName": "Ananya",
-      "lastName": "Rao",
-      "enabled": true,
-      "emailVerified": true,
-      "credentials": [
-        {
-          "type": "password",
-          "value": "Signet!2026",
-          "temporary": false
-        }
-      ],
-      "groups": [
-        "/signet-risk-officers"
-      ]
-    },
-    {
-      "username": "jonas.weber",
-      "email": "jonas.weber@northwind.example",
-      "firstName": "Jonas",
-      "lastName": "Weber",
-      "enabled": true,
-      "emailVerified": true,
-      "credentials": [
-        {
-          "type": "password",
-          "value": "Signet!2026",
-          "temporary": false
-        }
-      ],
-      "groups": [
-        "/signet-security-officers"
-      ]
-    },
-    {
-      "username": "priya.menon",
-      "email": "priya.menon@northwind.example",
-      "firstName": "Priya",
-      "lastName": "Menon",
-      "enabled": true,
-      "emailVerified": true,
-      "credentials": [
-        {
-          "type": "password",
-          "value": "Signet!2026",
-          "temporary": false
-        }
-      ],
-      "groups": [
-        "/signet-agent-owners"
-      ]
-    },
-    {
-      "username": "ravi.kapoor",
-      "email": "ravi.kapoor@northwind.example",
-      "firstName": "Ravi",
-      "lastName": "Kapoor",
-      "enabled": true,
-      "emailVerified": true,
-      "credentials": [
-        {
-          "type": "password",
-          "value": "Signet!2026",
-          "temporary": false
-        }
-      ],
-      "groups": [
-        "/signet-governance-board"
-      ]
-    },
-    {
-      "username": "arjun.mehta",
-      "email": "arjun.mehta@northwind.example",
-      "firstName": "Arjun",
-      "lastName": "Mehta",
-      "enabled": true,
-      "emailVerified": true,
-      "credentials": [
-        {
-          "type": "password",
-          "value": "Signet!2026",
-          "temporary": false
-        }
-      ],
-      "groups": [
-        "/signet-platform-admins",
-        "/signet-builders"
-      ]
-    },
-    {
-      "username": "elena.rossi",
-      "email": "elena.rossi@northwind.example",
-      "firstName": "Elena",
-      "lastName": "Rossi",
-      "enabled": true,
-      "emailVerified": true,
-      "credentials": [
-        {
-          "type": "password",
-          "value": "Signet!2026",
-          "temporary": false
-        }
-      ],
-      "groups": [
-        "/signet-tenant-admins"
-      ]
-    },
-    {
-      "username": "marta.silva",
-      "email": "marta.silva@northwind.example",
-      "firstName": "Marta",
-      "lastName": "Silva",
-      "enabled": true,
-      "emailVerified": true,
-      "credentials": [
-        {
-          "type": "password",
-          "value": "Signet!2026",
-          "temporary": false
-        }
-      ],
-      "groups": [
-        "/signet-approvers"
-      ]
-    },
-    {
-      "username": "lena.vogt",
-      "email": "lena.vogt@northwind.example",
-      "firstName": "Lena",
-      "lastName": "Vogt",
-      "enabled": true,
-      "emailVerified": true,
-      "credentials": [
-        {
-          "type": "password",
-          "value": "Signet!2026",
-          "temporary": false
-        }
-      ],
-      "groups": [
-        "/signet-auditors"
-      ]
-    },
-    {
-      "username": "service-account-signet-automation",
-      "enabled": true,
-      "serviceAccountClientId": "signet-automation",
-      "groups": [
-        "/signet-automation"
-      ]
-    }
-  ],
+  "users": [],
   "clients": [
     {
       "clientId": "signet-console",
       "name": "Signet console",
       "enabled": true,
       "publicClient": false,
-      "secret": "signet-console-dev-secret",
       "standardFlowEnabled": true,
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": false,
@@ -264,7 +109,6 @@
       "name": "Signet automation (CI/CD)",
       "enabled": true,
       "publicClient": false,
-      "secret": "signet-automation-dev-secret",
       "standardFlowEnabled": false,
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": true,

@@ -22,7 +22,7 @@ export function Tools() {
   };
   return (
     <>
-      <PageHeader title="Tools & secrets" subtitle="Agents call aliases through the gateway; the real address and credential live only here. Agents never hold keys (RB-INV-03)." />
+      <PageHeader title="Tools & credentials" subtitle="Manage the services your agents can use. Signet stores their credentials securely and applies each agent’s permissions." />
       <ErrorNote error={error} />
       <div className="mt-2 grid gap-4 xl:grid-cols-2">
         <Card title="Tool aliases" pad={false}>

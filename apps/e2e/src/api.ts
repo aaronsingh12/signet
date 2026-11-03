@@ -12,15 +12,16 @@ export const TOOLS_URL = env('SIGNET_FIXTURES_URL', 'http://localhost:7910');
 export type Json = Record<string, any>;
 
 export const PEOPLE = {
-  owner: 'priya.menon',
-  security: 'jonas.weber',
-  risk: 'ananya.rao',
-  platform: 'arjun.mehta',
+  owner: env('SIGNET_DEMO_OWNER_ID', ''),
+  security: env('SIGNET_DEMO_SECURITY_ID', ''),
+  risk: env('SIGNET_DEMO_RISK_ID', ''),
+  platform: env('SIGNET_DEMO_PLATFORM_ID', ''),
 } as const;
 
 const cache = new Map<string, string>();
 export async function tokenFor(who: keyof typeof PEOPLE | 'automation') {
-  if (!cache.has(who)) cache.set(who, who === 'automation' ? await automationToken() : await devUserToken(PEOPLE[who]));
+  if (who !== 'automation' && !PEOPLE[who]) throw new Error(`Configure SIGNET_DEMO_${who.toUpperCase()}_ID for the external test identity provider`);
+  if (!cache.has(who)) cache.set(who, who === 'automation' ? await automationToken() : await devUserToken(PEOPLE[who], env('SIGNET_DEMO_PASSWORD', '')));
   return cache.get(who)!;
 }
 

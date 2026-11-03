@@ -31,6 +31,21 @@ CREATE TABLE IF NOT EXISTS session (
   last_seen_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS vercel_connection (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES tenant(id),
+  principal_id TEXT NOT NULL,
+  vercel_user_id TEXT NOT NULL,
+  email TEXT,
+  name TEXT,
+  access_token_sealed TEXT NOT NULL,
+  refresh_token_sealed TEXT,
+  expires_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (tenant_id, principal_id)
+);
+
 CREATE TABLE IF NOT EXISTS idempotency_key (
   key TEXT NOT NULL,
   principal TEXT NOT NULL,
@@ -540,6 +555,10 @@ CREATE TABLE IF NOT EXISTS discovery_source (
   total INTEGER NOT NULL DEFAULT 0
 );
 `);
+
+if (!(db.prepare('PRAGMA table_info(ledger_record)').all() as { name: string }[]).some((column) => column.name === 'erasure_proof')) {
+  db.exec('ALTER TABLE ledger_record ADD COLUMN erasure_proof TEXT');
+}
 
 // WAL with synchronous=NORMAL syncs at checkpoints; a checkpoint every 2 s keeps committed records
 // durable within the 2 s the Blueprint allows (BP 2 NFR "durable within 2 s"). A failed checkpoint is

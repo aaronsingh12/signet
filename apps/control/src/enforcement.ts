@@ -99,6 +99,7 @@ export function buildBundle(): string {
     policies,
     enforcement,
     revoked_jti: (db.prepare('SELECT jti FROM revoked_jti WHERE exp > ?').all(Math.floor(now / 1000)) as { jti: string }[]).map((r) => r.jti),
+    erased_agent_hashes: (db.prepare("SELECT DISTINCT json_extract(data, '$.subject_hash') AS hash FROM ledger_record WHERE tenant_id = ? AND json_extract(data, '$.event') = 'record.erased'").all(tenant.id) as { hash: string }[]).map((row) => row.hash),
     catalogue: tenant.settings.catalogue,
     tools: listTools(),
     detectors: db.prepare('SELECT id, version, mode FROM detector').all() as unknown as DetectorConfig[],

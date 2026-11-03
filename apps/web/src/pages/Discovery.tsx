@@ -60,7 +60,7 @@ export function Discovery() {
   };
   return (
     <>
-      <PageHeader title="Discovery Inbox" subtitle="AI use that does not go through Signet yet: credentials in code, direct traffic to AI providers, and agents whose runtime could bypass the gateway." />
+      <PageHeader title="Discovered agents" subtitle="Review AI agents and credentials found outside Signet, then decide how they should be managed." />
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <Stat label="Open findings" value={data ? data.items.filter((f: any) => f.status === 'open').length : '—'} hint={data ? `${data.items.length} in total` : ''} tone={data?.items?.some((f: any) => f.status === 'open') ? 'warn' : undefined} />
         <Stat label="Unmanaged keys open" value={kpi?.unmanaged_keys_open ?? '—'} hint={`${kpi?.unmanaged_keys_total ?? 0} found by Key Sweep`} tone={kpi?.unmanaged_keys_open ? 'warn' : undefined} />

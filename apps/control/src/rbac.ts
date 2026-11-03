@@ -11,7 +11,7 @@ export const ROLES = [
 export type Role = (typeof ROLES)[number];
 
 export const PERMISSIONS = [
-  'agents.read', 'agents.write', 'certificates.approve', 'identity.bootstrap',
+  'agents.read', 'agents.write', 'agents.delete', 'certificates.approve', 'identity.bootstrap',
   'ladder.step_up', 'ladder.throttle', 'ladder.quarantine', 'ladder.kill', 'ladder.release', 'circuit_breaker.arm',
   'ledger.read', 'ledger.verify', 'evidence.export', 'evidence.payload.read',
   'tools.manage', 'secrets.manage', 'discovery.read', 'discovery.write', 'detectors.manage',
@@ -20,7 +20,7 @@ export const PERMISSIONS = [
 export type Permission = (typeof PERMISSIONS)[number];
 
 const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
-  tenant_admin: ['compliance.read', 'tenant.read', 'tenant.admin', 'agents.read', 'ledger.read', 'gateways.read'],
+  tenant_admin: ['compliance.read', 'tenant.read', 'tenant.admin', 'agents.read', 'agents.delete', 'ledger.read', 'gateways.read'],
   platform_admin: ['connectors.manage', 'compliance.read', 'agents.read', 'identity.bootstrap', 'tools.manage', 'secrets.manage', 'discovery.read', 'discovery.write', 'detectors.manage', 'ledger.read', 'gateways.read', 'tenant.read'],
   governance_board: ['compliance.read', 'agents.read', 'certificates.approve', 'ladder.quarantine', 'circuit_breaker.arm', 'ledger.read', 'ledger.verify', 'gateways.read', 'tenant.read'],
   risk_officer: ['compliance.read', 'agents.read', 'certificates.approve', 'ladder.quarantine', 'ladder.release', 'ledger.read', 'ledger.verify', 'evidence.export', 'discovery.read', 'gateways.read', 'tenant.read'],

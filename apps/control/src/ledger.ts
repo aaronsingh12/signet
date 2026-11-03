@@ -2,10 +2,11 @@ import { GENESIS_HASH, hashRecord, newId, verifyChain, type LedgerKind, type Led
 import { db, nowIso, tx } from './db';
 import { notFound } from './errors';
 import { tenant } from './tenant';
+import { keys } from './keys';
 
-type Row = Omit<LedgerRecord, 'data'> & { data: string };
+type Row = Omit<LedgerRecord, 'data' | 'erasure_proof'> & { data: string; erasure_proof: string | null };
 
-export const toRecord = (r: Row): LedgerRecord => ({ ...r, data: JSON.parse(r.data) as Record<string, unknown> });
+export const toRecord = ({ erasure_proof, ...row }: Row): LedgerRecord => ({ ...row, data: JSON.parse(row.data) as Record<string, unknown>, ...(erasure_proof ? { erasure_proof } : {}) });
 
 const insert = db.prepare(
   'INSERT INTO ledger_record (seq, record_id, tenant_id, kind, ts, agent_id, cert_id, data, prev_hash, record_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
@@ -24,6 +25,7 @@ export const onAppend = (fn: (r: LedgerRecord) => void) => (listeners.add(fn), (
 
 // Synchronous append (RB-INV-15): the caller gets the record hash back only after it is stored.
 export function append(entry: LedgerEntry): LedgerRecord {
+  if (entry.agent_id && !db.prepare('SELECT 1 FROM agent WHERE id = ? AND tenant_id = ?').get(entry.agent_id, tenant.id)) throw notFound('agent for ledger entry; removed agents cannot write new records');
   const last = head.get() as { seq: number; record_hash: string } | undefined;
   const rec: Omit<LedgerRecord, 'record_hash'> = {
     record_id: newId('rec'),
@@ -98,5 +100,5 @@ export function prevHashOf(seq: number): string {
 }
 
 export function verify(fromSeq = 1, toSeq = Number.MAX_SAFE_INTEGER) {
-  return verifyChain(range(fromSeq, toSeq), prevHashOf(fromSeq));
+  return verifyChain(range(fromSeq, toSeq), prevHashOf(fromSeq), new Map([[keys.ledger.kid, keys.ledger.publicKey]]));
 }
