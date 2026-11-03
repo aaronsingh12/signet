@@ -10,15 +10,19 @@ import * as evidence from './evidence';
 import { cursor, idempotency, limitOf, problemHandler, route } from './http';
 import * as hub from './hub';
 import * as identity from './identity';
+import * as deploymentIdentity from './deployment-identity';
 import { jwks, keys } from './keys';
 import * as ledger from './ledger';
 import * as live from './live';
 import * as oidc from './oidc';
+import * as plugins from './plugins';
 import { openapi } from './openapi';
 import { principalOf, requires } from './rbac';
 import * as registry from './registry';
 import * as secrets from './secrets';
 import { commandCenter } from './stats';
+import { agentAnalytics } from './agent-analytics';
+import { agentRemovalPreview, removeAgent } from './agent-removal';
 import { tenant } from './tenant';
 import * as tools from './tools';
 
@@ -49,19 +53,31 @@ app.get('/healthz', (_req, res) => res.json({ ok: true, tenant: tenant.id }));
 
 // --- public: sign-in, identity exchange, API description ---
 api.get('/auth/login', route((req, res) => oidc.login(req, res)));
+api.get('/auth/config', route(() => ({ auth_mode: oidc.OIDC.authMode, tenant_name: tenant.name })));
+api.post('/auth/local-login', route((req, res) => oidc.localLogin(req, res)));
 api.get('/auth/callback', route((req, res) => oidc.callback(req, res)));
 api.post('/auth/logout', route((req, res) => oidc.logout(req, res)));
+api.post('/auth/dev-token', route((req) => oidc.localToken(req.body ?? {})));
 api.get('/identity/jwks', route(() => jwks()));
 api.post('/identity/token', route((req) => identity.exchangeBootstrap(String(req.body?.bootstrap_credential ?? ''))));
 api.post('/identity/token/refresh', route((req) => identity.refreshToken((req.headers.authorization ?? '').replace(/^Bearer /, ''))));
+api.post('/identity/deployment-token', route((req, res) => {
+  res.setHeader('cache-control', 'no-store');
+  return deploymentIdentity.exchangeDeploymentCredential(String(req.body?.deployment_credential ?? ''));
+}));
 api.get('/openapi.json', (_req, res) => res.json(openapi));
 
 // --- everything below needs a signed-in person or an approved machine client ---
 api.use(oidc.authenticate, signedIn, idempotency);
 
 api.get('/me', route((_req, res) => ({ principal: principalOf(res), tenant: { id: tenant.id, name: tenant.name } })));
+api.get('/plugins/vercel', requires('tenant.admin'), route((_req, res) => plugins.vercelConnection(principalOf(res))));
+api.get('/plugins/vercel/connect', requires('tenant.admin'), route((_req, res) => plugins.startVercelConnection(res, principalOf(res))));
+api.get('/plugins/vercel/callback', requires('tenant.admin'), route((req, res) => plugins.completeVercelConnection(req, res, principalOf(res))));
+api.post('/plugins/vercel/disconnect', requires('tenant.admin'), route((_req, res) => plugins.disconnectVercel(principalOf(res))));
 api.get('/catalogue', requires('agents.read'), route(() => ({ catalogue: tenant.settings.catalogue })));
 api.get('/stats/command-center', requires('agents.read'), route(() => commandCenter()));
+api.get('/stats/agents', requires('agents.read'), route(() => agentAnalytics()));
 api.get('/gateways', requires('gateways.read'), route(() => ({ items: db.prepare('SELECT * FROM gateway_node ORDER BY id').all() })));
 api.get('/live', requires('ledger.read'), (_req, res) => live.attach(res));
 
@@ -71,6 +87,11 @@ api.get('/agents', requires('agents.read'), route((req) => {
   return { items: out.items.map((a) => ({ ...a, enforcement: enforcement.agentLevel(a.id) })), next_cursor: out.next_cursor ? cursor.encode(out.next_cursor) : null };
 }));
 api.post('/agents', requires('agents.write'), route((req, res) => [201, registry.registerAgent(req.body, principalOf(res))]));
+api.get('/agents/:id/removal-preview', requires('agents.delete'), route((req, res) => agentRemovalPreview(req.params.id!, principalOf(res))));
+api.delete('/agents/:id', requires('agents.delete'), route((req, res) => {
+  if (typeof req.body?.confirm_handle !== 'string') throw invalid('confirm_handle must be the exact agent handle');
+  return removeAgent(req.params.id!, req.body.confirm_handle, principalOf(res));
+}));
 api.get('/agents/:id', requires('agents.read'), route((req) => {
   const agent = registry.getAgent(req.params.id!);
   const active = registry.activeCertificate(agent.id);
@@ -106,6 +127,13 @@ api.post('/certificates/verify', requires('agents.read'), route((req) => {
   }
 }));
 api.post('/agents/:id/bootstrap', requires('identity.bootstrap'), route((req, res) => [201, identity.createBootstrap(req.params.id!, principalOf(res), String(req.body?.environment ?? 'dev'))]));
+api.post('/agents/:id/deployment-credentials', requires('identity.bootstrap'), route((req, res) => {
+  res.setHeader('cache-control', 'no-store');
+  return [201, deploymentIdentity.createDeploymentCredential(req.params.id!, principalOf(res), String(req.body?.environment ?? 'dev'))];
+}));
+api.delete('/agents/:id/deployment-credentials/:credentialId', requires('identity.bootstrap'), route((req, res) =>
+  deploymentIdentity.revokeDeploymentCredential(req.params.id!, req.params.credentialId!, principalOf(res)),
+));
 
 // Response ladder (manual): owners can quarantine or kill their own agents (BP 14.2)
 api.post('/agents/:id/ladder', route((req, res) => {
@@ -196,6 +224,11 @@ int.get('/trust', route(() => ({ ca: toJwk(keys.ca), token: toJwk(keys.token) })
 int.get('/bundle', route(() => ({ bundle: enforcement.buildBundle() })));
 int.get('/events', (req, res) => hub.attach(String(req.query.node ?? 'unknown'), res));
 int.post('/acks', route((req) => (enforcement.recordAck(String(req.body?.event_id), String(req.body?.node_id)), { ok: true })));
+int.post('/agent-erasure-acks', route((req) => {
+  if (typeof req.body?.request_id !== 'string' || typeof req.body?.node_id !== 'string') throw invalid('request_id and node_id are required strings');
+  hub.acknowledgeAgentErasure(req.body.request_id, req.body.node_id);
+  return { ok: true };
+}));
 int.post('/ledger', route((req) => (Array.isArray(req.body?.records) ? { records: ledger.appendMany(req.body.records).map((r) => ({ record_id: r.record_id, seq: r.seq })) } : { record: ledger.append(req.body) })));
 int.get('/secrets/:id', route((req) => secrets.revealForGateway(req.params.id!)));
 int.post('/heartbeat', route((req) => {

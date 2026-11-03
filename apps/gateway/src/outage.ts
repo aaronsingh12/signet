@@ -8,6 +8,7 @@ import * as state from './state';
 const BUCKET_MS = 5 * 60_000;
 let bucketStart = Date.now();
 const perAgent = new Map<string, { ok: number; err: number }>();
+export const eraseAgentOutage = (agentId: string): void => { perAgent.delete(agentId); };
 let declared = false;
 
 function roll() {

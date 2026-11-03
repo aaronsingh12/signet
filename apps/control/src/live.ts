@@ -9,6 +9,11 @@ import * as ledger from './ledger';
 const clients = new Set<Response>();
 const handles = new Map<string, string>();
 
+export function forgetAgent(agentId: string): void {
+  handles.delete(agentId);
+  for (const client of clients) client.write('event: reset\ndata: {}\n\n');
+}
+
 const handleOf = (agentId: string | null) => {
   if (!agentId) return null;
   if (!handles.has(agentId)) {

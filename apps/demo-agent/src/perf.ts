@@ -57,7 +57,7 @@ async function main() {
   });
   try {
     await ensureTools();
-    const reg = await api('owner', 'POST', '/agents', { handle: `perf-agent-${Date.now().toString(36)}`, name: 'Perf agent', purpose: 'Latency test', sponsor: 'ravi.kapoor@northwind.example', tier: 'T4', autonomy_level: 'L2' });
+    const reg = await api('owner', 'POST', '/agents', { handle: `perf-agent-${Date.now().toString(36)}`, name: 'Perf agent', purpose: 'Latency test', sponsor: process.env.SIGNET_DEMO_SPONSOR_ID || '', tier: 'T4', autonomy_level: 'L2' });
     const seal = await api('security', 'POST', `/agents/${reg.json.id}/certificates`, {
       models: [{ model: MODEL, region: 'unverified' }],
       tools: [{ server: 'mcp://orders', data_scopes: ['personal'], actions: [{ name: 'lookup_order', impact: 'read', constraints: { order_id: { pattern: '^A-[0-9]{4}$' } } }] }],

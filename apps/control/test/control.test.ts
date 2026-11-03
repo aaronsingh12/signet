@@ -21,6 +21,10 @@ test('policy compiler flattens tools, attaches HITL rules and is deterministic',
   assert.deepEqual(a.hitl, [{ arg: 'amount', gt: 2000, approver_group: 'ops-supervisors' }]);
   assert.deepEqual(a.data_scopes, ['personal']);
   assert.equal(policyHash(p), policyHash(compilePolicy(structuredClone(seal), { max_input_tokens: 32000, max_cost_per_request_usd: 5 })));
+  assert.equal(Object.hasOwn(p, 'detector_unavailability'), false);
+  const explicit = compilePolicy({ ...seal, detector_unavailability: 'audit' }, { max_input_tokens: 32000, max_cost_per_request_usd: 5 });
+  assert.equal(explicit.detector_unavailability, 'audit');
+  assert.notEqual(policyHash(p), policyHash(explicit));
 });
 
 test('IdP groups map to roles and roles to permissions (BP 14.2)', () => {

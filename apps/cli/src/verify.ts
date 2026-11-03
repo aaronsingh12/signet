@@ -84,12 +84,13 @@ async function main() {
     bad(`manifest says ${manifest.record_count} records, package holds ${records.length}`);
     failed = true;
   }
-  const chain = verifyChain(records, manifest.start_prev_hash ?? undefined);
+  const chain = verifyChain(records, manifest.start_prev_hash ?? undefined, keys);
   if (chain.ok) ok(`${chain.count.toLocaleString()} records · hash chain intact`);
   else {
     bad(`hash chain broken at seq ${chain.error!.seq} (${chain.error!.record_id}): ${chain.error!.reason}`);
     failed = true;
   }
+  if (chain.erased_count) console.log(`  · ${chain.erased_count} signed erasure markers: removed content is unavailable; original hash commitments remain`);
 
   const bySeq = new Map(records.map((r) => [r.seq, r]));
   let rootsOk = 0;

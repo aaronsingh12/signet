@@ -4,6 +4,11 @@ import {
   canonicalize, devSecret, env, fromJwk, request, scopeKey, sha256, verifyJws,
   type CertificateBody, type CompiledPolicy, type DetectorConfig, type PolicyBundle, type PublicJwk, type ScopeState, type ToolAlias,
 } from '@signet/core';
+import { eraseAgentVault } from './vault';
+import { eraseAgentLimits } from './limits';
+import { eraseSessions } from './taint';
+import { eraseAgentOutage } from './outage';
+import { eraseAgentLedgerQueue } from './ledgerclient';
 
 // Gateway-side cache of the signed policy bundle (BP 3, 5.2). Gateways are stateless apart from this
 // cache: they enforce from memory and keep enforcing on the last bundle if the control plane is down.
@@ -33,6 +38,9 @@ interface Inflight {
   ctrl: AbortController;
 }
 const inflight = new Set<Inflight>();
+const erasedAgents = new Set<string>();
+const erasedScopes = new Set<string>();
+const erasedTokens = new Set<string>();
 
 export function track(agentId: string, version: string, instanceId: string, ctrl: AbortController) {
   const entry = { agentId, version, instanceId, ctrl };
@@ -59,9 +67,11 @@ export function effective(agentId: string, version: string, instanceId: string):
 }
 
 export const isRevoked = (jti: string) => revoked.has(jti);
+export const agentErased = (agentId: string): boolean => erasedAgents.has(sha256(agentId));
 export const bundleExpired = () => !bundle || Date.parse(bundle.expires_at) < Date.now();
 
 export function applyScope(key: string, state: ScopeState) {
+  if (erasedScopes.has(sha256(key))) return;
   if (scopes.get(key)?.level === 'killed') return; // never lifted (RB-INV-08)
   if (state.level === 'active') scopes.delete(key);
   else scopes.set(key, state);
@@ -89,10 +99,13 @@ export async function refresh() {
   const { bundle: jws } = await internal<{ bundle: string }>('/internal/bundle');
   const next = verifyJws<PolicyBundle>(jws, caKeys, 'signet-bundle').payload;
   if (bundle && next.version < bundle.version) return;
+  for (const digest of next.erased_agent_hashes ?? []) erasedAgents.add(digest);
   const verifiedCerts = new Map<string, CertificateBody>();
   const verifiedPolicies = new Map<string, CompiledPolicy>();
+  const verifiedCertificates: string[] = [];
   for (const c of next.certificates) {
     const body = verifyJws<CertificateBody>(c, caKeys, 'signet-seal').payload; // each seal checked again
+    if (erasedAgents.has(sha256(body.agent_id))) continue;
     const policy = next.policies[body.cert_id];
     // The compiled policy must be exactly the one the seal was signed over.
     if (!policy || sha256(canonicalize(policy)) !== body.policy_sha256) {
@@ -101,21 +114,46 @@ export async function refresh() {
     }
     verifiedCerts.set(body.cert_id, body);
     verifiedPolicies.set(body.cert_id, policy);
+    verifiedCertificates.push(c);
   }
   certs.clear();
   policies.clear();
   for (const [k, v] of verifiedCerts) certs.set(k, v);
   for (const [k, v] of verifiedPolicies) policies.set(k, v);
-  const killed = [...scopes].filter(([, s]) => s.level === 'killed');
-  scopes = new Map(Object.entries(next.enforcement));
+  const killed = [...scopes].filter(([key, s]) => s.level === 'killed' && !erasedScopes.has(sha256(key)));
+  const enforcement = Object.fromEntries(Object.entries(next.enforcement).filter(([key]) => !erasedScopes.has(sha256(key))));
+  scopes = new Map(Object.entries(enforcement));
   for (const [k, s] of killed) scopes.set(k, s);
-  for (const [k, s] of Object.entries(next.enforcement)) applyScope(k, s);
+  for (const [k, s] of Object.entries(enforcement)) applyScope(k, s);
   tools.clear();
   for (const t of next.tools) tools.set(t.alias, t);
   detectors.clear();
   for (const d of next.detectors) detectors.set(d.id, d);
-  revoked = new Set(next.revoked_jti);
-  bundle = next;
+  const revokedTokens = next.revoked_jti.filter((token) => !erasedTokens.has(sha256(token)));
+  revoked = new Set(revokedTokens);
+  bundle = { ...next, certificates: verifiedCertificates, policies: Object.fromEntries(verifiedPolicies), enforcement, revoked_jti: revokedTokens };
+}
+
+async function eraseAgentMemory(agentId: string, sessionIds: string[], instanceIds: string[], tokenIds: string[]): Promise<void> {
+  applyScope(scopeKey.agent(agentId), { level: 'killed' });
+  const deadline = Date.now() + 5_000;
+  while ([...inflight].some((entry) => entry.agentId === agentId)) {
+    if (Date.now() >= deadline) throw new Error(`Agent ${agentId} still has in-flight calls; cleanup cannot complete`);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  await eraseSessions(sessionIds);
+  await eraseAgentLedgerQueue(agentId);
+  erasedAgents.add(sha256(agentId));
+  const matches = (key: string): boolean => key === scopeKey.agent(agentId) || key.startsWith(`version:${agentId}@`) || instanceIds.some((instance) => key === scopeKey.instance(instance));
+  for (const key of [scopeKey.agent(agentId), ...instanceIds.map((instance) => scopeKey.instance(instance)), ...[...scopes.keys()].filter(matches)]) erasedScopes.add(sha256(key));
+  for (const token of tokenIds) erasedTokens.add(sha256(token));
+  await refresh();
+  eraseAgentVault(agentId);
+  eraseAgentLimits(agentId, sessionIds);
+  eraseAgentOutage(agentId);
+  for (const key of scopes.keys()) if (matches(key)) scopes.delete(key);
+  for (const token of tokenIds) revoked.delete(token);
+  if (bundle) bundle = { ...bundle, enforcement: Object.fromEntries(Object.entries(bundle.enforcement).filter(([key]) => !matches(key))), revoked_jti: bundle.revoked_jti.filter((token) => !tokenIds.includes(token)) };
 }
 
 // Brokered credentials (BP 5.2 step 11), cached briefly in memory, never logged.
@@ -145,7 +183,14 @@ async function subscribe() {
           const data = frame.match(/^data: (.+)$/m)?.[1];
           if (!type || !data) continue;
           const ev = JSON.parse(data) as Record<string, unknown>;
-          if (type === 'enforcement') {
+          if (type === 'agent.erase') {
+            const strings = (value: unknown): string[] => {
+              if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) throw new TypeError('Agent erasure event must contain string arrays');
+              return value;
+            };
+            await eraseAgentMemory(String(ev.agent_id), strings(ev.sessions), strings(ev.instances), strings(ev.tokens));
+            await internal('/internal/agent-erasure-acks', { method: 'POST', body: JSON.stringify({ request_id: ev.request_id, node_id: NODE_ID }) });
+          } else if (type === 'enforcement') {
             applyScope(String(ev.scope_key), ev.state as ScopeState); // apply first, then confirm
             internal('/internal/acks', { method: 'POST', body: JSON.stringify({ event_id: ev.event_id, node_id: NODE_ID }) }).catch(() => {});
             refresh().catch(() => {});

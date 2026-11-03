@@ -3,18 +3,20 @@ import { Card, ErrorNote, PageHeader } from '../components/ui';
 import { ApiError, api, useApi } from '../lib/api';
 import { useCan } from '../lib/auth';
 import { ago } from '../lib/format';
+import { useAgentAnalytics } from '../lib/analytics';
 import { EventsTable } from './Agent360';
 
 const LEVELS = [
-  ['L1', 'Block', 'deny', 'Next request evaluated fresh'],
-  ['L2', 'Step-up', 'step_up', 'Window expires or Security clears'],
-  ['L3', 'Throttle', 'throttled', 'Cool-down or manual'],
-  ['L4', 'Quarantine', 'quarantined', 'Owner + Security release'],
-  ['L5', 'Kill', 'killed', 'Never lifted'],
-  ['L6', 'Circuit breaker', 'breaker', 'Lifted per agent'],
+  ['L1', 'Blocked requests', 'deny', 'Individual requests refused'],
+  ['L2', 'Extra checks', 'step_up', 'Additional safety checks applied'],
+  ['L3', 'Rate limits', 'throttled', 'Request rates reduced'],
+  ['L4', 'Paused agents', 'quarantined', 'A review is needed to resume'],
+  ['L5', 'Stopped agents', 'killed', 'A new approval is required'],
+  ['L6', 'Group controls', 'breaker', 'Safety controls for multiple agents'],
 ] as const;
 
 export function Enforcement() {
+  const { data: analytics } = useAgentAnalytics();
   const can = useCan();
   const { data: ev, reload } = useApi<any>('/enforcement-events?limit=100');
   const { data: br, reload: reloadBr } = useApi<any>('/circuit-breakers');
@@ -25,11 +27,11 @@ export function Enforcement() {
   const lastKill = events.find((e) => e.level === 'killed');
   return (
     <>
-      <PageHeader title="Enforcement Center" subtitle="The response ladder, kill propagation and circuit breakers. Automatic actions always cite the deterministic rule behind them (RB-INV-05)." />
+      <PageHeader title="Safety center" subtitle="See which actions were blocked, which agents need review, and where safety controls were applied." />
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         {LEVELS.map(([l, name, key, lift]) => (
           <div key={l} className="card px-4 py-3">
-            <div className="text-xs text-ink-3">Level {l.slice(1)}</div>
+            <div className="mb-2 text-[10px] text-ink-3">{key === 'breaker' ? 'Currently configured' : 'Last 24 hours'}</div>
             <div className="text-sm font-semibold">{name}</div>
             <div className="mt-1 text-2xl font-semibold">{count(key)}</div>
             <div className="text-[11px] text-ink-3">{lift}</div>
@@ -37,7 +39,7 @@ export function Enforcement() {
         ))}
       </div>
       {lastKill && (
-        <Card className="mt-4" title={<span><span className="mr-2 rounded bg-bad px-1.5 py-0.5 text-[11px] text-white">L5 Kill</span><span className="mono">{lastKill.agent_id}</span> killed {ago(lastKill.published_at)}</span>}>
+        <Card className="mt-4" title={<span><span className="mr-2 rounded bg-bad px-1.5 py-0.5 text-[11px] text-white">Stopped</span><span>{analytics?.agents.find((agent) => agent.id === lastKill.agent_id)?.name ?? lastKill.agent_id}</span> · {ago(lastKill.published_at)}</span>}>
           <div className="text-sm text-ink-2">{lastKill.rule_id ? <span className="mono mr-1">{lastKill.rule_id}</span> : null}{lastKill.reason}</div>
           <div className="mt-3 text-sm font-medium">
             Propagation {lastKill.acks.length}/{lastKill.nodes_expected} · {lastKill.acks.length ? `${(Math.max(...lastKill.acks.map((a: any) => a.latency_ms)) / 1000).toFixed(3)} s` : 'waiting'}
@@ -50,14 +52,14 @@ export function Enforcement() {
               </div>
             ))}
           </div>
-          <div className="mt-2 text-xs text-ink-3">Kill is never lifted. Re-entry only by a new seal from Stage 3. Gateways also poll the bundle every 5 s, so a missed push cannot keep an agent alive.</div>
+          <div className="mt-2 text-xs text-ink-3">This agent cannot run. It needs a new approval process before it can return.</div>
         </Card>
       )}
-      <div className="mt-4 grid gap-4 xl:grid-cols-[1fr_380px]">
-        <Card title="Ladder events" pad={false} action={<button className="text-xs text-royal hover:underline" onClick={() => void reload()}>Refresh</button>}>
+      <div className="mt-4 space-y-5">
+        <Card title="Safety actions" pad={false} action={<button className="text-xs text-royal hover:underline" onClick={() => void reload()}>Refresh</button>}>
           <EventsTable events={events} />
         </Card>
-        <Breaker canArm={can('circuit_breaker.arm')} armed={br?.items ?? []} onArmed={() => (void reloadBr(), void reload())} />
+        <details><summary className="cursor-pointer text-sm text-ink-2">Advanced: manage safety controls for a group of agents</summary><div className="mt-4"><Breaker canArm={can('circuit_breaker.arm')} armed={br?.items ?? []} onArmed={() => (void reloadBr(), void reload())} /></div></details>
       </div>
     </>
   );

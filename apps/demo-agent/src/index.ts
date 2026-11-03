@@ -38,7 +38,7 @@ async function main() {
 
   head('Priya (owner) proposes a T3 customer-service agent');
   const handle = `refund-concierge-${Date.now().toString(36)}`;
-  const reg = await api('owner', 'POST', '/agents', { handle, name: 'Refund Concierge', purpose: 'Answers order questions and issues small refunds', sponsor: 'ravi.kapoor@northwind.example', tier: 'T3', autonomy_level: 'L2', team: [{ user: 'arjun.mehta@northwind.example', role: 'builder' }, { user: 'ananya.rao@northwind.example', role: 'operator' }] });
+  const reg = await api('owner', 'POST', '/agents', { handle, name: 'Refund Concierge', purpose: 'Answers order questions and issues small refunds', sponsor: process.env.SIGNET_DEMO_SPONSOR_ID || '', tier: 'T3', autonomy_level: 'L2', team: [{ user: process.env.SIGNET_DEMO_PLATFORM_ID || '', role: 'builder' }, { user: process.env.SIGNET_DEMO_RISK_ID || '', role: 'operator' }] });
   const agentId = reg.json.id as string;
   say(`${reg.status} ${agentId} (${handle}) owner ${reg.json.owner}`);
 

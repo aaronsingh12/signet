@@ -5,6 +5,7 @@ import { api, useApi } from '../lib/api';
 import { useCan } from '../lib/auth';
 import { dlpSummary, hash, time } from '../lib/format';
 import { Pipeline } from './LiveTraffic';
+import { useAgentAnalytics } from '../lib/analytics';
 
 const KINDS = [
   ['transaction', 'Transaction'],
@@ -14,6 +15,7 @@ const KINDS = [
 ] as const;
 
 export function Ledger() {
+  const { data: analytics } = useAgentAnalytics();
   const can = useCan();
   const [params] = useSearchParams();
   const [kind, setKind] = useState<string>('transaction');
@@ -36,8 +38,8 @@ export function Ledger() {
   return (
     <>
       <PageHeader
-        title="Ledger Explorer"
-        subtitle="Hash-chained, write-once evidence: record_hash = SHA-256(canonical_json(record) ‖ prev_hash). Each finished UTC day is rolled into a signed Merkle root."
+        title="Activity history"
+        subtitle="A permanent record of your agents’ actions. Open an entry to see what happened, or verify and export records for a review."
         actions={
           can('evidence.export') && (
             <a className="btn-primary" href="/api/v1/ledger/export">
@@ -58,7 +60,7 @@ export function Ledger() {
                     <td className="td mono">{r.seq}</td>
                     <td className="td mono whitespace-nowrap">{time(r.ts)}</td>
                     <td className="td mono text-xs">{r.data.action_type ?? r.data.event}{r.data.target ? ` · ${r.data.target}` : ''}</td>
-                    <td className="td mono text-xs">{r.agent_id ?? '—'}</td>
+                    <td className="td text-xs">{analytics?.agents.find((item) => item.id === r.agent_id)?.name ?? r.agent_id ?? 'Workspace action'}</td>
                     <td className="td"><Pill value={r.data.policy_decision ?? r.data.level} /></td>
                     <td className="td text-xs">{dlpSummary(r.data.dlp_actions)}</td>
                     <td className="td"><Mono>{hash(r.record_hash)}</Mono></td>

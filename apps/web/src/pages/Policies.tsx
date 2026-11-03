@@ -37,7 +37,7 @@ export function Policies() {
   };
   return (
     <>
-      <PageHeader title="Policies & detectors" subtitle="Tier 0 rules decide; detectors can only add caution (DA 2). Tenant rules can be tightened, never loosened without approval." />
+      <PageHeader title="Safety rules" subtitle="Review the rules and detection services that check your agents’ requests. Changes here affect your workspace." />
       <div className="grid gap-4 xl:grid-cols-2">
         <Card title="The cloud LLM (Rulebook D-17)">
           {cat?.catalogue?.map((c: any) => (

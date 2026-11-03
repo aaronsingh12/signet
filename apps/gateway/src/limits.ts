@@ -8,6 +8,13 @@ const sessionTools = new Map<string, { n: number; at: number }>();
 
 const today = () => new Date().toISOString().slice(0, 10);
 
+export function eraseAgentLimits(agentId: string, sessions: string[]): void {
+  minute.delete(agentId);
+  daily.delete(agentId);
+  outOfManifest.delete(agentId);
+  for (const session of sessions) sessionTools.delete(session);
+}
+
 // Requests per minute (BP 5.2 step 5), reduced by a throttle (ladder level 3).
 export function takeRequest(agentId: string, rpm: number): boolean {
   const now = Date.now();

@@ -32,6 +32,7 @@ export function compilePolicy(cert: Omit<CertificateBody, 'policy_sha256'>, base
     forbidden_tags: cert.data_classes.forbidden,
     max_input_tokens: baseline.max_input_tokens,
     max_cost_per_request_usd: baseline.max_cost_per_request_usd,
+    ...(cert.detector_unavailability ? { detector_unavailability: cert.detector_unavailability } : {}),
   };
 }
 

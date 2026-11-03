@@ -5,6 +5,7 @@ import { Shell } from './components/Shell';
 import './index.css';
 import { AuthProvider } from './lib/auth';
 import { Agent360 } from './pages/Agent360';
+import { AgentSettings } from './pages/AgentSettings';
 import { CommandCenter } from './pages/CommandCenter';
 import { Discovery } from './pages/Discovery';
 import { Enforcement } from './pages/Enforcement';
@@ -12,6 +13,7 @@ import { Ledger } from './pages/Ledger';
 import { LiveTraffic } from './pages/LiveTraffic';
 import { Login } from './pages/Login';
 import { Policies } from './pages/Policies';
+import { Plugins } from './pages/Plugins';
 import { Propose } from './pages/Propose';
 import { Registry } from './pages/Registry';
 import { Tenant } from './pages/Tenant';
@@ -33,11 +35,13 @@ createRoot(document.getElementById('root')!).render(
           <Route path="agents" element={<Registry />} />
           <Route path="agents/new" element={<Propose />} />
           <Route path="agents/:id" element={<Agent360 />} />
+          <Route path="settings/agents" element={<AgentSettings />} />
           <Route path="discovery" element={<Discovery />} />
           <Route path="live" element={<LiveTraffic />} />
           <Route path="enforcement" element={<Enforcement />} />
           <Route path="ledger" element={<Ledger />} />
           <Route path="policies" element={<Policies />} />
+          <Route path="plugins" element={<Plugins />} />
           <Route path="tools" element={<Tools />} />
           <Route path="tenant" element={<Tenant />} />
         </Route>

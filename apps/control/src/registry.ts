@@ -92,10 +92,12 @@ export interface SealInput {
   environments: string[];
   tags?: string[];
   ai_disclosure?: boolean;
+  detector_unavailability?: 'hold' | 'audit';
 }
 
 // Seal validation: every check cites the rule it enforces.
 function validateSeal(agent: AgentRow, input: SealInput) {
+  if (input.detector_unavailability !== undefined && !['hold', 'audit'].includes(input.detector_unavailability)) throw invalid('detector_unavailability must be hold or audit');
   if (!input.models?.length) throw new PolicyError('RB-BL-01', 'a seal needs at least one model');
   for (const m of input.models) {
     if (!tenant.settings.catalogue.some((c) => globMatch(m.model, c.model))) {
@@ -180,6 +182,7 @@ export function issueSeal(agentRef: string, input: SealInput, p: Principal) {
     environments: input.environments,
     tags: input.tags ?? [],
     ai_disclosure: input.ai_disclosure ?? true,
+    detector_unavailability: input.detector_unavailability ?? 'hold',
     valid_from: issued.toISOString(),
     valid_to: new Date(issued.getTime() + VALIDITY_DAYS[agent.tier] * 86_400_000).toISOString(),
     issued_at: issued.toISOString(),

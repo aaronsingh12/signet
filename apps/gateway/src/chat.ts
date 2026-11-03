@@ -1,5 +1,5 @@
 import type { IncomingHttpHeaders } from 'node:http';
-import { canonicalize, combine, sha256, strictest, type Outcome } from '@signet/core';
+import { canonicalize, combine, combineWithDetectorOutageAudit, sha256, strictest, type Outcome } from '@signet/core';
 import { type Ctx, type Done, Halt, finish, halt, ladder, newCtx, preflight, recordOutOfManifest, step } from './ctx';
 import { detectInjection, notDeployed } from './detectors';
 import { evaluate } from './engine';
@@ -83,7 +83,9 @@ async function run(ctx: Ctx, headers: IncomingHttpHeaders, body: Record<string, 
     action: { key: 'llm', est_input_tokens: estTokens, est_cost_usd: (estTokens * model!.price_per_1k_usd.in) / 1000 },
     context: { dlp_tokenised: inspection.tokenised, max_tokens_capped: capped },
   });
-  const combined = combine(r.decision as Outcome, ctx.detectors, cert.tier);
+  const combined = cert.detector_unavailability === 'audit'
+    ? combineWithDetectorOutageAudit(r.decision as Outcome, ctx.detectors, cert.tier)
+    : combine(r.decision as Outcome, ctx.detectors, cert.tier);
   ctx.decision = combined.outcome;
   ctx.rules.push(...r.rule_ids);
   ctx.reasons.push(...r.details, ...combined.reasons, ...r.obligations.map((o) => `obligation: ${o}`));

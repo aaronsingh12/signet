@@ -1,4 +1,6 @@
 import type { Response } from 'express';
+import { newId } from '@signet/core';
+import { PolicyError } from './errors';
 
 // Push channel to gateway nodes (Server-Sent Events). Stands in for the NATS event bus of BP 3
 // in the dev profile; gateways also poll the bundle every 5 s, so a missed push cannot keep an
@@ -22,3 +24,28 @@ export function publish(type: string, data: Record<string, unknown>) {
 }
 
 export const connectedNodes = () => [...nodes.keys()];
+
+interface ErasureRequest { expected: Set<string>; complete: () => void }
+const erasures = new Map<string, ErasureRequest>();
+
+/** Require every registered gateway to discard the agent before its persisted records are erased. */
+export async function eraseAgentOnGateways(agentId: string, sessions: string[], instances: string[], tokens: string[], expected: string[]): Promise<void> {
+  if (!expected.length) return;
+  const requestId = newId('evt');
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      const missing = [...(erasures.get(requestId)?.expected ?? [])];
+      erasures.delete(requestId);
+      reject(new PolicyError('ERASURE_GATEWAY', `Agent data was not deleted: gateways ${missing.join(', ')} did not confirm cleanup. The agent is stopped; reconnect these gateways and retry deletion.`, 503));
+    }, 10_000);
+    erasures.set(requestId, { expected: new Set(expected), complete: () => { clearTimeout(timer); erasures.delete(requestId); resolve(); } });
+    publish('agent.erase', { request_id: requestId, agent_id: agentId, sessions, instances, tokens });
+  });
+}
+
+export function acknowledgeAgentErasure(requestId: string, nodeId: string): void {
+  const request = erasures.get(requestId);
+  if (!request) return;
+  request.expected.delete(nodeId);
+  if (!request.expected.size) request.complete();
+}

@@ -37,7 +37,7 @@ export function Propose() {
   };
   return (
     <>
-      <PageHeader title="Propose a new agent" subtitle="Stage 1 · Nothing runs unregistered. You become the accountable owner; someone outside the build team approves the seal." />
+      <PageHeader title="Add an AI agent" subtitle="Tell us what this agent does and who is responsible for it. An independent approver will review its permissions before it can run." />
       <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
         <Card title="Purpose, owners, autonomy">
           <div className="grid gap-4 md:grid-cols-2">
@@ -59,11 +59,11 @@ export function Propose() {
             </div>
             <div>
               <label className="label">Sponsor</label>
-              <input className="input" value={f.sponsor} onChange={set('sponsor')} placeholder="ravi.kapoor@northwind.example" />
+              <input className="input" value={f.sponsor} onChange={set('sponsor')} placeholder="Sponsor ID or email" />
             </div>
             <div className="md:col-span-2">
               <label className="label">Build team (comma-separated emails; they can never approve this agent)</label>
-              <input className="input" value={f.team} onChange={set('team')} placeholder="arjun.mehta@northwind.example" />
+              <input className="input" value={f.team} onChange={set('team')} placeholder="Builder IDs or emails" />
             </div>
             <div>
               <label className="label">Risk tier (Classify sets this from the risk score in Phase 2)</label>

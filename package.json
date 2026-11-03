@@ -9,9 +9,8 @@
     "apps/*"
   ],
   "scripts": {
-    "up": "docker compose up -d keycloak",
-    "dev": "concurrently -k -n control,gw-a1,gw-a2,tools,web -c blue,magenta,magenta,yellow,green \"npm run start -w @signet/control\" \"npm run start -w @signet/gateway\" \"npm run start:a2 -w @signet/gateway\" \"npm run start -w @signet/mock-tools\" \"npm run dev -w @signet/web\"",
-    "dev:api": "concurrently -k -n control,gw-a1,gw-a2,tools -c blue,magenta,magenta,yellow \"npm run start -w @signet/control\" \"npm run start -w @signet/gateway\" \"npm run start:a2 -w @signet/gateway\" \"npm run start -w @signet/mock-tools\"",
+    "dev": "concurrently -k -n control,gw-a1,gw-a2,web -c blue,magenta,magenta,green \"npm run start -w @signet/control\" \"npm run start -w @signet/gateway\" \"npm run start:a2 -w @signet/gateway\" \"npm run dev -w @signet/web\"",
+    "dev:api": "concurrently -k -n control,gw-a1,gw-a2 -c blue,magenta,magenta \"npm run start -w @signet/control\" \"npm run start -w @signet/gateway\" \"npm run start:a2 -w @signet/gateway\"",
     "demo": "npm run start -w @signet/demo-agent",
     "perf": "npm run perf -w @signet/demo-agent",
     "verify": "npm run verify -w @signet/cli --",

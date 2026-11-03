@@ -16,7 +16,7 @@ export function Discovery() {
   };
   return (
     <>
-      <PageHeader title="Discovery Inbox" subtitle="Credentials and agents found outside Signet. Move keys behind the Secrets Broker so agents become keyless, or block them." />
+      <PageHeader title="Discovered agents" subtitle="Review AI agents and credentials found outside Signet, then decide how they should be managed." />
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <Stat label="Unmanaged keys open" value={kpi?.unmanaged_keys_open ?? '—'} hint={`${kpi?.unmanaged_keys_total ?? 0} found in total`} tone={kpi?.unmanaged_keys_open ? 'warn' : 'ok'} />
         <Stat label="Sealed agents" value={kpi?.sealed_agents ?? '—'} hint="all authenticate with workload tokens only" />

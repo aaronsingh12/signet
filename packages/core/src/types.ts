@@ -82,6 +82,7 @@ export interface CertificateBody {
   environments: string[];
   tags: string[];
   ai_disclosure: boolean;
+  detector_unavailability?: 'hold' | 'audit';
   policy_sha256: string; // hash of the compiled policy the gateway enforces
   valid_from: string;
   valid_to: string;
@@ -111,6 +112,7 @@ export interface CompiledPolicy {
   forbidden_tags: DataTag[];
   max_input_tokens: number;
   max_cost_per_request_usd: number;
+  detector_unavailability?: 'hold' | 'audit';
 }
 
 // Workload token claims (BP 4.2).
@@ -163,6 +165,7 @@ export interface PolicyBundle {
   policies: Record<string, CompiledPolicy>; // by cert_id
   enforcement: Record<string, ScopeState>; // by scope key
   revoked_jti: string[];
+  erased_agent_hashes?: string[];
   catalogue: CatalogueModel[];
   tools: ToolAlias[];
   detectors: DetectorConfig[];

@@ -10,7 +10,7 @@ import type { Principal } from './rbac';
 const BOOTSTRAP_TTL_MS = 15 * 60_000; // BP 4.2: valid 15 minutes, single use
 const tokenTtlSeconds = (tier: string) => (tier === 'T1' || tier === 'T2' ? 600 : 1800);
 
-function mintToken(cert: CertificateBody, instanceId: string) {
+export function mintToken(cert: CertificateBody, instanceId: string) {
   const now = Math.floor(Date.now() / 1000);
   const claims: WorkloadClaims = {
     sub: spiffeId(cert.tenant, cert.agent_id, cert.version),
@@ -29,7 +29,7 @@ function mintToken(cert: CertificateBody, instanceId: string) {
   return { token: signJws(claims, keys.token, 'JWT'), token_type: 'Bearer', expires_in: claims.exp - now, claims };
 }
 
-function usableCertificate(agentId: string, instanceId?: string) {
+export function usableCertificate(agentId: string, instanceId?: string) {
   const blocked = agentBlocked(agentId, instanceId);
   if (blocked) throw new PolicyError(blocked === 'killed' ? 'RB-INV-08' : 'BP-5.4', `agent is ${blocked}; new tokens are refused`, 403);
   const active = activeCertificate(agentId);

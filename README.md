@@ -9,8 +9,8 @@ plan. "Status" below lists exactly what is built, measured, and not built yet.
 
 ## Run it
 
-Requirements: Node 22.13+ (uses the built-in `node:sqlite`), Docker (for the identity provider), and
-Ollama signed in with access to `gpt-oss:120b-cloud`.
+Requirements: Node 22.13+ (uses the built-in `node:sqlite`) and Ollama signed in with access to
+`gpt-oss:120b-cloud`. Docker is not required for local development.
 
 The DET-INJ detector model (about 700 MB, Apache-2.0) is not in git. Download it once; without it the
 gateway runs and reports the detector as unavailable:
@@ -24,8 +24,7 @@ curl -sSL -o onnx/model.onnx $B/onnx/model.onnx && cd ../..
 
 ```bash
 npm install
-npm run up          # Keycloak identity provider (dev realm) on :8180
-npm run dev         # control plane :4100, gateways gw-a1 :8100 and gw-a2 :8101, mock tools :7100, console :5174
+npm run dev         # control plane :4100, gateways gw-a1 :8100 and gw-a2 :8101, console :5174
 npm run demo        # Phase 1 gate demo against the real model, tools and both gateway nodes
 npm run verify      # export a .sep evidence package and verify it offline
 npm run perf        # gateway latency test (separate node, fast test model)
@@ -34,17 +33,9 @@ npm run typecheck
 npm run build       # bundled services in dist/ and the console in dist/web
 ```
 
-Open http://localhost:5174 and sign in through Keycloak. Dev accounts (password `Signet!2026`):
-
-| Account | Role |
-| --- | --- |
-| jonas.weber | Security Officer (approves seals, kills, circuit breakers, detector promotion) |
-| ananya.rao | Risk & Compliance Officer |
-| priya.menon | Agent Owner |
-| ravi.kapoor | AI Governance Board |
-| arjun.mehta | Platform Admin + Builder (tools, Secrets Broker) |
-| elena.rossi | Tenant Admin |
-| lena.vogt | Auditor (read-only) |
+Open http://localhost:5174 and sign in using `SIGNET_ADMIN_ID` and `SIGNET_ADMIN_PASSWORD`
+from your local `.env`. No sample human accounts are provisioned. Set `SIGNET_AUTH_MODE=oidc`
+and configure an external identity provider when multiple individual users are required.
 
 Machine clients use OAuth client credentials (`signet-automation`), as CI/CD would. Dev secrets and signing
 keys are generated on first start under `data/` (git-ignored); delete `data/` to start again. Optional:
@@ -62,7 +53,7 @@ keys are generated on first start under `data/` (git-ignored); delete `data/` to
 | `apps/demo-agent` | Phase 1 gate demo and the latency test |
 | `apps/mock-tools` | Demo MCP server, HTTP tool and fast test model |
 | `policy/` | `signet.rego` (gateway decision policy), shared conformance cases, OPA tests |
-| `infra/keycloak` | Dev realm: users, groups, OIDC clients |
+| `infra/keycloak` | OIDC realm template: groups and clients; provision identities and credentials in the provider |
 | `docs/` | Evidence Package format |
 
 ## Status
@@ -72,9 +63,9 @@ keys are generated on first start under `data/` (git-ignored); delete `data/` to
 | --- | --- |
 | Monorepo, typed build, bundled services | Done (`npm run build`) |
 | CI with security scanning | Workflow written (`.github/workflows/ci.yml`: typecheck, tests, `npm audit`, gitleaks, OPA tests and WASM build, CycloneDX SBOM, cosign-signed images). Not yet run: the repo has no remote |
-| IaC for dev/test | Docker Compose (Keycloak; `--profile full` for containerised services) and a multi-target Dockerfile |
+| IaC for dev/test | Native Node development profile with a built-in local account directory; optional Docker Compose and multi-target Dockerfile for containerised deployments |
 | Tenancy skeleton | Every tenant table carries `tenant_id`; one tenant per install until the SaaS cells (Phase 4) |
-| OIDC login | Done: authorization code + PKCE + state + nonce against Keycloak; HttpOnly session (30 min idle, 12 h absolute); IdP logout; bearer tokens for machine clients |
+| OIDC login | Done: authorization code + PKCE + state + nonce against an external IdP; HttpOnly session (30 min idle, 12 h absolute); IdP logout; bearer tokens for machine clients. Local development uses the built-in account directory instead. |
 | RBAC framework | Done: 11 roles, 22 permissions, IdP group → role mapping, owner-scoped actions |
 | API conventions | Done: RFC 9457 problem details citing the rule, Idempotency-Key, cursor pagination, OpenAPI 3.1 at `/api/v1/openapi.json` |
 | Design system | Done: console tokens and components from the Console UI & UX design |

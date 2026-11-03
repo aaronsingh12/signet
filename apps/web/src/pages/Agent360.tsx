@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { AgentInsights } from '../components/AgentInsights';
 import { Link, useParams } from 'react-router-dom';
 import { Card, Empty, ErrorNote, KV, LEVEL_LABEL, Modal, Mono, PageHeader, Pill, Tabs, TierChip } from '../components/ui';
 import { ApiError, api, useApi } from '../lib/api';
@@ -27,48 +28,49 @@ export function Agent360() {
   return (
     <>
       <div className="mb-1 text-xs text-ink-3">
-        <Link to="/agents" className="hover:underline">Agent Registry</Link> / <span className="mono">{agent.handle}</span>
+        <Link to="/agents" className="hover:underline">AI agents</Link> / <span>{agent.name}</span>
       </div>
       <PageHeader
         title={agent.name}
         subtitle={
           <span className="flex flex-wrap items-center gap-2">
-            {cert ? <Pill value="sealed" label={`Sealed · valid to ${date(cert.valid_to)}`} /> : <Pill value={agent.status} />}
-            <Pill value={enforcement.level} label={enforcement.level === 'active' ? 'ladder: active' : LEVEL_LABEL[enforcement.level] ?? enforcement.level} />
+            {cert ? <Pill value="sealed" label={`Approved until ${date(cert.valid_to)}`} /> : <Pill value={agent.status} />}
+            <Pill value={enforcement.level} label={enforcement.level === 'active' ? 'Safety checks active' : LEVEL_LABEL[enforcement.level] ?? enforcement.level} />
             <TierChip tier={agent.tier} />
-            <span className="text-xs">{agent.autonomy_level}</span>
-            <Mono>{agent.id}</Mono>
-            {cert && <span className="text-xs">version {cert.version} · gpt-oss (cloud LLM) · keyless</span>}
+            <span className="text-xs text-ink-3">{agent.purpose}</span>
           </span>
         }
         actions={
           !killed && (
-            <>
+            <details className="relative" data-testid="agent-management">
+              <summary className="btn-ghost cursor-pointer">Manage agent</summary>
+              <div className="absolute right-0 z-30 mt-2 flex w-64 flex-col gap-2 rounded-xl border border-line bg-white p-3 shadow-lg">
               {can('identity.bootstrap') && cert && <button className="btn-ghost" onClick={() => void issueBootstrap()}>Bootstrap credential</button>}
-              {ladderAllowed('step_up') && <button className="btn-ghost" onClick={() => setLadder('step_up')}>Step-up</button>}
-              {ladderAllowed('throttle') && <button className="btn-ghost" onClick={() => setLadder('throttle')}>Throttle</button>}
+              {ladderAllowed('step_up') && <button className="btn-ghost" onClick={() => setLadder('step_up')}>Add extra checks</button>}
+              {ladderAllowed('throttle') && <button className="btn-ghost" onClick={() => setLadder('throttle')}>Limit request rate</button>}
               {ladderAllowed('release') && enforcement.level !== 'active' && <button className="btn-ghost" onClick={() => setLadder('release')}>Release</button>}
-              {ladderAllowed('quarantine') && <button className="btn-ghost text-bad" onClick={() => setLadder('quarantine')}>Quarantine</button>}
-              {ladderAllowed('kill') && <button className="btn-danger" onClick={() => setLadder('kill')}>Kill</button>}
-            </>
+              {ladderAllowed('quarantine') && <button className="btn-ghost text-bad" onClick={() => setLadder('quarantine')}>Pause agent</button>}
+              {ladderAllowed('kill') && <button className="btn-danger" onClick={() => setLadder('kill')}>Permanently stop agent</button>}
+              </div>
+            </details>
           )
         }
       />
-      {killed && <div className="mb-4 rounded-md border border-bad/30 bg-bad-50 px-4 py-2.5 text-sm text-bad">This agent has been killed. A kill is never lifted; re-entry needs a new seal through Assess (RB-INV-08).</div>}
+      {killed && <div className="mb-4 rounded-md border border-bad/30 bg-bad-50 px-4 py-2.5 text-sm text-bad">This agent is permanently stopped. It must go through a new approval process before it can return.</div>}
       <Tabs
         active={tab}
         onChange={setTab}
         tabs={[
           { id: 'overview', label: 'Overview' },
-          { id: 'seal', label: 'Seal' },
-          { id: 'manifest', label: 'Manifest' },
-          { id: 'instances', label: `Instances ${data.instances.length}` },
-          { id: 'ledger', label: 'Ledger' },
+          { id: 'seal', label: 'Approval certificate' },
+          { id: 'manifest', label: 'Permissions & limits' },
+          { id: 'instances', label: `Deployments (${data.instances.length})` },
+          { id: 'ledger', label: 'Activity history' },
           ...(can('certificates.approve') && !killed ? [{ id: 'approve', label: cert ? 'Re-issue seal' : 'Approve & seal' }] : []),
         ]}
       />
       {tab === 'overview' && (
-        <div className="grid gap-4 xl:grid-cols-3">
+        <><AgentInsights agentId={agent.id} /><details className="mt-7"><summary className="cursor-pointer text-xs font-medium text-ink-3">Advanced details & safety history</summary><div className="mt-4 grid gap-4 xl:grid-cols-3">
           <Card title="Accountability" className="xl:col-span-1">
             <KV
               rows={[
@@ -112,7 +114,7 @@ export function Agent360() {
           <Card title="Recent ladder events" className="xl:col-span-3" pad={false}>
             <EventsTable events={data.events} />
           </Card>
-        </div>
+        </div></details></>
       )}
       {tab === 'seal' && <SealTab agentId={agent.id} cert={cert} history={data.certificates} />}
       {tab === 'manifest' && cert && <ManifestTab cert={cert} />}

@@ -8,7 +8,7 @@ export function Tenant() {
   const { data: gws } = useApi<any>('/gateways');
   return (
     <>
-      <PageHeader title="Tenant & access" subtitle="Sign-in is single sign-on only. IdP groups map to Signet roles; roles are bundles of permissions (BP 14.2)." />
+      <PageHeader title="Workspace & access" subtitle="See your workspace, team permissions and connected safety gateways." />
       <div className="grid gap-4 xl:grid-cols-2">
         <Card title="You">
           <KV
