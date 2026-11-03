@@ -1,0 +1,12 @@
+{
+  "name": "@signet/sidecar",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@signet/core": "*"
+  }
+}

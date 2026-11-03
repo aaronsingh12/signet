@@ -1,0 +1,2108 @@
+{
+ "conformance": {
+  "cases": [
+   {
+    "name": "read action in manifest",
+    "input": {
+     "kind": "tool",
+     "policy": {
+      "cert_id": "crt_x",
+      "agent_id": "agt_x",
+      "version": "v1.0",
+      "tier": "T3",
+      "autonomy_level": "L2",
+      "models": [
+       "gpt-oss:120b-cloud"
+      ],
+      "prompt_tags": [],
+      "forbidden_tags": [],
+      "max_input_tokens": 32000,
+      "max_cost_per_request_usd": 5,
+      "actions": {
+       "mcp://orders.lookup_order": {
+        "key": "mcp://orders.lookup_order",
+        "impact": "read",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {
+         "order_id": {
+          "pattern": "^A-[0-9]{4}$"
+         }
+        },
+        "data_scopes": [],
+        "hitl": []
+       },
+       "mcp://orders.issue_refund": {
+        "key": "mcp://orders.issue_refund",
+        "impact": "privileged",
+        "value_threshold_usd": 100,
+        "value_arg": "amount",
+        "constraints": {
+         "amount": {
+          "max": 5000,
+          "min": 1
+         }
+        },
+        "data_scopes": [
+         "personal"
+        ],
+        "hitl": [
+         {
+          "arg": "amount",
+          "gt": 2000,
+          "approver_group": "ops-supervisors"
+         }
+        ]
+       },
+       "mcp://orders.delete_customer": {
+        "key": "mcp://orders.delete_customer",
+        "impact": "critical",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {},
+        "data_scopes": [],
+        "hitl": []
+       },
+       "mcp://orders.create_ticket": {
+        "key": "mcp://orders.create_ticket",
+        "impact": "write",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {
+         "priority": {
+          "enum": [
+           "low",
+           "normal",
+           "high"
+          ]
+         },
+         "subject": {
+          "max_length": 20
+         }
+        },
+        "data_scopes": [],
+        "hitl": []
+       }
+      }
+     },
+     "action": {
+      "key": "mcp://orders.lookup_order",
+      "args": {
+       "order_id": "A-1182"
+      }
+     },
+     "context": {
+      "tainted": false,
+      "step_up": false,
+      "tool_calls_in_session": 0,
+      "tool_calls_limit": null,
+      "dlp_tokenised": 0,
+      "max_tokens_capped": false
+     }
+    },
+    "expect": {
+     "decision": "allow",
+     "rule_ids": []
+    }
+   },
+   {
+    "name": "action not in seal",
+    "input": {
+     "kind": "tool",
+     "policy": {
+      "cert_id": "crt_x",
+      "agent_id": "agt_x",
+      "version": "v1.0",
+      "tier": "T3",
+      "autonomy_level": "L2",
+      "models": [
+       "gpt-oss:120b-cloud"
+      ],
+      "prompt_tags": [],
+      "forbidden_tags": [],
+      "max_input_tokens": 32000,
+      "max_cost_per_request_usd": 5,
+      "actions": {
+       "mcp://orders.lookup_order": {
+        "key": "mcp://orders.lookup_order",
+        "impact": "read",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {
+         "order_id": {
+          "pattern": "^A-[0-9]{4}$"
+         }
+        },
+        "data_scopes": [],
+        "hitl": []
+       },
+       "mcp://orders.issue_refund": {
+        "key": "mcp://orders.issue_refund",
+        "impact": "privileged",
+        "value_threshold_usd": 100,
+        "value_arg": "amount",
+        "constraints": {
+         "amount": {
+          "max": 5000,
+          "min": 1
+         }
+        },
+        "data_scopes": [
+         "personal"
+        ],
+        "hitl": [
+         {
+          "arg": "amount",
+          "gt": 2000,
+          "approver_group": "ops-supervisors"
+         }
+        ]
+       },
+       "mcp://orders.delete_customer": {
+        "key": "mcp://orders.delete_customer",
+        "impact": "critical",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {},
+        "data_scopes": [],
+        "hitl": []
+       },
+       "mcp://orders.create_ticket": {
+        "key": "mcp://orders.create_ticket",
+        "impact": "write",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {
+         "priority": {
+          "enum": [
+           "low",
+           "normal",
+           "high"
+          ]
+         },
+         "subject": {
+          "max_length": 20
+         }
+        },
+        "data_scopes": [],
+        "hitl": []
+       }
+      }
+     },
+     "action": {
+      "key": "mcp://orders.drop_tables",
+      "args": {}
+     },
+     "context": {
+      "tainted": false,
+      "step_up": false,
+      "tool_calls_in_session": 0,
+      "tool_calls_limit": null,
+      "dlp_tokenised": 0,
+      "max_tokens_capped": false
+     }
+    },
+    "expect": {
+     "decision": "deny",
+     "rule_ids": [
+      "RB-PREC-01"
+     ]
+    }
+   },
+   {
+    "name": "argument pattern violated",
+    "input": {
+     "kind": "tool",
+     "policy": {
+      "cert_id": "crt_x",
+      "agent_id": "agt_x",
+      "version": "v1.0",
+      "tier": "T3",
+      "autonomy_level": "L2",
+      "models": [
+       "gpt-oss:120b-cloud"
+      ],
+      "prompt_tags": [],
+      "forbidden_tags": [],
+      "max_input_tokens": 32000,
+      "max_cost_per_request_usd": 5,
+      "actions": {
+       "mcp://orders.lookup_order": {
+        "key": "mcp://orders.lookup_order",
+        "impact": "read",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {
+         "order_id": {
+          "pattern": "^A-[0-9]{4}$"
+         }
+        },
+        "data_scopes": [],
+        "hitl": []
+       },
+       "mcp://orders.issue_refund": {
+        "key": "mcp://orders.issue_refund",
+        "impact": "privileged",
+        "value_threshold_usd": 100,
+        "value_arg": "amount",
+        "constraints": {
+         "amount": {
+          "max": 5000,
+          "min": 1
+         }
+        },
+        "data_scopes": [
+         "personal"
+        ],
+        "hitl": [
+         {
+          "arg": "amount",
+          "gt": 2000,
+          "approver_group": "ops-supervisors"
+         }
+        ]
+       },
+       "mcp://orders.delete_customer": {
+        "key": "mcp://orders.delete_customer",
+        "impact": "critical",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {},
+        "data_scopes": [],
+        "hitl": []
+       },
+       "mcp://orders.create_ticket": {
+        "key": "mcp://orders.create_ticket",
+        "impact": "write",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {
+         "priority": {
+          "enum": [
+           "low",
+           "normal",
+           "high"
+          ]
+         },
+         "subject": {
+          "max_length": 20
+         }
+        },
+        "data_scopes": [],
+        "hitl": []
+       }
+      }
+     },
+     "action": {
+      "key": "mcp://orders.lookup_order",
+      "args": {
+       "order_id": "1 OR 1=1"
+      }
+     },
+     "context": {
+      "tainted": false,
+      "step_up": false,
+      "tool_calls_in_session": 0,
+      "tool_calls_limit": null,
+      "dlp_tokenised": 0,
+      "max_tokens_capped": false
+     }
+    },
+    "expect": {
+     "decision": "deny",
+     "rule_ids": [
+      "BP-4.3-constraint"
+     ]
+    }
+   },
+   {
+    "name": "refund over seal maximum",
+    "input": {
+     "kind": "tool",
+     "policy": {
+      "cert_id": "crt_x",
+      "agent_id": "agt_x",
+      "version": "v1.0",
+      "tier": "T3",
+      "autonomy_level": "L2",
+      "models": [
+       "gpt-oss:120b-cloud"
+      ],
+      "prompt_tags": [],
+      "forbidden_tags": [],
+      "max_input_tokens": 32000,
+      "max_cost_per_request_usd": 5,
+      "actions": {
+       "mcp://orders.lookup_order": {
+        "key": "mcp://orders.lookup_order",
+        "impact": "read",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {
+         "order_id": {
+          "pattern": "^A-[0-9]{4}$"
+         }
+        },
+        "data_scopes": [],
+        "hitl": []
+       },
+       "mcp://orders.issue_refund": {
+        "key": "mcp://orders.issue_refund",
+        "impact": "privileged",
+        "value_threshold_usd": 100,
+        "value_arg": "amount",
+        "constraints": {
+         "amount": {
+          "max": 5000,
+          "min": 1
+         }
+        },
+        "data_scopes": [
+         "personal"
+        ],
+        "hitl": [
+         {
+          "arg": "amount",
+          "gt": 2000,
+          "approver_group": "ops-supervisors"
+         }
+        ]
+       },
+       "mcp://orders.delete_customer": {
+        "key": "mcp://orders.delete_customer",
+        "impact": "critical",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {},
+        "data_scopes": [],
+        "hitl": []
+       },
+       "mcp://orders.create_ticket": {
+        "key": "mcp://orders.create_ticket",
+        "impact": "write",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {
+         "priority": {
+          "enum": [
+           "low",
+           "normal",
+           "high"
+          ]
+         },
+         "subject": {
+          "max_length": 20
+         }
+        },
+        "data_scopes": [],
+        "hitl": []
+       }
+      }
+     },
+     "action": {
+      "key": "mcp://orders.issue_refund",
+      "args": {
+       "amount": 9000
+      }
+     },
+     "context": {
+      "tainted": false,
+      "step_up": false,
+      "tool_calls_in_session": 0,
+      "tool_calls_limit": null,
+      "dlp_tokenised": 0,
+      "max_tokens_capped": false
+     }
+    },
+    "expect": {
+     "decision": "deny",
+     "rule_ids": [
+      "BP-4.3-constraint"
+     ]
+    }
+   },
+   {
+    "name": "T3 privileged refund under waiver",
+    "input": {
+     "kind": "tool",
+     "policy": {
+      "cert_id": "crt_x",
+      "agent_id": "agt_x",
+      "version": "v1.0",
+      "tier": "T3",
+      "autonomy_level": "L2",
+      "models": [
+       "gpt-oss:120b-cloud"
+      ],
+      "prompt_tags": [],
+      "forbidden_tags": [],
+      "max_input_tokens": 32000,
+      "max_cost_per_request_usd": 5,
+      "actions": {
+       "mcp://orders.lookup_order": {
+        "key": "mcp://orders.lookup_order",
+        "impact": "read",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {
+         "order_id": {
+          "pattern": "^A-[0-9]{4}$"
+         }
+        },
+        "data_scopes": [],
+        "hitl": []
+       },
+       "mcp://orders.issue_refund": {
+        "key": "mcp://orders.issue_refund",
+        "impact": "privileged",
+        "value_threshold_usd": 100,
+        "value_arg": "amount",
+        "constraints": {
+         "amount": {
+          "max": 5000,
+          "min": 1
+         }
+        },
+        "data_scopes": [
+         "personal"
+        ],
+        "hitl": [
+         {
+          "arg": "amount",
+          "gt": 2000,
+          "approver_group": "ops-supervisors"
+         }
+        ]
+       },
+       "mcp://orders.delete_customer": {
+        "key": "mcp://orders.delete_customer",
+        "impact": "critical",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {},
+        "data_scopes": [],
+        "hitl": []
+       },
+       "mcp://orders.create_ticket": {
+        "key": "mcp://orders.create_ticket",
+        "impact": "write",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {
+         "priority": {
+          "enum": [
+           "low",
+           "normal",
+           "high"
+          ]
+         },
+         "subject": {
+          "max_length": 20
+         }
+        },
+        "data_scopes": [],
+        "hitl": []
+       }
+      }
+     },
+     "action": {
+      "key": "mcp://orders.issue_refund",
+      "args": {
+       "amount": 50
+      }
+     },
+     "context": {
+      "tainted": false,
+      "step_up": false,
+      "tool_calls_in_session": 0,
+      "tool_calls_limit": null,
+      "dlp_tokenised": 0,
+      "max_tokens_capped": false
+     }
+    },
+    "expect": {
+     "decision": "allow",
+     "rule_ids": []
+    }
+   },
+   {
+    "name": "seal HITL rule over 2000",
+    "input": {
+     "kind": "tool",
+     "policy": {
+      "cert_id": "crt_x",
+      "agent_id": "agt_x",
+      "version": "v1.0",
+      "tier": "T3",
+      "autonomy_level": "L2",
+      "models": [
+       "gpt-oss:120b-cloud"
+      ],
+      "prompt_tags": [],
+      "forbidden_tags": [],
+      "max_input_tokens": 32000,
+      "max_cost_per_request_usd": 5,
+      "actions": {
+       "mcp://orders.lookup_order": {
+        "key": "mcp://orders.lookup_order",
+        "impact": "read",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {
+         "order_id": {
+          "pattern": "^A-[0-9]{4}$"
+         }
+        },
+        "data_scopes": [],
+        "hitl": []
+       },
+       "mcp://orders.issue_refund": {
+        "key": "mcp://orders.issue_refund",
+        "impact": "privileged",
+        "value_threshold_usd": 100,
+        "value_arg": "amount",
+        "constraints": {
+         "amount": {
+          "max": 5000,
+          "min": 1
+         }
+        },
+        "data_scopes": [
+         "personal"
+        ],
+        "hitl": [
+         {
+          "arg": "amount",
+          "gt": 2000,
+          "approver_group": "ops-supervisors"
+         }
+        ]
+       },
+       "mcp://orders.delete_customer": {
+        "key": "mcp://orders.delete_customer",
+        "impact": "critical",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {},
+        "data_scopes": [],
+        "hitl": []
+       },
+       "mcp://orders.create_ticket": {
+        "key": "mcp://orders.create_ticket",
+        "impact": "write",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {
+         "priority": {
+          "enum": [
+           "low",
+           "normal",
+           "high"
+          ]
+         },
+         "subject": {
+          "max_length": 20
+         }
+        },
+        "data_scopes": [],
+        "hitl": []
+       }
+      }
+     },
+     "action": {
+      "key": "mcp://orders.issue_refund",
+      "args": {
+       "amount": 3200
+      }
+     },
+     "context": {
+      "tainted": false,
+      "step_up": false,
+      "tool_calls_in_session": 0,
+      "tool_calls_limit": null,
+      "dlp_tokenised": 0,
+      "max_tokens_capped": false
+     }
+    },
+    "expect": {
+     "decision": "require_approval",
+     "rule_ids": [
+      "cert.hitl"
+     ]
+    }
+   },
+   {
+    "name": "T2 privileged above waiver",
+    "input": {
+     "kind": "tool",
+     "policy": {
+      "cert_id": "crt_x",
+      "agent_id": "agt_x",
+      "version": "v1.0",
+      "tier": "T2",
+      "autonomy_level": "L2",
+      "models": [
+       "gpt-oss:120b-cloud"
+      ],
+      "prompt_tags": [],
+      "forbidden_tags": [],
+      "max_input_tokens": 32000,
+      "max_cost_per_request_usd": 5,
+      "actions": {
+       "mcp://orders.lookup_order": {
+        "key": "mcp://orders.lookup_order",
+        "impact": "read",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {
+         "order_id": {
+          "pattern": "^A-[0-9]{4}$"
+         }
+        },
+        "data_scopes": [],
+        "hitl": []
+       },
+       "mcp://orders.issue_refund": {
+        "key": "mcp://orders.issue_refund",
+        "impact": "privileged",
+        "value_threshold_usd": 100,
+        "value_arg": "amount",
+        "constraints": {
+         "amount": {
+          "max": 5000,
+          "min": 1
+         }
+        },
+        "data_scopes": [
+         "personal"
+        ],
+        "hitl": [
+         {
+          "arg": "amount",
+          "gt": 2000,
+          "approver_group": "ops-supervisors"
+         }
+        ]
+       },
+       "mcp://orders.delete_customer": {
+        "key": "mcp://orders.delete_customer",
+        "impact": "critical",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {},
+        "data_scopes": [],
+        "hitl": []
+       },
+       "mcp://orders.create_ticket": {
+        "key": "mcp://orders.create_ticket",
+        "impact": "write",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {
+         "priority": {
+          "enum": [
+           "low",
+           "normal",
+           "high"
+          ]
+         },
+         "subject": {
+          "max_length": 20
+         }
+        },
+        "data_scopes": [],
+        "hitl": []
+       }
+      }
+     },
+     "action": {
+      "key": "mcp://orders.issue_refund",
+      "args": {
+       "amount": 500
+      }
+     },
+     "context": {
+      "tainted": false,
+      "step_up": false,
+      "tool_calls_in_session": 0,
+      "tool_calls_limit": null,
+      "dlp_tokenised": 0,
+      "max_tokens_capped": false
+     }
+    },
+    "expect": {
+     "decision": "require_approval",
+     "rule_ids": [
+      "RB-PRIV-04"
+     ]
+    }
+   },
+   {
+    "name": "T2 privileged under waiver",
+    "input": {
+     "kind": "tool",
+     "policy": {
+      "cert_id": "crt_x",
+      "agent_id": "agt_x",
+      "version": "v1.0",
+      "tier": "T2",
+      "autonomy_level": "L2",
+      "models": [
+       "gpt-oss:120b-cloud"
+      ],
+      "prompt_tags": [],
+      "forbidden_tags": [],
+      "max_input_tokens": 32000,
+      "max_cost_per_request_usd": 5,
+      "actions": {
+       "mcp://orders.lookup_order": {
+        "key": "mcp://orders.lookup_order",
+        "impact": "read",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {
+         "order_id": {
+          "pattern": "^A-[0-9]{4}$"
+         }
+        },
+        "data_scopes": [],
+        "hitl": []
+       },
+       "mcp://orders.issue_refund": {
+        "key": "mcp://orders.issue_refund",
+        "impact": "privileged",
+        "value_threshold_usd": 100,
+        "value_arg": "amount",
+        "constraints": {
+         "amount": {
+          "max": 5000,
+          "min": 1
+         }
+        },
+        "data_scopes": [
+         "personal"
+        ],
+        "hitl": [
+         {
+          "arg": "amount",
+          "gt": 2000,
+          "approver_group": "ops-supervisors"
+         }
+        ]
+       },
+       "mcp://orders.delete_customer": {
+        "key": "mcp://orders.delete_customer",
+        "impact": "critical",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {},
+        "data_scopes": [],
+        "hitl": []
+       },
+       "mcp://orders.create_ticket": {
+        "key": "mcp://orders.create_ticket",
+        "impact": "write",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {
+         "priority": {
+          "enum": [
+           "low",
+           "normal",
+           "high"
+          ]
+         },
+         "subject": {
+          "max_length": 20
+         }
+        },
+        "data_scopes": [],
+        "hitl": []
+       }
+      }
+     },
+     "action": {
+      "key": "mcp://orders.issue_refund",
+      "args": {
+       "amount": 50
+      }
+     },
+     "context": {
+      "tainted": false,
+      "step_up": false,
+      "tool_calls_in_session": 0,
+      "tool_calls_limit": null,
+      "dlp_tokenised": 0,
+      "max_tokens_capped": false
+     }
+    },
+    "expect": {
+     "decision": "allow",
+     "rule_ids": []
+    }
+   },
+   {
+    "name": "critical on T3 always needs approval",
+    "input": {
+     "kind": "tool",
+     "policy": {
+      "cert_id": "crt_x",
+      "agent_id": "agt_x",
+      "version": "v1.0",
+      "tier": "T3",
+      "autonomy_level": "L2",
+      "models": [
+       "gpt-oss:120b-cloud"
+      ],
+      "prompt_tags": [],
+      "forbidden_tags": [],
+      "max_input_tokens": 32000,
+      "max_cost_per_request_usd": 5,
+      "actions": {
+       "mcp://orders.lookup_order": {
+        "key": "mcp://orders.lookup_order",
+        "impact": "read",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {
+         "order_id": {
+          "pattern": "^A-[0-9]{4}$"
+         }
+        },
+        "data_scopes": [],
+        "hitl": []
+       },
+       "mcp://orders.issue_refund": {
+        "key": "mcp://orders.issue_refund",
+        "impact": "privileged",
+        "value_threshold_usd": 100,
+        "value_arg": "amount",
+        "constraints": {
+         "amount": {
+          "max": 5000,
+          "min": 1
+         }
+        },
+        "data_scopes": [
+         "personal"
+        ],
+        "hitl": [
+         {
+          "arg": "amount",
+          "gt": 2000,
+          "approver_group": "ops-supervisors"
+         }
+        ]
+       },
+       "mcp://orders.delete_customer": {
+        "key": "mcp://orders.delete_customer",
+        "impact": "critical",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {},
+        "data_scopes": [],
+        "hitl": []
+       },
+       "mcp://orders.create_ticket": {
+        "key": "mcp://orders.create_ticket",
+        "impact": "write",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {
+         "priority": {
+          "enum": [
+           "low",
+           "normal",
+           "high"
+          ]
+         },
+         "subject": {
+          "max_length": 20
+         }
+        },
+        "data_scopes": [],
+        "hitl": []
+       }
+      }
+     },
+     "action": {
+      "key": "mcp://orders.delete_customer",
+      "args": {
+       "id": "c1"
+      }
+     },
+     "context": {
+      "tainted": false,
+      "step_up": false,
+      "tool_calls_in_session": 0,
+      "tool_calls_limit": null,
+      "dlp_tokenised": 0,
+      "max_tokens_capped": false
+     }
+    },
+    "expect": {
+     "decision": "require_approval",
+     "rule_ids": [
+      "RB-PRIV-03"
+     ]
+    }
+   },
+   {
+    "name": "tainted session privileged",
+    "input": {
+     "kind": "tool",
+     "policy": {
+      "cert_id": "crt_x",
+      "agent_id": "agt_x",
+      "version": "v1.0",
+      "tier": "T3",
+      "autonomy_level": "L2",
+      "models": [
+       "gpt-oss:120b-cloud"
+      ],
+      "prompt_tags": [],
+      "forbidden_tags": [],
+      "max_input_tokens": 32000,
+      "max_cost_per_request_usd": 5,
+      "actions": {
+       "mcp://orders.lookup_order": {
+        "key": "mcp://orders.lookup_order",
+        "impact": "read",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {
+         "order_id": {
+          "pattern": "^A-[0-9]{4}$"
+         }
+        },
+        "data_scopes": [],
+        "hitl": []
+       },
+       "mcp://orders.issue_refund": {
+        "key": "mcp://orders.issue_refund",
+        "impact": "privileged",
+        "value_threshold_usd": 100,
+        "value_arg": "amount",
+        "constraints": {
+         "amount": {
+          "max": 5000,
+          "min": 1
+         }
+        },
+        "data_scopes": [
+         "personal"
+        ],
+        "hitl": [
+         {
+          "arg": "amount",
+          "gt": 2000,
+          "approver_group": "ops-supervisors"
+         }
+        ]
+       },
+       "mcp://orders.delete_customer": {
+        "key": "mcp://orders.delete_customer",
+        "impact": "critical",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {},
+        "data_scopes": [],
+        "hitl": []
+       },
+       "mcp://orders.create_ticket": {
+        "key": "mcp://orders.create_ticket",
+        "impact": "write",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {
+         "priority": {
+          "enum": [
+           "low",
+           "normal",
+           "high"
+          ]
+         },
+         "subject": {
+          "max_length": 20
+         }
+        },
+        "data_scopes": [],
+        "hitl": []
+       }
+      }
+     },
+     "action": {
+      "key": "mcp://orders.issue_refund",
+      "args": {
+       "amount": 50
+      }
+     },
+     "context": {
+      "tainted": true,
+      "step_up": false,
+      "tool_calls_in_session": 0,
+      "tool_calls_limit": null,
+      "dlp_tokenised": 0,
+      "max_tokens_capped": false
+     }
+    },
+    "expect": {
+     "decision": "require_approval",
+     "rule_ids": [
+      "RB-BL-12"
+     ]
+    }
+   },
+   {
+    "name": "L1 autonomy write",
+    "input": {
+     "kind": "tool",
+     "policy": {
+      "cert_id": "crt_x",
+      "agent_id": "agt_x",
+      "version": "v1.0",
+      "tier": "T3",
+      "autonomy_level": "L1",
+      "models": [
+       "gpt-oss:120b-cloud"
+      ],
+      "prompt_tags": [],
+      "forbidden_tags": [],
+      "max_input_tokens": 32000,
+      "max_cost_per_request_usd": 5,
+      "actions": {
+       "mcp://orders.lookup_order": {
+        "key": "mcp://orders.lookup_order",
+        "impact": "read",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {
+         "order_id": {
+          "pattern": "^A-[0-9]{4}$"
+         }
+        },
+        "data_scopes": [],
+        "hitl": []
+       },
+       "mcp://orders.issue_refund": {
+        "key": "mcp://orders.issue_refund",
+        "impact": "privileged",
+        "value_threshold_usd": 100,
+        "value_arg": "amount",
+        "constraints": {
+         "amount": {
+          "max": 5000,
+          "min": 1
+         }
+        },
+        "data_scopes": [
+         "personal"
+        ],
+        "hitl": [
+         {
+          "arg": "amount",
+          "gt": 2000,
+          "approver_group": "ops-supervisors"
+         }
+        ]
+       },
+       "mcp://orders.delete_customer": {
+        "key": "mcp://orders.delete_customer",
+        "impact": "critical",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {},
+        "data_scopes": [],
+        "hitl": []
+       },
+       "mcp://orders.create_ticket": {
+        "key": "mcp://orders.create_ticket",
+        "impact": "write",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {
+         "priority": {
+          "enum": [
+           "low",
+           "normal",
+           "high"
+          ]
+         },
+         "subject": {
+          "max_length": 20
+         }
+        },
+        "data_scopes": [],
+        "hitl": []
+       }
+      }
+     },
+     "action": {
+      "key": "mcp://orders.create_ticket",
+      "args": {
+       "priority": "low"
+      }
+     },
+     "context": {
+      "tainted": false,
+      "step_up": false,
+      "tool_calls_in_session": 0,
+      "tool_calls_limit": null,
+      "dlp_tokenised": 0,
+      "max_tokens_capped": false
+     }
+    },
+    "expect": {
+     "decision": "require_approval",
+     "rule_ids": [
+      "RB-PRIV-07"
+     ]
+    }
+   },
+   {
+    "name": "enum violated",
+    "input": {
+     "kind": "tool",
+     "policy": {
+      "cert_id": "crt_x",
+      "agent_id": "agt_x",
+      "version": "v1.0",
+      "tier": "T3",
+      "autonomy_level": "L2",
+      "models": [
+       "gpt-oss:120b-cloud"
+      ],
+      "prompt_tags": [],
+      "forbidden_tags": [],
+      "max_input_tokens": 32000,
+      "max_cost_per_request_usd": 5,
+      "actions": {
+       "mcp://orders.lookup_order": {
+        "key": "mcp://orders.lookup_order",
+        "impact": "read",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {
+         "order_id": {
+          "pattern": "^A-[0-9]{4}$"
+         }
+        },
+        "data_scopes": [],
+        "hitl": []
+       },
+       "mcp://orders.issue_refund": {
+        "key": "mcp://orders.issue_refund",
+        "impact": "privileged",
+        "value_threshold_usd": 100,
+        "value_arg": "amount",
+        "constraints": {
+         "amount": {
+          "max": 5000,
+          "min": 1
+         }
+        },
+        "data_scopes": [
+         "personal"
+        ],
+        "hitl": [
+         {
+          "arg": "amount",
+          "gt": 2000,
+          "approver_group": "ops-supervisors"
+         }
+        ]
+       },
+       "mcp://orders.delete_customer": {
+        "key": "mcp://orders.delete_customer",
+        "impact": "critical",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {},
+        "data_scopes": [],
+        "hitl": []
+       },
+       "mcp://orders.create_ticket": {
+        "key": "mcp://orders.create_ticket",
+        "impact": "write",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {
+         "priority": {
+          "enum": [
+           "low",
+           "normal",
+           "high"
+          ]
+         },
+         "subject": {
+          "max_length": 20
+         }
+        },
+        "data_scopes": [],
+        "hitl": []
+       }
+      }
+     },
+     "action": {
+      "key": "mcp://orders.create_ticket",
+      "args": {
+       "priority": "urgent"
+      }
+     },
+     "context": {
+      "tainted": false,
+      "step_up": false,
+      "tool_calls_in_session": 0,
+      "tool_calls_limit": null,
+      "dlp_tokenised": 0,
+      "max_tokens_capped": false
+     }
+    },
+    "expect": {
+     "decision": "deny",
+     "rule_ids": [
+      "BP-4.3-constraint"
+     ]
+    }
+   },
+   {
+    "name": "max length violated",
+    "input": {
+     "kind": "tool",
+     "policy": {
+      "cert_id": "crt_x",
+      "agent_id": "agt_x",
+      "version": "v1.0",
+      "tier": "T3",
+      "autonomy_level": "L2",
+      "models": [
+       "gpt-oss:120b-cloud"
+      ],
+      "prompt_tags": [],
+      "forbidden_tags": [],
+      "max_input_tokens": 32000,
+      "max_cost_per_request_usd": 5,
+      "actions": {
+       "mcp://orders.lookup_order": {
+        "key": "mcp://orders.lookup_order",
+        "impact": "read",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {
+         "order_id": {
+          "pattern": "^A-[0-9]{4}$"
+         }
+        },
+        "data_scopes": [],
+        "hitl": []
+       },
+       "mcp://orders.issue_refund": {
+        "key": "mcp://orders.issue_refund",
+        "impact": "privileged",
+        "value_threshold_usd": 100,
+        "value_arg": "amount",
+        "constraints": {
+         "amount": {
+          "max": 5000,
+          "min": 1
+         }
+        },
+        "data_scopes": [
+         "personal"
+        ],
+        "hitl": [
+         {
+          "arg": "amount",
+          "gt": 2000,
+          "approver_group": "ops-supervisors"
+         }
+        ]
+       },
+       "mcp://orders.delete_customer": {
+        "key": "mcp://orders.delete_customer",
+        "impact": "critical",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {},
+        "data_scopes": [],
+        "hitl": []
+       },
+       "mcp://orders.create_ticket": {
+        "key": "mcp://orders.create_ticket",
+        "impact": "write",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {
+         "priority": {
+          "enum": [
+           "low",
+           "normal",
+           "high"
+          ]
+         },
+         "subject": {
+          "max_length": 20
+         }
+        },
+        "data_scopes": [],
+        "hitl": []
+       }
+      }
+     },
+     "action": {
+      "key": "mcp://orders.create_ticket",
+      "args": {
+       "subject": "this subject is far too long"
+      }
+     },
+     "context": {
+      "tainted": false,
+      "step_up": false,
+      "tool_calls_in_session": 0,
+      "tool_calls_limit": null,
+      "dlp_tokenised": 0,
+      "max_tokens_capped": false
+     }
+    },
+    "expect": {
+     "decision": "deny",
+     "rule_ids": [
+      "BP-4.3-constraint"
+     ]
+    }
+   },
+   {
+    "name": "step-up on T3 write is not in scope",
+    "input": {
+     "kind": "tool",
+     "policy": {
+      "cert_id": "crt_x",
+      "agent_id": "agt_x",
+      "version": "v1.0",
+      "tier": "T3",
+      "autonomy_level": "L2",
+      "models": [
+       "gpt-oss:120b-cloud"
+      ],
+      "prompt_tags": [],
+      "forbidden_tags": [],
+      "max_input_tokens": 32000,
+      "max_cost_per_request_usd": 5,
+      "actions": {
+       "mcp://orders.lookup_order": {
+        "key": "mcp://orders.lookup_order",
+        "impact": "read",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {
+         "order_id": {
+          "pattern": "^A-[0-9]{4}$"
+         }
+        },
+        "data_scopes": [],
+        "hitl": []
+       },
+       "mcp://orders.issue_refund": {
+        "key": "mcp://orders.issue_refund",
+        "impact": "privileged",
+        "value_threshold_usd": 100,
+        "value_arg": "amount",
+        "constraints": {
+         "amount": {
+          "max": 5000,
+          "min": 1
+         }
+        },
+        "data_scopes": [
+         "personal"
+        ],
+        "hitl": [
+         {
+          "arg": "amount",
+          "gt": 2000,
+          "approver_group": "ops-supervisors"
+         }
+        ]
+       },
+       "mcp://orders.delete_customer": {
+        "key": "mcp://orders.delete_customer",
+        "impact": "critical",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {},
+        "data_scopes": [],
+        "hitl": []
+       },
+       "mcp://orders.create_ticket": {
+        "key": "mcp://orders.create_ticket",
+        "impact": "write",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {
+         "priority": {
+          "enum": [
+           "low",
+           "normal",
+           "high"
+          ]
+         },
+         "subject": {
+          "max_length": 20
+         }
+        },
+        "data_scopes": [],
+        "hitl": []
+       }
+      }
+     },
+     "action": {
+      "key": "mcp://orders.create_ticket",
+      "args": {
+       "priority": "low"
+      }
+     },
+     "context": {
+      "tainted": false,
+      "step_up": true,
+      "tool_calls_in_session": 0,
+      "tool_calls_limit": null,
+      "dlp_tokenised": 0,
+      "max_tokens_capped": false
+     }
+    },
+    "expect": {
+     "decision": "allow",
+     "rule_ids": []
+    }
+   },
+   {
+    "name": "step-up on T3 privileged",
+    "input": {
+     "kind": "tool",
+     "policy": {
+      "cert_id": "crt_x",
+      "agent_id": "agt_x",
+      "version": "v1.0",
+      "tier": "T3",
+      "autonomy_level": "L2",
+      "models": [
+       "gpt-oss:120b-cloud"
+      ],
+      "prompt_tags": [],
+      "forbidden_tags": [],
+      "max_input_tokens": 32000,
+      "max_cost_per_request_usd": 5,
+      "actions": {
+       "mcp://orders.lookup_order": {
+        "key": "mcp://orders.lookup_order",
+        "impact": "read",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {
+         "order_id": {
+          "pattern": "^A-[0-9]{4}$"
+         }
+        },
+        "data_scopes": [],
+        "hitl": []
+       },
+       "mcp://orders.issue_refund": {
+        "key": "mcp://orders.issue_refund",
+        "impact": "privileged",
+        "value_threshold_usd": 100,
+        "value_arg": "amount",
+        "constraints": {
+         "amount": {
+          "max": 5000,
+          "min": 1
+         }
+        },
+        "data_scopes": [
+         "personal"
+        ],
+        "hitl": [
+         {
+          "arg": "amount",
+          "gt": 2000,
+          "approver_group": "ops-supervisors"
+         }
+        ]
+       },
+       "mcp://orders.delete_customer": {
+        "key": "mcp://orders.delete_customer",
+        "impact": "critical",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {},
+        "data_scopes": [],
+        "hitl": []
+       },
+       "mcp://orders.create_ticket": {
+        "key": "mcp://orders.create_ticket",
+        "impact": "write",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {
+         "priority": {
+          "enum": [
+           "low",
+           "normal",
+           "high"
+          ]
+         },
+         "subject": {
+          "max_length": 20
+         }
+        },
+        "data_scopes": [],
+        "hitl": []
+       }
+      }
+     },
+     "action": {
+      "key": "mcp://orders.issue_refund",
+      "args": {
+       "amount": 50
+      }
+     },
+     "context": {
+      "tainted": false,
+      "step_up": true,
+      "tool_calls_in_session": 0,
+      "tool_calls_limit": null,
+      "dlp_tokenised": 0,
+      "max_tokens_capped": false
+     }
+    },
+    "expect": {
+     "decision": "require_approval",
+     "rule_ids": [
+      "BP-5.4-L2"
+     ]
+    }
+   },
+   {
+    "name": "tool calls per session exhausted",
+    "input": {
+     "kind": "tool",
+     "policy": {
+      "cert_id": "crt_x",
+      "agent_id": "agt_x",
+      "version": "v1.0",
+      "tier": "T3",
+      "autonomy_level": "L2",
+      "models": [
+       "gpt-oss:120b-cloud"
+      ],
+      "prompt_tags": [],
+      "forbidden_tags": [],
+      "max_input_tokens": 32000,
+      "max_cost_per_request_usd": 5,
+      "actions": {
+       "mcp://orders.lookup_order": {
+        "key": "mcp://orders.lookup_order",
+        "impact": "read",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {
+         "order_id": {
+          "pattern": "^A-[0-9]{4}$"
+         }
+        },
+        "data_scopes": [],
+        "hitl": []
+       },
+       "mcp://orders.issue_refund": {
+        "key": "mcp://orders.issue_refund",
+        "impact": "privileged",
+        "value_threshold_usd": 100,
+        "value_arg": "amount",
+        "constraints": {
+         "amount": {
+          "max": 5000,
+          "min": 1
+         }
+        },
+        "data_scopes": [
+         "personal"
+        ],
+        "hitl": [
+         {
+          "arg": "amount",
+          "gt": 2000,
+          "approver_group": "ops-supervisors"
+         }
+        ]
+       },
+       "mcp://orders.delete_customer": {
+        "key": "mcp://orders.delete_customer",
+        "impact": "critical",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {},
+        "data_scopes": [],
+        "hitl": []
+       },
+       "mcp://orders.create_ticket": {
+        "key": "mcp://orders.create_ticket",
+        "impact": "write",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {
+         "priority": {
+          "enum": [
+           "low",
+           "normal",
+           "high"
+          ]
+         },
+         "subject": {
+          "max_length": 20
+         }
+        },
+        "data_scopes": [],
+        "hitl": []
+       }
+      }
+     },
+     "action": {
+      "key": "mcp://orders.lookup_order",
+      "args": {
+       "order_id": "A-1182"
+      }
+     },
+     "context": {
+      "tainted": false,
+      "step_up": false,
+      "tool_calls_in_session": 20,
+      "tool_calls_limit": 20,
+      "dlp_tokenised": 0,
+      "max_tokens_capped": false
+     }
+    },
+    "expect": {
+     "decision": "deny",
+     "rule_ids": [
+      "BP-4.3-limits"
+     ]
+    }
+   },
+   {
+    "name": "llm within caps",
+    "input": {
+     "kind": "llm",
+     "policy": {
+      "cert_id": "crt_x",
+      "agent_id": "agt_x",
+      "version": "v1.0",
+      "tier": "T3",
+      "autonomy_level": "L2",
+      "models": [
+       "gpt-oss:120b-cloud"
+      ],
+      "prompt_tags": [],
+      "forbidden_tags": [],
+      "max_input_tokens": 32000,
+      "max_cost_per_request_usd": 5,
+      "actions": {
+       "mcp://orders.lookup_order": {
+        "key": "mcp://orders.lookup_order",
+        "impact": "read",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {
+         "order_id": {
+          "pattern": "^A-[0-9]{4}$"
+         }
+        },
+        "data_scopes": [],
+        "hitl": []
+       },
+       "mcp://orders.issue_refund": {
+        "key": "mcp://orders.issue_refund",
+        "impact": "privileged",
+        "value_threshold_usd": 100,
+        "value_arg": "amount",
+        "constraints": {
+         "amount": {
+          "max": 5000,
+          "min": 1
+         }
+        },
+        "data_scopes": [
+         "personal"
+        ],
+        "hitl": [
+         {
+          "arg": "amount",
+          "gt": 2000,
+          "approver_group": "ops-supervisors"
+         }
+        ]
+       },
+       "mcp://orders.delete_customer": {
+        "key": "mcp://orders.delete_customer",
+        "impact": "critical",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {},
+        "data_scopes": [],
+        "hitl": []
+       },
+       "mcp://orders.create_ticket": {
+        "key": "mcp://orders.create_ticket",
+        "impact": "write",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {
+         "priority": {
+          "enum": [
+           "low",
+           "normal",
+           "high"
+          ]
+         },
+         "subject": {
+          "max_length": 20
+         }
+        },
+        "data_scopes": [],
+        "hitl": []
+       }
+      }
+     },
+     "action": {
+      "key": "llm",
+      "est_input_tokens": 100,
+      "est_cost_usd": 0.01
+     },
+     "context": {
+      "tainted": false,
+      "step_up": false,
+      "tool_calls_in_session": 0,
+      "tool_calls_limit": null,
+      "dlp_tokenised": 0,
+      "max_tokens_capped": false
+     }
+    },
+    "expect": {
+     "decision": "allow",
+     "rule_ids": []
+    }
+   },
+   {
+    "name": "llm with tokenisation",
+    "input": {
+     "kind": "llm",
+     "policy": {
+      "cert_id": "crt_x",
+      "agent_id": "agt_x",
+      "version": "v1.0",
+      "tier": "T3",
+      "autonomy_level": "L2",
+      "models": [
+       "gpt-oss:120b-cloud"
+      ],
+      "prompt_tags": [],
+      "forbidden_tags": [],
+      "max_input_tokens": 32000,
+      "max_cost_per_request_usd": 5,
+      "actions": {
+       "mcp://orders.lookup_order": {
+        "key": "mcp://orders.lookup_order",
+        "impact": "read",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {
+         "order_id": {
+          "pattern": "^A-[0-9]{4}$"
+         }
+        },
+        "data_scopes": [],
+        "hitl": []
+       },
+       "mcp://orders.issue_refund": {
+        "key": "mcp://orders.issue_refund",
+        "impact": "privileged",
+        "value_threshold_usd": 100,
+        "value_arg": "amount",
+        "constraints": {
+         "amount": {
+          "max": 5000,
+          "min": 1
+         }
+        },
+        "data_scopes": [
+         "personal"
+        ],
+        "hitl": [
+         {
+          "arg": "amount",
+          "gt": 2000,
+          "approver_group": "ops-supervisors"
+         }
+        ]
+       },
+       "mcp://orders.delete_customer": {
+        "key": "mcp://orders.delete_customer",
+        "impact": "critical",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {},
+        "data_scopes": [],
+        "hitl": []
+       },
+       "mcp://orders.create_ticket": {
+        "key": "mcp://orders.create_ticket",
+        "impact": "write",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {
+         "priority": {
+          "enum": [
+           "low",
+           "normal",
+           "high"
+          ]
+         },
+         "subject": {
+          "max_length": 20
+         }
+        },
+        "data_scopes": [],
+        "hitl": []
+       }
+      }
+     },
+     "action": {
+      "key": "llm",
+      "est_input_tokens": 100,
+      "est_cost_usd": 0.01
+     },
+     "context": {
+      "tainted": false,
+      "step_up": false,
+      "tool_calls_in_session": 0,
+      "tool_calls_limit": null,
+      "dlp_tokenised": 2,
+      "max_tokens_capped": false
+     }
+    },
+    "expect": {
+     "decision": "allow_with_obligations",
+     "rule_ids": []
+    }
+   },
+   {
+    "name": "llm input too large",
+    "input": {
+     "kind": "llm",
+     "policy": {
+      "cert_id": "crt_x",
+      "agent_id": "agt_x",
+      "version": "v1.0",
+      "tier": "T3",
+      "autonomy_level": "L2",
+      "models": [
+       "gpt-oss:120b-cloud"
+      ],
+      "prompt_tags": [],
+      "forbidden_tags": [],
+      "max_input_tokens": 32000,
+      "max_cost_per_request_usd": 5,
+      "actions": {
+       "mcp://orders.lookup_order": {
+        "key": "mcp://orders.lookup_order",
+        "impact": "read",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {
+         "order_id": {
+          "pattern": "^A-[0-9]{4}$"
+         }
+        },
+        "data_scopes": [],
+        "hitl": []
+       },
+       "mcp://orders.issue_refund": {
+        "key": "mcp://orders.issue_refund",
+        "impact": "privileged",
+        "value_threshold_usd": 100,
+        "value_arg": "amount",
+        "constraints": {
+         "amount": {
+          "max": 5000,
+          "min": 1
+         }
+        },
+        "data_scopes": [
+         "personal"
+        ],
+        "hitl": [
+         {
+          "arg": "amount",
+          "gt": 2000,
+          "approver_group": "ops-supervisors"
+         }
+        ]
+       },
+       "mcp://orders.delete_customer": {
+        "key": "mcp://orders.delete_customer",
+        "impact": "critical",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {},
+        "data_scopes": [],
+        "hitl": []
+       },
+       "mcp://orders.create_ticket": {
+        "key": "mcp://orders.create_ticket",
+        "impact": "write",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {
+         "priority": {
+          "enum": [
+           "low",
+           "normal",
+           "high"
+          ]
+         },
+         "subject": {
+          "max_length": 20
+         }
+        },
+        "data_scopes": [],
+        "hitl": []
+       }
+      }
+     },
+     "action": {
+      "key": "llm",
+      "est_input_tokens": 40000,
+      "est_cost_usd": 0.01
+     },
+     "context": {
+      "tainted": false,
+      "step_up": false,
+      "tool_calls_in_session": 0,
+      "tool_calls_limit": null,
+      "dlp_tokenised": 0,
+      "max_tokens_capped": false
+     }
+    },
+    "expect": {
+     "decision": "deny",
+     "rule_ids": [
+      "RB-BL-03"
+     ]
+    }
+   },
+   {
+    "name": "llm over cost cap",
+    "input": {
+     "kind": "llm",
+     "policy": {
+      "cert_id": "crt_x",
+      "agent_id": "agt_x",
+      "version": "v1.0",
+      "tier": "T3",
+      "autonomy_level": "L2",
+      "models": [
+       "gpt-oss:120b-cloud"
+      ],
+      "prompt_tags": [],
+      "forbidden_tags": [],
+      "max_input_tokens": 32000,
+      "max_cost_per_request_usd": 5,
+      "actions": {
+       "mcp://orders.lookup_order": {
+        "key": "mcp://orders.lookup_order",
+        "impact": "read",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {
+         "order_id": {
+          "pattern": "^A-[0-9]{4}$"
+         }
+        },
+        "data_scopes": [],
+        "hitl": []
+       },
+       "mcp://orders.issue_refund": {
+        "key": "mcp://orders.issue_refund",
+        "impact": "privileged",
+        "value_threshold_usd": 100,
+        "value_arg": "amount",
+        "constraints": {
+         "amount": {
+          "max": 5000,
+          "min": 1
+         }
+        },
+        "data_scopes": [
+         "personal"
+        ],
+        "hitl": [
+         {
+          "arg": "amount",
+          "gt": 2000,
+          "approver_group": "ops-supervisors"
+         }
+        ]
+       },
+       "mcp://orders.delete_customer": {
+        "key": "mcp://orders.delete_customer",
+        "impact": "critical",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {},
+        "data_scopes": [],
+        "hitl": []
+       },
+       "mcp://orders.create_ticket": {
+        "key": "mcp://orders.create_ticket",
+        "impact": "write",
+        "value_threshold_usd": null,
+        "value_arg": null,
+        "constraints": {
+         "priority": {
+          "enum": [
+           "low",
+           "normal",
+           "high"
+          ]
+         },
+         "subject": {
+          "max_length": 20
+         }
+        },
+        "data_scopes": [],
+        "hitl": []
+       }
+      }
+     },
+     "action": {
+      "key": "llm",
+      "est_input_tokens": 100,
+      "est_cost_usd": 7.5
+     },
+     "context": {
+      "tainted": false,
+      "step_up": false,
+      "tool_calls_in_session": 0,
+      "tool_calls_limit": null,
+      "dlp_tokenised": 0,
+      "max_tokens_capped": false
+     }
+    },
+    "expect": {
+     "decision": "require_approval",
+     "rule_ids": [
+      "RB-BL-04"
+     ]
+    }
+   }
+  ]
+ }
+}

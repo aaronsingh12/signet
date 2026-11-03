@@ -1,0 +1,15 @@
+{
+  "name": "@signet/e2e",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "End-to-end suites against an isolated Signet stack (own data dir and ports). Fixture tools live here only.",
+  "scripts": {
+    "e2e": "tsx src/run.ts",
+    "perf": "tsx src/perf.ts"
+  },
+  "dependencies": {
+    "@signet/core": "*",
+    "express": "4.21.2"
+  }
+}
