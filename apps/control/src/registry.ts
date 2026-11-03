@@ -119,6 +119,7 @@ export interface SealInput {
   environments: string[];
   tags?: string[];
   ai_disclosure?: boolean;
+  detector_unavailability?: 'hold' | 'audit';
 }
 
 // Seal validation: every check cites the rule it enforces.
@@ -128,6 +129,7 @@ export function validateSeal(agent: Pick<AgentRow, 'tier'> & { kind?: AgentKind 
     if (input.models?.length) throw new PolicyError('VALIDATION', 'a third-party agent uses its vendor\'s model, which Signet cannot route; list no models, only the company tools it may call');
     if (!input.tools?.length) throw new PolicyError('VALIDATION', 'a third-party agent is governed through the company tools it calls; list at least one');
   } else if (!input.models?.length) throw new PolicyError('RB-BL-01', 'a seal needs at least one model');
+  if (input.detector_unavailability !== undefined && !['hold', 'audit'].includes(input.detector_unavailability)) throw invalid('detector_unavailability must be hold or audit');
   for (const m of input.models) {
     if (!tenant.settings.catalogue.some((c) => globMatch(m.model, c.model))) {
       throw new PolicyError('RB-INV-19', `model ${m.model} is not the tenant's cloud LLM (${tenant.settings.catalogue.map((c) => c.model).join(', ')})`);
@@ -188,6 +190,15 @@ export interface SealContext {
   actor: string;
 }
 
+/** Preserve approvals for agents registered before lifecycle onboarding was introduced. */
+export function issueSeal(agentRef: string, input: SealInput, actor: Principal): ReturnType<typeof signSeal> {
+  const agent = getAgent(agentRef);
+  if (!can(actor, 'certificates.approve') || actor.kind !== 'human') throw forbidden('RBAC', 'a human certificate approver is required');
+  if ([agent.owner, agent.created_by, ...teamOf(agent.id).map((member) => member.user)].includes(actor.id)) throw forbidden('RB-INV-09', 'owners, proposers and builders cannot approve their own agent');
+  if (db.prepare('SELECT 1 FROM lifecycle WHERE agent_id = ?').get(agent.id)) throw new PolicyError('BP-6', 'Complete this agent’s lifecycle approval matrix before issuing its seal', 409);
+  return signSeal(agent.id, input, { approvers: [{ user: actor.id, at: nowIso() }], evidence_refs: {}, regulatory_category: 'legacy', minor: false, actor: actor.id });
+}
+
 export function signSeal(agentRef: string, input: SealInput, ctx: SealContext) {
   const agent = getAgent(agentRef);
   if (agent.status === 'killed') throw new PolicyError('RB-INV-08', 'a killed agent re-enters only through a new lifecycle from Assess', 409);
@@ -216,6 +227,7 @@ export function signSeal(agentRef: string, input: SealInput, ctx: SealContext) {
     tags: input.tags ?? [],
     ai_disclosure: input.ai_disclosure ?? true,
     evidence_refs: ctx.evidence_refs,
+    detector_unavailability: input.detector_unavailability ?? 'hold',
     valid_from: issued.toISOString(),
     valid_to: new Date(issued.getTime() + VALIDITY_DAYS[agent.tier] * 86_400_000).toISOString(),
     issued_at: issued.toISOString(),

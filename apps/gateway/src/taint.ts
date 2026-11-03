@@ -24,6 +24,12 @@ export function taintOf(sessionId: string) {
 // them (bounded), so scoring off the critical path can never let a hijack through.
 const pending = new Map<string, Set<Promise<unknown>>>();
 
+export async function eraseSessions(sessionIds: string[]): Promise<void> {
+  const settled = await Promise.all(sessionIds.map((sessionId) => settle(sessionId, 5_000)));
+  if (settled.some((complete) => !complete)) throw new Error('Agent deletion cannot complete while detector work is still running; retry after detector processing completes');
+  for (const sessionId of sessionIds) { sessions.delete(sessionId); pending.delete(sessionId); }
+}
+
 export function trackPending(sessionId: string, p: Promise<unknown>) {
   const set = pending.get(sessionId) ?? new Set();
   set.add(p);

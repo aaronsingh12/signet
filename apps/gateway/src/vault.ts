@@ -19,6 +19,10 @@ interface Entry {
 
 const entries = new Map<string, Entry>();
 
+export function eraseAgentVault(agentId: string): void {
+  for (const [token, entry] of entries) if (entry.agentId === agentId) entries.delete(token);
+}
+
 export function tokenise(value: string, tag: DataTag, agentId: string, sessionId: string): string {
   const token = `<tok:${tag}:${randomBytes(6).toString('hex')}>`;
   entries.set(token, { sealed: seal(value, KEY), agentId, sessionId, expires: Date.now() + TTL_MS });

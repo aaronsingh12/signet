@@ -1,5 +1,5 @@
 import { X } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { useEffect, useId, useRef, type ReactNode } from 'react';
 
 export function PageHeader({ title, subtitle, actions }: { title: string; subtitle?: ReactNode; actions?: ReactNode }) {
   return (
@@ -40,7 +40,8 @@ export function Stat({ label, value, hint, tone }: { label: string; value: React
 
 export function TierChip({ tier }: { tier: string }) {
   const cls = tier === 'T1' ? 'bg-ink text-white' : tier === 'T2' ? 'bg-ink-2 text-white' : tier === 'T3' ? 'bg-slate-300 text-ink' : 'bg-slate-100 text-ink-2';
-  return <span className={`inline-flex rounded px-1.5 py-0.5 text-[11px] font-semibold ${cls}`}>{tier}</span>;
+  const labels: Record<string, string> = { T1: 'Critical risk', T2: 'High risk', T3: 'Moderate risk', T4: 'Low risk' };
+  return <span title={`Risk classification: ${tier}`} className={`inline-flex whitespace-nowrap rounded px-1.5 py-0.5 text-[11px] font-semibold ${cls}`}>{labels[tier] ?? tier}</span>;
 }
 
 const DECISION: Record<string, string> = {
@@ -67,10 +68,11 @@ const DECISION: Record<string, string> = {
 
 export function Pill({ value, label }: { value: string | null | undefined; label?: string }) {
   if (!value) return <span className="text-ink-3">—</span>;
-  return <span className={`inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold ${DECISION[value] ?? 'bg-slate-100 text-ink-2'}`}>{label ?? value.replace(/_/g, ' ')}</span>;
+  const labels: Record<string, string> = { allow: 'Allowed', allow_with_obligations: 'Allowed with safeguards', require_approval: 'Needs review', step_up: 'Extra checks', throttle: 'Rate limited', deny: 'Blocked', quarantine: 'Paused', kill: 'Stopped', killed: 'Stopped', quarantined: 'Paused', throttled: 'Rate limited', sealed: 'Approved', proposed: 'Awaiting approval', active: 'Active', taint: 'Risk detected', would_taint: 'Potential risk', none: 'No change' };
+  return <span title={value.replace(/_/g, ' ')} className={`inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold ${DECISION[value] ?? 'bg-slate-100 text-ink-2'}`}>{label ?? labels[value] ?? value.replace(/_/g, ' ')}</span>;
 }
 
-export const LEVEL_LABEL: Record<string, string> = { step_up: 'L2 Step-up', throttled: 'L3 Throttle', quarantined: 'L4 Quarantine', killed: 'L5 Kill', active: 'Released' };
+export const LEVEL_LABEL: Record<string, string> = { step_up: 'Extra safety checks', throttled: 'Rate limited', quarantined: 'Paused for review', killed: 'Permanently stopped', active: 'Resumed' };
 
 export function Mono({ children, title }: { children: ReactNode; title?: string }) {
   return (
@@ -95,11 +97,26 @@ export function ErrorNote({ error }: { error: { rule?: string; message: string }
 }
 
 export function Modal({ title, onClose, children, width = 'max-w-xl' }: { title: ReactNode; onClose: () => void; children: ReactNode; width?: string }) {
+  const titleId = useId();
+  const dialog = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const previous = document.activeElement;
+    dialog.current?.focus();
+    return () => { if (previous instanceof HTMLElement) previous.focus(); };
+  }, []);
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-ink/40 p-6 pt-20" onMouseDown={onClose}>
-      <div className={`card w-full ${width}`} onMouseDown={(e) => e.stopPropagation()}>
+      <div ref={dialog} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} className={`card w-full ${width}`} onMouseDown={(e) => e.stopPropagation()} onKeyDown={(event) => {
+        if (event.key === 'Escape') onClose();
+        if (event.key !== 'Tab') return;
+        const controls = event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex="0"]');
+        const first = controls[0];
+        const last = controls[controls.length - 1];
+        if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog.current)) { event.preventDefault(); last?.focus(); }
+        if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+      }}>
         <div className="flex items-center justify-between border-b border-line px-5 py-3">
-          <h2 className="text-base font-semibold">{title}</h2>
+          <h2 id={titleId} className="text-base font-semibold">{title}</h2>
           <button className="text-ink-3 hover:text-ink" onClick={onClose} aria-label="Close">
             <X size={18} />
           </button>
@@ -125,9 +142,9 @@ export function KV({ rows }: { rows: [ReactNode, ReactNode][] }) {
 
 export function Tabs({ tabs, active, onChange }: { tabs: { id: string; label: ReactNode }[]; active: string; onChange: (id: string) => void }) {
   return (
-    <div className="mb-4 flex gap-1 border-b border-line">
+    <div className="mb-4 flex gap-1 overflow-x-auto border-b border-line">
       {tabs.map((t) => (
-        <button key={t.id} onClick={() => onChange(t.id)} className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium ${active === t.id ? 'border-royal text-royal' : 'border-transparent text-ink-2 hover:text-ink'}`}>
+        <button key={t.id} onClick={() => onChange(t.id)} className={`-mb-px whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium ${active === t.id ? 'border-royal text-royal' : 'border-transparent text-ink-2 hover:text-ink'}`}>
           {t.label}
         </button>
       ))}

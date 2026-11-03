@@ -1,4 +1,5 @@
 export * from './canonical';
+export * from './analytics';
 export * from './crypto';
 export * from './datamatrix';
 export * from './decision';

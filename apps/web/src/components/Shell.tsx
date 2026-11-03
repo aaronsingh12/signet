@@ -1,131 +1,70 @@
-import {
-  Activity, Bell, BookLock, Boxes, Cable, ClipboardCheck, Cpu, FileSearch, Gauge, KeyRound, LayoutDashboard, LogOut, Plus, Radar, ScrollText, ShieldAlert, SlidersHorizontal, Users, Wrench,
-} from 'lucide-react';
-import { useEffect, useState, type ReactNode } from 'react';
-import { Link, NavLink, Outlet } from 'react-router-dom';
+import { Activity, Bell, BookLock, Boxes, Cable, ClipboardCheck, ChevronRight, CircleHelp, KeyRound, LayoutDashboard, LogOut, Menu, Plug, Radar, ScrollText, Settings2, ShieldCheck, SlidersHorizontal, Users, Wrench, X } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { api, useApi } from '../lib/api';
+import { signOut, useMe } from '../lib/auth';
 import { ago } from '../lib/format';
-import { ROLE_LABEL, signOut, useMe } from '../lib/auth';
 import { Logo } from './Logo';
+import { Modal } from './ui';
 
-interface Item {
-  to: string;
-  label: string;
-  icon: ReactNode;
-  phase?: string; // screens that arrive in a later phase are shown, disabled, with their phase
-}
-
-const NAV: { section: string; items: Item[] }[] = [
-  { section: 'Home', items: [{ to: '/', label: 'Command Center', icon: <LayoutDashboard size={16} /> }] },
-  {
-    section: 'Agents',
-    items: [
-      { to: '/agents', label: 'Agent Registry', icon: <Boxes size={16} /> },
-      { to: '/agents/new', label: 'Propose agent', icon: <Plus size={16} /> },
-      { to: '/discovery', label: 'Discovery Inbox', icon: <Radar size={16} /> },
-    ],
-  },
-  {
-    section: 'Governance',
-    items: [
-      { to: '/approvals', label: 'My Approvals', icon: <ClipboardCheck size={16} /> },
-      { to: '/controls', label: 'Control Library', icon: <BookLock size={16} /> },
-    ],
-  },
-  {
-    section: 'Runtime',
-    items: [
-      { to: '/live', label: 'Live Traffic', icon: <Activity size={16} /> },
-      { to: '/enforcement', label: 'Enforcement Center', icon: <ShieldAlert size={16} /> },
-      { to: '/ledger', label: 'Ledger Explorer', icon: <ScrollText size={16} /> },
-    ],
-  },
-  {
-    section: 'Admin',
-    items: [
-      { to: '/policies', label: 'Policies & detectors', icon: <SlidersHorizontal size={16} /> },
-      { to: '/tools', label: 'Tools & secrets', icon: <Wrench size={16} /> },
-      { to: '/connectors', label: 'Connectors', icon: <Cable size={16} /> },
-      { to: '/tenant', label: 'Tenant & access', icon: <Users size={16} /> },
-    ],
-  },
+const mainLinks = [
+  { to: '/', label: 'Overview', icon: LayoutDashboard },
+  { to: '/agents', label: 'AI agents', icon: Boxes },
+  { to: '/approvals', label: 'Approvals', icon: ClipboardCheck },
+  { to: '/live', label: 'Live activity', icon: Activity },
+  { to: '/enforcement', label: 'Safety center', icon: ShieldCheck },
+  { to: '/ledger', label: 'Activity history', icon: ScrollText },
 ];
+const settingsLinks = [
+  { to: '/discovery', label: 'Discovered agents', icon: Radar },
+  { to: '/settings/agents', label: 'Agent settings', icon: Boxes },
+  { to: '/controls', label: 'Control library', icon: BookLock },
+  { to: '/connectors', label: 'Service connectors', icon: Cable },
+  { to: '/policies', label: 'Safety rules', icon: SlidersHorizontal },
+  { to: '/tools', label: 'Tools & credentials', icon: Wrench },
+  { to: '/plugins', label: 'Connections', icon: Plug },
+  { to: '/tenant', label: 'Workspace & access', icon: Users },
+];
+
+interface SystemStats { gateways: { id: string; healthy: boolean }[] }
 
 export function Shell() {
   const me = useMe();
-  const { data: stats } = useApi<any>('/stats/command-center');
-  const healthy = (stats?.gateways ?? []).filter((g: any) => g.healthy).length;
-  const total = (stats?.gateways ?? []).length;
-  const initials = me.principal.name.split(/\s+/).map((p) => p[0]).join('').slice(0, 2).toUpperCase();
+  const location = useLocation();
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(settingsLinks.some((item) => location.pathname.startsWith(item.to)));
+  const [helpOpen, setHelpOpen] = useState(false);
+  const { data: stats, error: connectionError, reload } = useApi<SystemStats>('/stats/command-center');
+  useEffect(() => { const timer = window.setInterval(() => void reload(), 30_000); return () => window.clearInterval(timer); }, [reload]);
+  const connected = stats !== null && stats.gateways.length > 0 && stats.gateways.every((node) => node.healthy);
+  const section = [...mainLinks, ...settingsLinks].find((item) => item.to !== '/' && location.pathname.startsWith(item.to))?.label ?? 'Overview';
+  const initials = me.principal.name.slice(0, 2).toUpperCase();
   return (
-    <div className="flex min-h-screen">
-      <aside className="sticky top-0 flex h-screen w-60 shrink-0 flex-col bg-shell text-shell-text">
-        <div className="flex items-center gap-2.5 px-4 py-4">
-          <Logo />
-          <div>
-            <div className="text-[15px] font-semibold text-white">Signet</div>
-            <div className="text-[11px]">{me.tenant.name}</div>
-          </div>
-        </div>
-        <nav className="flex-1 overflow-y-auto px-2 pb-4">
-          {NAV.map((g) => (
-            <div key={g.section} className="mt-4">
-              <div className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">{g.section}</div>
-              {g.items.map((i) =>
-                i.phase ? (
-                  <div key={i.to} className="flex cursor-not-allowed items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-slate-600" title={`${i.label} arrives in ${i.phase}`}>
-                    {i.icon}
-                    <span className="flex-1">{i.label}</span>
-                    <span className="rounded bg-shell-2 px-1 text-[9px]">{i.phase}</span>
-                  </div>
-                ) : (
-                  <NavLink key={i.to} to={i.to} end={i.to === '/' || i.to === '/agents'} className={({ isActive }) => `flex items-center gap-2 rounded-md px-2 py-1.5 text-[13px] ${isActive ? 'bg-shell-2 font-medium text-white' : 'hover:bg-shell-2 hover:text-white'}`}>
-                    {i.icon}
-                    {i.label}
-                  </NavLink>
-                ),
-              )}
-            </div>
-          ))}
+    <div className="app-layout">
+      <a href="#main-content" className="skip-link">Skip to content</a>
+      {mobileOpen && <button aria-label="Close navigation overlay" className="nav-overlay" onClick={() => setMobileOpen(false)} />}
+      <aside className={`app-sidebar ${mobileOpen ? 'is-open' : ''}`} aria-label="Main navigation">
+        <Link to="/" className="brand" onClick={() => setMobileOpen(false)}><span className="brand-mark"><Logo size={31} /></span><span><strong>signet<span className="text-royal">.</span></strong><small>AI, under your control</small></span></Link>
+        <div className="workspace-label"><span className="workspace-avatar">{me.tenant.name.slice(0, 1)}</span><div><strong>{me.tenant.name}</strong><small>Your workspace</small></div></div>
+        <nav className="sidebar-navigation">
+          <div className="nav-caption">WORKSPACE</div>
+          {mainLinks.map(({ to, label, icon: Icon }) => <NavLink key={to} to={to} end={to === '/' || to === '/agents'} onClick={() => setMobileOpen(false)} className={({ isActive }) => `sidebar-link ${isActive ? 'selected' : ''}`}><Icon size={19} strokeWidth={1.7} /><span>{label}</span></NavLink>)}
+          <div className="nav-caption mt-8">MANAGE</div>
+          <button className="sidebar-link w-full" data-testid="settings-toggle" aria-expanded={settingsOpen} aria-controls="settings-navigation" onClick={() => setSettingsOpen(!settingsOpen)}><Settings2 size={19} strokeWidth={1.7} /><span>Settings</span><ChevronRight size={15} className={`ml-auto transition ${settingsOpen ? 'rotate-90' : ''}`} /></button>
+          {settingsOpen && <div id="settings-navigation" className="settings-navigation">{settingsLinks.map(({ to, label, icon: Icon }) => <NavLink key={to} to={to} onClick={() => setMobileOpen(false)} className={({ isActive }) => `sidebar-link ${isActive ? 'selected' : ''}`}><Icon size={16} /><span>{label}</span></NavLink>)}</div>}
         </nav>
-        <div className="border-t border-shell-line px-4 py-3 text-[11px]">
-          <div className="flex items-center gap-1.5 text-slate-300">
-            <span className={`h-2 w-2 rounded-full ${total && healthy === total ? 'bg-emerald-400' : 'bg-amber-400'}`} />
-            {healthy}/{total} gateway nodes healthy
-          </div>
-          <div className="mt-0.5">
-            <Cpu size={11} className="mr-1 inline" />
-            gateway p95 {stats?.gateway_p95_ms_24h ?? '—'} ms · dev · single tenant
-          </div>
-        </div>
+        <div className="sidebar-bottom"><div className="connection-status"><span className={`status-dot ${connected && !connectionError ? 'ok' : 'warn'}`} /><span>{connectionError ? 'Connection check unavailable' : stats ? connected ? 'Safety gateway connected' : 'Gateway needs attention' : 'Checking connection…'}</span></div></div>
       </aside>
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-line bg-white/95 px-6 backdrop-blur">
-          <div className="flex items-center gap-2 text-xs text-ink-3">
-            <FileSearch size={14} /> Every action here goes through the public API and is written to the admin ledger.
-          </div>
-          <div className="ml-auto flex items-center gap-3">
-            <Notifications />
-            <span className="rounded-md border border-line px-2 py-1 text-xs text-ink-2">
-              <Gauge size={12} className="mr-1 inline" />
-              Environment: dev
-            </span>
-            <div className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-royal text-xs font-semibold text-white">{initials}</div>
-              <div className="leading-tight">
-                <div className="text-sm font-medium">{me.principal.name}</div>
-                <div className="text-[11px] text-ink-3">{me.principal.roles.map((r) => ROLE_LABEL[r] ?? r).join(' · ') || 'No Signet role'}</div>
-              </div>
-            </div>
-            <button className="btn-ghost" onClick={() => void signOut()} title="Sign out">
-              <LogOut size={14} />
-            </button>
-          </div>
+      <div className="app-body">
+        <header className="app-header">
+          <button className="icon-button mobile-menu" data-testid="navigation-toggle" aria-label="Open navigation" aria-expanded={mobileOpen} onClick={() => setMobileOpen(!mobileOpen)}>{mobileOpen ? <X size={20} /> : <Menu size={20} />}</button>
+          <div className="header-breadcrumb"><span>Workspace</span><ChevronRight size={14} /><strong>{section}</strong></div>
+          <div className="header-actions"><Notifications /><span className="header-safety"><ShieldCheck size={15} /> Independent AI governance</span><button className="icon-button" aria-label="Open quick guide" onClick={() => setHelpOpen(true)}><CircleHelp size={19} /></button><div className="profile-avatar">{initials}</div><div className="profile-info"><strong>{me.principal.name}</strong><small>{me.principal.roles.includes('tenant_admin') ? 'Administrator' : 'Workspace member'}</small></div><button className="icon-button" aria-label="Sign out" onClick={() => void signOut()}><LogOut size={17} /></button></div>
         </header>
-        <main className="mx-auto w-full max-w-[1400px] flex-1 px-6 py-6">
-          <Outlet />
-        </main>
+        <main id="main-content" className="app-main"><Outlet /></main>
+        <footer className="app-footer"><span>Signet · A clearer view of your AI</span><span><ShieldCheck size={13} /> Every action has a record</span></footer>
       </div>
+      {helpOpen && <Modal title="Your AI, explained simply" onClose={() => setHelpOpen(false)}><div className="space-y-5 text-sm text-ink-2"><p>Signet checks what each AI agent is allowed to do and keeps a record of its requests.</p><div><strong className="text-ink">Governed</strong><p>The agent has an active approval certificate. Its requests still go through safety checks.</p></div><div><strong className="text-ink">Blocked request</strong><p>Signet refused a particular action. This does not always mean the entire agent has stopped.</p></div><div><strong className="text-ink">Paused or stopped</strong><p>A paused agent needs review. A permanently stopped agent needs a new approval process before returning.</p></div><div><strong className="text-ink">Usage & cost</strong><p>Charts show the last 24 hours of recorded requests. Costs are estimates from configured model prices, not an invoice.</p></div><button className="btn-primary" onClick={() => setHelpOpen(false)}>Got it</button></div></Modal>}
     </div>
   );
 }
@@ -159,7 +98,7 @@ function Notifications() {
               <li key={n.id}>
                 <Link to={n.link ?? '#'} onClick={() => setOpen(false)} className={`block px-4 py-2.5 text-sm hover:bg-canvas ${n.read_at ? 'text-ink-2' : 'font-medium'}`}>
                   {n.title}
-                  <div className="text-[11px] font-normal text-ink-3">{n.kind} · {ago(n.created_at)}</div>
+                  <div className="text-[11px] font-normal text-ink-3">{n.kind} Â· {ago(n.created_at)}</div>
                 </Link>
               </li>
             ))}

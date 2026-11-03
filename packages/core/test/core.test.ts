@@ -1,7 +1,7 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import {
-  GENESIS_HASH, canonicalize, combine, generateSigningKey, hashRecord, ibanValid, inclusionProof, loadSigningKey, luhn, merkleRoot, scan,
+  GENESIS_HASH, canonicalize, combine, combineWithDetectorOutageAudit, generateSigningKey, hashRecord, ibanValid, inclusionProof, loadSigningKey, luhn, merkleRoot, scan,
   sha256, signJws, strictest, ulid, verifyChain, verifyInclusion, verifyJws, type DetectorResult, type LedgerRecord,
 } from '../src/index';
 
@@ -94,4 +94,16 @@ test('combiner: only rules allow; unavailable detectors hold T1/T2 allows (RB-IN
     assert.notEqual(combine('deny', [{ id: 'D', version: 'x', status: 'ok', band }], 'T4').outcome, 'allow');
   }
   assert.equal(strictest('allow', 'throttle', 'deny'), 'deny');
+});
+
+test('explicit detector outage audit allows normal calls but preserves detected threats and policy refusals', () => {
+  const missing: DetectorResult[] = [{ id: 'DET-PII', version: 'none', status: 'unavailable' }];
+  const allowed = combineWithDetectorOutageAudit('allow', missing, 'T1');
+  assert.equal(allowed.outcome, 'allow_with_obligations');
+  assert.match(allowed.reasons[0]!, /coverage gap audited/);
+  for (const rule of ['deny', 'require_approval', 'quarantine', 'kill'] as const) {
+    assert.equal(combineWithDetectorOutageAudit(rule, missing, 'T1').outcome, rule);
+  }
+  assert.equal(combineWithDetectorOutageAudit('allow', [...missing, { id: 'DET-INJ', version: '1', status: 'ok', band: 'high' }], 'T1').outcome, 'quarantine');
+  assert.equal(combineWithDetectorOutageAudit('allow', [...missing, { id: 'DET-INJ', version: '1', status: 'ok', band: 'elevated' }], 'T1').outcome, 'require_approval');
 });

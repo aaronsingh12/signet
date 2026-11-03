@@ -3,10 +3,12 @@ import { Link } from 'react-router-dom';
 import { Card, Empty, KV, Mono, PageHeader, Pill } from '../components/ui';
 import { api, useApi, useLive } from '../lib/api';
 import { dlpSummary, time } from '../lib/format';
+import { useAgentAnalytics } from '../lib/analytics';
 
 // Every gateway decision as it happens. Payload values never appear here, only classes, counts and
 // hashes (Console UI & UX, Live Traffic).
 export function LiveTraffic() {
+  const { data: analytics } = useAgentAnalytics();
   const { data } = useApi<any>('/ledger/records?kind=transaction&limit=60');
   const [rows, setRows] = useState<any[]>([]);
   const [paused, setPaused] = useState(false);
@@ -23,9 +25,9 @@ export function LiveTraffic() {
   return (
     <>
       <PageHeader
-        title="Live Traffic"
-        subtitle="Every gateway decision as it happens. Payload values never appear here, only classes, counts and hashes."
-        actions={<button className="btn-ghost" onClick={() => setPaused(!paused)}>{paused ? 'Resume' : 'Pause'}</button>}
+        title="Live activity"
+        subtitle="Follow your agents’ requests as they happen. Select a request to see its safety checks and outcome."
+        actions={<button data-testid="live-activity-toggle" aria-pressed={paused} className="btn-ghost" onClick={() => setPaused(!paused)}>{paused ? 'Resume updates' : 'Pause updates'}</button>}
       />
       <div className="grid gap-4 xl:grid-cols-[1fr_420px]">
         <Card pad={false}>
@@ -44,7 +46,7 @@ export function LiveTraffic() {
                 {shown.map((r) => (
                   <tr key={r.record_id} className={`cursor-pointer hover:bg-canvas ${selected?.record?.record_id === r.record_id ? 'bg-royal-50' : ''}`} onClick={() => void api(`/ledger/records/${r.record_id}`).then(setSelected)}>
                     <td className="td mono whitespace-nowrap">{time(r.ts)}</td>
-                    <td className="td mono text-xs">{r.handle ?? r.agent_id ?? '—'}</td>
+                    <td className="td text-xs">{analytics?.agents.find((agent) => agent.id === r.agent_id)?.name ?? r.handle ?? r.agent_id ?? 'Unidentified request'}</td>
                     <td className="td mono text-xs">{r.target ?? r.action_type}</td>
                     <td className="td"><Pill value={r.decision} /></td>
                     <td className="td text-xs">{dlpSummary(r.dlp_actions)}</td>

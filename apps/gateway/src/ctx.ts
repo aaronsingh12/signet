@@ -139,6 +139,7 @@ export function preflight(ctx: Ctx, headers: IncomingHttpHeaders) {
     halt(ctx, 1, 401, 'invalid_token', 'workload token signature is not valid', 'deny', ['BP-5.2-1']);
   }
   // The signature proves who the agent is, so even a refused stale token is attributed to it in the ledger.
+  if (state.agentErased(claims.agent_id)) halt(ctx, 1, 403, 'agent_removed', 'this agent was permanently removed from Signet', 'deny', ['BP-5.2-1']);
   ctx.claims = claims;
   const tenant = state.bundle?.tenant;
   if (claims.aud !== TOKEN_AUDIENCE || !tenant || claims.tenant !== tenant || claims.iss !== tokenIssuer(tenant)) {
@@ -323,7 +324,15 @@ export async function humanApproval(ctx: Ctx, headers: IncomingHttpHeaders, inpu
   if (headers['x-signet-hitl'] === 'async') {
     halt(ctx, 10, 202, 'approval_pending', `waiting for ${input.groups.join(', ') || 'an approver'}; resubmit with x-signet-approval: ${opened.approval_id}`, 'require_approval', input.rules, 'pending', { approval_id: opened.approval_id, expires_at: opened.expires_at });
   }
-  const out = await waitForDecision(opened.approval_id, Date.parse(opened.expires_at ?? '') || Date.now() + state.hitlWaitMs());
+  const hold = new AbortController();
+  const untrack = state.track(c.agent_id, c.ver, c.ins, hold);
+  let out: Awaited<ReturnType<typeof waitForDecision>>;
+  try {
+    out = await waitForDecision(opened.approval_id, Date.parse(opened.expires_at ?? '') || Date.now() + state.hitlWaitMs(), hold.signal);
+  } catch (error) {
+    if (hold.signal.aborted) halt(ctx, 10, 403, 'agent_stopped', 'approval wait was cancelled because this agent was stopped', 'deny', ['BP-5.4']);
+    throw error;
+  } finally { untrack(); }
   if (out.status === 'approved') {
     ctx.decision = 'allow';
     ctx.extra.approved_by = out.approvers;
@@ -337,9 +346,10 @@ export async function humanApproval(ctx: Ctx, headers: IncomingHttpHeaders, inpu
 const waiters = new Map<string, () => void>();
 export const hitlDecided = (approvalId: string) => waiters.get(approvalId)?.();
 
-async function waitForDecision(id: string, until: number): Promise<{ status: string; decision: string | null; approvers: string[] }> {
+async function waitForDecision(id: string, until: number, signal: AbortSignal): Promise<{ status: string; decision: string | null; approvers: string[] }> {
   const fetchStatus = () => state.internal<{ status: string; outcome: string | null; approvers: { approver: string; decision: string }[] }>(`/internal/hitl/${encodeURIComponent(id)}`);
   for (;;) {
+    signal.throwIfAborted();
     const s = await fetchStatus().catch(() => null);
     if (s && s.status !== 'pending') return { status: s.status, decision: s.outcome, approvers: s.approvers.map((a) => a.approver) };
     if (Date.now() > until + 3_000) return { status: s?.status ?? 'pending', decision: null, approvers: [] };

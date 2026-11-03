@@ -1,24 +1,32 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { KeyObject } from 'node:crypto';
 import type { NextFunction, Request, Response } from 'express';
-import { checkTimes, env, keyFromJwk, sha256, verifyJwtSignature, decodeJwt } from '@signet/core';
+import { checkTimes, devSecret, env, keyFromJwk, sha256, signJws, verifyJws, verifyJwtSignature, decodeJwt } from '@signet/core';
 import { db, nowIso } from './db';
 import { PolicyError } from './errors';
 import { permissionsFor, rolesFor, type Principal } from './rbac';
 import { tenant } from './tenant';
+import { keys } from './keys';
+import { localAdminProfile, verifyLocalAdminCredentials } from './local-admin';
 
 // Single sign-on (BP 2 principle: OIDC/SAML to the customer IdP; Signet stores no passwords).
 // Humans sign in through the authorization-code flow with PKCE, state and nonce; the console then
 // holds an HttpOnly session cookie. Machine clients send OAuth 2.0 bearer tokens from the same IdP.
 
 export const OIDC = {
+  authMode: env('SIGNET_AUTH_MODE', 'local'),
   issuer: env('SIGNET_OIDC_ISSUER', 'http://localhost:8180/realms/signet'),
   clientId: env('SIGNET_OIDC_CLIENT_ID', 'signet-console'),
-  clientSecret: env('SIGNET_OIDC_CLIENT_SECRET', 'signet-console-dev-secret'),
+  clientSecret: env('SIGNET_OIDC_CLIENT_SECRET', ''),
   publicUrl: env('SIGNET_PUBLIC_URL', 'http://localhost:5174'),
   // Clients whose access tokens the API accepts (azp claim).
   apiClients: env('SIGNET_OIDC_API_CLIENTS', 'signet-console,signet-dev-cli,signet-automation').split(','),
 };
+
+const LOCAL_ISSUER = 'signet-local-dev';
+const LOCAL_TOKEN_TTL_SECONDS = 600;
+
+const localAuthEnabled = () => OIDC.authMode === 'local';
 
 const SESSION_COOKIE = 'signet_session';
 const IDLE_MS = 30 * 60_000; // BP 18.5: 30 min idle
@@ -82,7 +90,33 @@ interface IdClaims {
   client_id?: string;
 }
 
+function localClaims(username: string, clientId: string): IdClaims {
+  const user = localAdminProfile();
+  if (username !== user.id) throw new PolicyError('AUTH', 'unknown local administrator account', 401);
+  const now = Math.floor(Date.now() / 1000);
+  return {
+    iss: LOCAL_ISSUER,
+    sub: user.id,
+    aud: clientId,
+    azp: clientId,
+    email: user.id,
+    preferred_username: user.id,
+    name: user.name,
+    groups: user.groups,
+    amr: ['local-dev'],
+    auth_time: now,
+    exp: now + LOCAL_TOKEN_TTL_SECONDS,
+  };
+}
+
 async function verifyIdpToken(token: string): Promise<IdClaims> {
+  if (localAuthEnabled()) {
+    const { payload } = verifyJws<IdClaims>(token, new Map([[keys.token.kid, keys.token.publicKey]]), 'JWT');
+    checkTimes(payload as unknown as Record<string, unknown>);
+    if (payload.iss !== LOCAL_ISSUER) throw new PolicyError('AUTH', 'token from an unexpected local issuer', 401);
+    if (payload.preferred_username !== 'service-account-signet-automation' && payload.sub !== localAdminProfile().id) throw new PolicyError('AUTH', 'local account is no longer configured', 401);
+    return payload;
+  }
   const { header } = decodeJwt(token);
   const { payload } = verifyJwtSignature(token, await keyFor(header.kid));
   checkTimes(payload);
@@ -113,6 +147,7 @@ function principalFromClaims(c: IdClaims, auth: Principal['auth']): Principal {
 const pending = new Map<string, { verifier: string; nonce: string; returnTo: string; at: number }>();
 
 export async function login(req: Request, res: Response) {
+  if (localAuthEnabled()) throw new PolicyError('AUTH', 'Local sign-in requires an administrator ID and password submitted to /api/v1/auth/local-login', 405);
   const d = await getDiscovery();
   const state = randomBytes(24).toString('base64url');
   const verifier = randomBytes(32).toString('base64url');
@@ -134,6 +169,44 @@ export async function login(req: Request, res: Response) {
     ...(req.query.max_age ? { max_age: String(req.query.max_age) } : {}),
   }).toString();
   res.redirect(url.toString());
+}
+
+/** Password authentication for the configured local administrator; never accepts credentials in URLs. */
+export function localLogin(req: Request, res: Response): { redirect_to: string } {
+  if (!localAuthEnabled()) throw new PolicyError('AUTH', 'local administrator authentication is disabled', 404);
+  if (typeof req.body?.username !== 'string' || typeof req.body?.password !== 'string') throw new PolicyError('AUTH', 'administrator ID and password are required', 400);
+  verifyLocalAdminCredentials(req.body.username, req.body.password);
+  const principal = principalFromClaims(localClaims(req.body.username, OIDC.clientId), 'session');
+  const sid = randomBytes(32).toString('base64url');
+  const now = Date.now();
+  db.prepare('INSERT INTO session (id_hash, tenant_id, principal, id_token, created_at, expires_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+    sha256(sid), tenant.id, JSON.stringify(principal), null, nowIso(), new Date(now + ABSOLUTE_MS).toISOString(), nowIso(),
+  );
+  res.cookie(SESSION_COOKIE, sid, { httpOnly: true, sameSite: 'lax', secure: OIDC.publicUrl.startsWith('https'), path: '/', maxAge: ABSOLUTE_MS });
+  const requested = req.body.return_to;
+  const returnTo = typeof requested === 'string' && requested.startsWith('/') && !requested.startsWith('//') ? requested : '/';
+  return { redirect_to: returnTo };
+}
+
+export function localToken(body: { username?: unknown; password?: unknown; client_id?: unknown; client_secret?: unknown; grant_type?: unknown }) {
+  if (!localAuthEnabled()) throw new PolicyError('AUTH', 'local development authentication is disabled', 404);
+  const grantType = String(body.grant_type ?? '');
+  const clientId = String(body.client_id ?? '');
+  if (!OIDC.apiClients.includes(clientId)) throw new PolicyError('AUTH', `unknown local development client: ${clientId}`, 401);
+  if (grantType === 'password') {
+    verifyLocalAdminCredentials(String(body.username ?? ''), String(body.password ?? ''));
+    const claims = localClaims(String(body.username ?? ''), clientId);
+    return { access_token: signJws(claims, keys.token, 'JWT'), token_type: 'Bearer', expires_in: LOCAL_TOKEN_TTL_SECONDS };
+  }
+  if (grantType === 'client_credentials') {
+    if (clientId !== env('SIGNET_AUTOMATION_CLIENT_ID', 'signet-automation') || String(body.client_secret ?? '') !== devSecret('SIGNET_AUTOMATION_CLIENT_SECRET')) {
+      throw new PolicyError('AUTH', 'invalid local automation client credentials', 401);
+    }
+    const now = Math.floor(Date.now() / 1000);
+    const claims: IdClaims = { iss: LOCAL_ISSUER, sub: 'service-account-signet-automation', aud: clientId, azp: clientId, preferred_username: 'service-account-signet-automation', name: 'Signet Automation', groups: ['signet-automation'], auth_time: now, exp: now + LOCAL_TOKEN_TTL_SECONDS };
+    return { access_token: signJws(claims, keys.token, 'JWT'), token_type: 'Bearer', expires_in: LOCAL_TOKEN_TTL_SECONDS };
+  }
+  throw new PolicyError('AUTH', `unsupported local development grant type: ${grantType}`, 400);
 }
 
 export async function callback(req: Request, res: Response) {
@@ -213,7 +286,9 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
             throw new PolicyError('AUTH', 'state-changing requests must be application/json', 415);
           }
           db.prepare('UPDATE session SET last_seen_at = ? WHERE id_hash = ?').run(nowIso(), sha256(sid));
-          res.locals.principal = JSON.parse(row.principal) as Principal;
+          const principal = JSON.parse(row.principal) as Principal;
+          if (localAuthEnabled() && principal.kind === 'human' && principal.id !== localAdminProfile().id) throw new PolicyError('AUTH', 'local account is no longer configured', 401);
+          res.locals.principal = { ...principal, permissions: permissionsFor(principal.roles) };
         } else if (row) {
           db.prepare('DELETE FROM session WHERE id_hash = ?').run(sha256(sid));
         }
