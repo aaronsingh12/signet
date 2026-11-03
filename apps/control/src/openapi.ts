@@ -1,6 +1,6 @@
 // OpenAPI 3.1 description of the public control API (BP 13). Served at /api/v1/openapi.json.
 
-type Op = { summary: string; permission?: string; public?: boolean; body?: string };
+type Op = { summary: string; permission?: string; public?: boolean; body?: string; runner?: boolean };
 
 const ops: Record<string, Record<string, Op>> = {
   '/auth/login': { get: { summary: 'Start single sign-on (authorization code + PKCE)', public: true } },
@@ -8,7 +8,15 @@ const ops: Record<string, Record<string, Op>> = {
   '/auth/logout': { post: { summary: 'End the Signet session and the IdP session', public: true } },
   '/me': { get: { summary: 'The signed-in principal, roles and permissions' } },
   '/identity/jwks': { get: { summary: 'Public keys: CA (seals, bundles), workload tokens, ledger roots', public: true } },
-  '/identity/token': { post: { summary: 'Exchange a one-time bootstrap credential, or OAuth client credentials (third-party agents), for a workload token; rate limited per address', public: true, body: 'BootstrapExchange' } },
+  '/identity/token': { post: { summary: 'Exchange a one-time bootstrap credential or OAuth client credentials for an agent workload token; rate limited per address', public: true, body: 'BootstrapExchange' } },
+  '/edge-runners': {
+    get: { summary: 'List outbound connector runners and heartbeat status', permission: 'agents.read' },
+    post: { summary: 'Enroll a private-network HTTP connector runner; returns its secret once', permission: 'connectors.manage' },
+  },
+  '/edge-runners/{id}/revoke': { post: { summary: 'Revoke a runner and cancel its jobs', permission: 'connectors.manage' } },
+  '/edge/runners/{runnerId}/poll': { post: { summary: 'Heartbeat and claim one approved HTTP job', runner: true } },
+  '/edge/runners/{runnerId}/jobs/{jobId}/lease': { get: { summary: 'Verify the job identity, seal, expiry and revocation', runner: true } },
+  '/edge/runners/{runnerId}/jobs/{jobId}/result': { post: { summary: 'Complete a claimed job with result_json or error', runner: true } },
   '/identity/diagnostics': { post: { summary: 'SDK or sidecar report of the agent runtime (provider variable names, egress check); workload token', public: true } },
   '/identity/token/refresh': { post: { summary: 'Swap a valid workload token for a fresh one', public: true } },
   '/catalogue': { get: { summary: "The tenant's cloud LLM catalogue (Rulebook D-17)", permission: 'agents.read' } },
@@ -26,8 +34,8 @@ const ops: Record<string, Record<string, Op>> = {
   '/agents/{id}/certificate': { get: { summary: 'The active seal (JWS and body)', permission: 'agents.read' } },
   '/certificates/verify': { post: { summary: 'Verify a seal signature and current status', permission: 'agents.read' } },
   '/agents/{id}/connection': { get: { summary: 'Connection state from identity records and gateway traffic, with diagnostics', permission: 'agents.read' } },
-  '/agents/{id}/clients': { post: { summary: 'Create OAuth client credentials for a third-party agent (secret shown once)', permission: 'identity.bootstrap' } },
-  '/clients/{id}/revoke': { post: { summary: 'Revoke a third-party client and its tokens', permission: 'identity.bootstrap or ladder.quarantine' } },
+  '/agents/{id}/clients': { post: { summary: 'Create environment-bound OAuth client credentials for an approved agent (secret shown once)', permission: 'identity.bootstrap', body: 'ClientEnrollment' } },
+  '/clients/{id}/revoke': { post: { summary: 'Revoke an agent OAuth client and its tokens', permission: 'identity.bootstrap or ladder.quarantine' } },
   '/instances/{id}/revoke': { post: { summary: 'Revoke one instance identity and its tokens', permission: 'identity.bootstrap or ladder.quarantine' } },
   '/connect/info': { get: { summary: 'Gateway and control URLs, models and tools for connection instructions', permission: 'agents.read' } },
   '/agents/{id}/bootstrap': { post: { summary: 'Issue a one-time bootstrap credential for a deployment', permission: 'identity.bootstrap' } },
@@ -65,7 +73,7 @@ for (const [path, methods] of Object.entries(ops)) {
     paths[path][method] = {
       summary: op.summary,
       ...(op.permission ? { 'x-signet-permission': op.permission } : {}),
-      security: op.public ? [] : [{ oidc: [] }, { session: [] }],
+      security: op.runner ? [{ runner: [] }] : op.public ? [] : [{ oidc: [] }, { session: [] }],
       ...(method === 'post' ? { parameters: [{ name: 'Idempotency-Key', in: 'header', required: false, schema: { type: 'string', maxLength: 200 } }] } : {}),
       ...(op.body ? { requestBody: { content: { 'application/json': { schema: { $ref: `#/components/schemas/${op.body}` } } } } } : {}),
       responses: {
@@ -85,19 +93,25 @@ export const openapi = {
     securitySchemes: {
       oidc: { type: 'openIdConnect', openIdConnectUrl: '/.well-known/openid-configuration (tenant IdP)' },
       session: { type: 'apiKey', in: 'cookie', name: 'signet_session' },
+      runner: { type: 'http', scheme: 'bearer', description: 'Scoped connector runner enrollment secret' },
     },
     schemas: {
+      ClientEnrollment: { type: 'object', properties: { label: { type: 'string' }, environment: { type: 'string' } } },
       Problem: {
         type: 'object',
         properties: { type: { type: 'string' }, title: { type: 'string' }, status: { type: 'integer' }, detail: { type: 'string' }, rule: { type: 'string', description: 'Blueprint or Rulebook rule behind the refusal' }, instance: { type: 'string' } },
       },
-      BootstrapExchange: { type: 'object', required: ['bootstrap_credential'], properties: { bootstrap_credential: { type: 'string' } } },
+      BootstrapExchange: { oneOf: [
+        { type: 'object', required: ['bootstrap_credential'], properties: { bootstrap_credential: { type: 'string' } } },
+        { type: 'object', required: ['grant_type', 'client_id', 'client_secret'], properties: { grant_type: { const: 'client_credentials' }, client_id: { type: 'string' }, client_secret: { type: 'string' } } },
+      ] },
       AgentRegistration: {
         type: 'object',
-        required: ['handle', 'name', 'purpose', 'sponsor', 'tier', 'autonomy_level'],
+        required: ['handle', 'name', 'purpose', 'sponsor', 'autonomy_level'],
         properties: {
           handle: { type: 'string', pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$' }, name: { type: 'string' }, purpose: { type: 'string' }, owner: { type: 'string' }, sponsor: { type: 'string' },
           tier: { enum: ['T1', 'T2', 'T3', 'T4'] }, autonomy_level: { enum: ['L0', 'L1', 'L2', 'L3', 'L4'] },
+          connection_method: { enum: ['oauth', 'rest', 'bootstrap', 'hybrid'] },
           team: { type: 'array', items: { type: 'object', properties: { user: { type: 'string' }, role: { enum: ['builder', 'operator'] } } } },
         },
       },

@@ -153,6 +153,14 @@ export interface ToolAlias {
   secret_id: string | null;
   auth_header: string;
   actions: Record<string, { method: string; path: string }>; // http tools only
+  runner_id?: string | null;
+}
+
+export type ConnectionMethod = 'oauth' | 'rest' | 'bootstrap' | 'hybrid';
+
+export interface EdgeTask {
+  id: string; alias: string; action: string; args_json: string; expires_at: string;
+  target: { url: string; method: string; path: string };
 }
 
 export type DetectorMode = 'off' | 'shadow' | 'active';

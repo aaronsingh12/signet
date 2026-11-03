@@ -64,7 +64,7 @@ const parse = (r: Row): ApprovalRequest => ({ ...r, pack: JSON.parse(r.pack), sl
 
 const STEP_UP_SECONDS = 300; // BP 7.3: fresh MFA within 5 minutes for T1/T2 decisions and kill reversals
 
-type Handler = (req: ApprovalRequest, outcome: Outcome, p: Principal | null, decision?: Decision) => void;
+type Handler = (req: ApprovalRequest, outcome: Outcome, p: Principal | null, decision?: Decision) => Promise<void>;
 const handlers = new Map<ApprovalType, Handler>();
 export const onDecision = (type: ApprovalType, fn: Handler) => handlers.set(type, fn);
 
@@ -82,32 +82,32 @@ export interface CreateInput {
   data?: Record<string, unknown>;
 }
 
-export function create(input: CreateInput): ApprovalRequest {
+export async function create(input: CreateInput): Promise<ApprovalRequest> {
   if (!input.slots.length) throw invalid('an approval needs at least one slot');
   const id = newId('evt').replace('evt_', 'apr_');
   const packHash = sha256(canonicalize(input.pack));
   const now = Date.now();
-  tx(() => {
-    db.prepare(
+  (await tx(async () => {
+    (await db.prepare(
       'INSERT INTO approval_request (id, type, agent_id, subject_ref, title, summary, pack, pack_hash, slots, tier, status, sla_due, created_by, created_at, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    ).run(id, input.type, input.agent_id, input.subject_ref, input.title, input.summary, JSON.stringify(input.pack), packHash, JSON.stringify(input.slots), input.tier, 'pending', new Date(now + input.sla_ms).toISOString(), input.created_by, new Date(now).toISOString(), JSON.stringify(input.data ?? {}));
-    ledger.append({ kind: 'decision', agent_id: input.agent_id, data: { event: 'approval.requested', approval_id: id, type: input.type, subject_ref: input.subject_ref, pack_sha256: packHash, slots: input.slots.map((s) => `${s.slot}×${s.count}`), sla_due: new Date(now + input.sla_ms).toISOString(), requested_by: input.created_by } });
-  });
+    ).run(id, input.type, input.agent_id, input.subject_ref, input.title, input.summary, JSON.stringify(input.pack), packHash, JSON.stringify(input.slots), input.tier, 'pending', new Date(now + input.sla_ms).toISOString(), input.created_by, new Date(now).toISOString(), JSON.stringify(input.data ?? {})));
+    (await ledger.append({ kind: 'decision', agent_id: input.agent_id, data: { event: 'approval.requested', approval_id: id, type: input.type, subject_ref: input.subject_ref, pack_sha256: packHash, slots: input.slots.map((s) => `${s.slot}×${s.count}`), sla_due: new Date(now + input.sla_ms).toISOString(), requested_by: input.created_by } }));
+  }));
   const link = input.type === 'runtime_hitl' ? `/m/approvals/${id}` : `/approvals?id=${id}`;
   for (const s of input.slots) {
     if (s.owner_only) {
-      const owner = input.agent_id ? (db.prepare('SELECT owner FROM agent WHERE id = ?').get(input.agent_id) as { owner: string } | undefined)?.owner : undefined;
-      if (owner) notify(owner, 'approval', input.title, link);
-    } else notifyRoles(s.roles, 'approval', input.title, link);
+      const owner = input.agent_id ? ((await db.prepare('SELECT owner FROM agent WHERE id = ?').get(input.agent_id)) as { owner: string } | undefined)?.owner : undefined;
+      if (owner) (await notify(owner, 'approval', input.title, link));
+    } else (await notifyRoles(s.roles, 'approval', input.title, link));
   }
-  return get(id);
+  return (await get(id));
 }
 
-export function get(id: string): ApprovalRequest {
-  const r = db.prepare('SELECT * FROM approval_request WHERE id = ?').get(id) as Row | undefined;
+export async function get(id: string): Promise<ApprovalRequest> {
+  const r = (await db.prepare('SELECT * FROM approval_request WHERE id = ?').get(id)) as Row | undefined;
   if (!r) throw notFound(`approval ${id}`);
   const req = parse(r);
-  req.decisions = db.prepare('SELECT id, approver, slot, delegate_of, decision, comment, conditions, auth_strength, pack_hash, ts FROM approval_decision WHERE request_id = ? ORDER BY ts').all(id) as unknown as DecisionRow[];
+  req.decisions = (await db.prepare('SELECT id, approver, slot, delegate_of, decision, comment, conditions, auth_strength, pack_hash, ts FROM approval_decision WHERE request_id = ? ORDER BY ts').all(id)) as unknown as DecisionRow[];
   return req;
 }
 
@@ -117,11 +117,11 @@ interface AgentFacts {
   team: string[];
 }
 
-function agentFacts(agentId: string | null): AgentFacts | null {
+async function agentFacts(agentId: string | null): Promise<AgentFacts | null> {
   if (!agentId) return null;
-  const a = db.prepare('SELECT owner, created_by FROM agent WHERE id = ?').get(agentId) as { owner: string; created_by: string } | undefined;
+  const a = (await db.prepare('SELECT owner, created_by FROM agent WHERE id = ?').get(agentId)) as { owner: string; created_by: string } | undefined;
   if (!a) return null;
-  const team = (db.prepare('SELECT user FROM agent_team_member WHERE agent_id = ?').all(agentId) as { user: string }[]).map((t) => t.user);
+  const team = ((await db.prepare('SELECT "user" FROM agent_team_member WHERE agent_id = ?').all(agentId)) as { user: string }[]).map((t) => t.user);
   return { ...a, team };
 }
 
@@ -133,10 +133,10 @@ function filled(req: ApprovalRequest) {
 
 // Slots this person may fill now. Separation of duties (RB-INV-09): the proposer, owner and build
 // team can never fill an independent slot; the owner fills only the owner slot.
-export function eligibleSlots(req: ApprovalRequest, p: Principal): Slot[] {
+export async function eligibleSlots(req: ApprovalRequest, p: Principal): Promise<Slot[]> {
   if (req.status !== 'pending' || p.kind !== 'human') return [];
   if ((req.decisions ?? []).some((d) => d.approver === p.id)) return [];
-  const facts = agentFacts(req.agent_id);
+  const facts = (await agentFacts(req.agent_id));
   const counts = filled(req);
   return req.slots.filter((s) => {
     if ((counts[s.slot] ?? 0) >= s.count) return false;
@@ -147,9 +147,9 @@ export function eligibleSlots(req: ApprovalRequest, p: Principal): Slot[] {
   });
 }
 
-function activeDelegator(p: Principal): string | null {
+async function activeDelegator(p: Principal): Promise<string | null> {
   const now = nowIso();
-  const d = db.prepare('SELECT from_user FROM delegation WHERE to_user = ? AND from_date <= ? AND to_date >= ? ORDER BY created_at DESC LIMIT 1').get(p.id, now, now) as { from_user: string } | undefined;
+  const d = (await db.prepare('SELECT from_user FROM delegation WHERE to_user = ? AND from_date <= ? AND to_date >= ? ORDER BY created_at DESC LIMIT 1').get(p.id, now, now)) as { from_user: string } | undefined;
   return d?.from_user ?? null;
 }
 
@@ -160,18 +160,18 @@ export interface DecideInput {
   slot?: string;
 }
 
-export function decide(id: string, p: Principal, input: DecideInput): ApprovalRequest {
-  const req = get(id);
+export async function decide(id: string, p: Principal, input: DecideInput): Promise<ApprovalRequest> {
+  const req = (await get(id));
   if (req.status !== 'pending') throw new PolicyError('BP-7', `this approval is already ${req.status}`, 409);
   if (Date.parse(req.sla_due) < Date.now() && req.type === 'runtime_hitl') throw new PolicyError('RB-INV-11', 'this runtime approval timed out and was rejected', 409);
   if (!['approve', 'approve_session', 'reject', 'reject_quarantine', 'send_back'].includes(input.decision)) throw invalid('unknown decision');
   if ((input.decision === 'approve_session' || input.decision === 'reject_quarantine') && req.type !== 'runtime_hitl') throw invalid(`${input.decision} applies to runtime approvals only`);
   if (input.decision === 'send_back' && req.type !== 'certificate') throw invalid('send_back applies to certificate approvals');
   if (input.decision !== 'approve' && input.decision !== 'approve_session' && !input.comment?.trim()) throw invalid('a reason is required to reject or send back');
-  const slots = eligibleSlots(req, p);
+  const slots = (await eligibleSlots(req, p));
   const slot = input.slot ? slots.find((s) => s.slot === input.slot) : slots[0];
   if (!slot) {
-    const facts = agentFacts(req.agent_id);
+    const facts = (await agentFacts(req.agent_id));
     if (facts && [facts.owner, facts.created_by, ...facts.team].includes(p.id) && !req.slots.some((s) => s.owner_only && facts.owner === p.id)) {
       throw forbidden('RB-INV-09', `${p.id} proposed, owns or builds this agent and cannot approve it`);
     }
@@ -186,106 +186,110 @@ export function decide(id: string, p: Principal, input: DecideInput): ApprovalRe
   const auth = { method: p.auth, mfa: p.mfa, auth_age_s: age, step_up_required: stepUp };
   const decisionId = newId('evt').replace('evt_', 'dec_');
   let outcome: Outcome | null = null;
-  tx(() => {
-    db.prepare('INSERT INTO approval_decision (id, request_id, approver, slot, delegate_of, decision, comment, conditions, auth_strength, pack_hash, ts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
-      decisionId, id, p.id, slot.slot, activeDelegator(p), input.decision, input.comment ?? null, input.conditions ?? null, JSON.stringify(auth), req.pack_hash, nowIso(),
-    );
-    const after = get(id);
+  (await tx(async () => {
+    (await db.prepare('INSERT INTO approval_decision (id, request_id, approver, slot, delegate_of, decision, comment, conditions, auth_strength, pack_hash, ts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+      decisionId, id, p.id, slot.slot, (await activeDelegator(p)), input.decision, input.comment ?? null, input.conditions ?? null, JSON.stringify(auth), req.pack_hash, nowIso(),
+    ));
+    const after = (await get(id));
     if (input.decision === 'reject' || input.decision === 'reject_quarantine') outcome = 'rejected';
     else if (input.decision === 'send_back') outcome = 'sent_back';
     else {
       const counts = filled(after);
       if (after.slots.every((s) => (counts[s.slot] ?? 0) >= s.count)) outcome = 'approved';
     }
-    ledger.append({
+    (await ledger.append({
       kind: 'decision',
       agent_id: req.agent_id,
       data: { event: 'approval.decision', approval_id: id, type: req.type, decision: input.decision, slot: slot.slot, approver: p.id, conditions: input.conditions ?? null, comment: input.comment ?? null, pack_sha256: req.pack_hash, auth, complete: outcome },
-    });
+    }));
     if (outcome) {
       const status = outcome === 'approved' ? 'approved' : outcome === 'sent_back' ? 'sent_back' : 'rejected';
-      db.prepare('UPDATE approval_request SET status = ?, outcome = ?, decided_at = ? WHERE id = ?').run(status, input.decision, nowIso(), id);
+      (await db.prepare('UPDATE approval_request SET status = ?, outcome = ?, decided_at = ? WHERE id = ?').run(status, input.decision, nowIso(), id));
     }
-  });
-  const final = get(id);
-  if (outcome) finish(final, outcome, p, input.decision);
+  }));
+  const final = (await get(id));
+  if (outcome) (await finish(final, outcome, p, input.decision));
   return final;
 }
 
-function finish(req: ApprovalRequest, outcome: Outcome, p: Principal | null, decision?: Decision) {
+async function finish(req: ApprovalRequest, outcome: Outcome, p: Principal | null, decision?: Decision) {
   if (req.type === 'runtime_hitl') hub.publish('hitl', { approval_id: req.id, status: req.status, decision: decision ?? outcome });
   const h = handlers.get(req.type);
   if (h) {
     try {
-      h(req, outcome, p, decision);
+      await h(req, outcome, p, decision);
     } catch (e) {
-      console.error(`[control] approval handler for ${req.type} failed`, e);
+      console.error('approval handler failed', { type: req.type, error: e });
+      throw e;
     }
   }
 }
 
-export function cancel(id: string, actor: string, reason: string) {
-  const req = get(id);
+export async function cancel(id: string, actor: string, reason: string) {
+  const req = (await get(id));
   if (req.status !== 'pending') return req;
-  db.prepare("UPDATE approval_request SET status = 'cancelled', decided_at = ? WHERE id = ?").run(nowIso(), id);
-  ledger.append({ kind: 'decision', agent_id: req.agent_id, data: { event: 'approval.cancelled', approval_id: id, actor, reason } });
-  return get(id);
+  (await db.prepare("UPDATE approval_request SET status = 'cancelled', decided_at = ? WHERE id = ?").run(nowIso(), id));
+  (await ledger.append({ kind: 'decision', agent_id: req.agent_id, data: { event: 'approval.cancelled', approval_id: id, actor, reason } }));
+  return (await get(id));
 }
 
-export function list(opts: { status?: string; type?: string; agent?: string; limit?: number }) {
+export async function list(opts: { status?: string; type?: string; agent?: string; limit?: number }) {
   const where: string[] = [];
   const args: (string | number)[] = [];
   if (opts.status) (where.push('status = ?'), args.push(opts.status));
   if (opts.type) (where.push('type = ?'), args.push(opts.type));
   if (opts.agent) (where.push('agent_id = ?'), args.push(opts.agent));
   args.push(opts.limit ?? 100);
-  return (db.prepare(`SELECT * FROM approval_request ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY created_at DESC LIMIT ?`).all(...args) as unknown as Row[]).map(parse);
+  return ((await db.prepare(`SELECT * FROM approval_request ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY created_at DESC LIMIT ?`).all(...args)) as unknown as Row[]).map(parse);
 }
 
 // My Approvals: pending requests with a slot this person can fill, plus ones delegated to them.
-export function forMe(p: Principal) {
-  return list({ status: 'pending', limit: 500 })
-    .map((r) => ({ ...r, decisions: get(r.id).decisions }))
-    .filter((r) => eligibleSlots(r, p).length > 0)
-    .map((r) => ({ ...r, my_slots: eligibleSlots(r, p).map((s) => s.slot) }));
+export async function forMe(p: Principal) {
+  const requests = await list({ status: 'pending', limit: 500 });
+  const candidates = await Promise.all(requests.map(async (request) => {
+    const details = await get(request.id);
+    const slots = await eligibleSlots(details, p);
+    return { ...details, my_slots: slots.map((slot) => slot.slot) };
+  }));
+  return candidates.filter((request) => request.my_slots.length > 0);
 }
 
-export function delegate(p: Principal, to: string, fromDate: string, toDate: string) {
+export async function delegate(p: Principal, to: string, fromDate: string, toDate: string) {
   if (!to || to.toLowerCase() === p.id) throw invalid('delegate to someone else');
   if (!(Date.parse(fromDate) <= Date.parse(toDate))) throw invalid('date range is not valid');
   const id = newId('evt').replace('evt_', 'dlg_');
-  db.prepare('INSERT INTO delegation (id, from_user, to_user, from_date, to_date, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(id, p.id, to.toLowerCase(), new Date(fromDate).toISOString(), new Date(toDate).toISOString(), nowIso());
-  ledger.append({ kind: 'decision', data: { event: 'approval.delegated', from: p.id, to: to.toLowerCase(), from_date: fromDate, to_date: toDate } });
-  notify(to.toLowerCase(), 'delegation', `${p.name} delegated approvals to you until ${toDate.slice(0, 10)}`, '/approvals');
+  (await db.prepare('INSERT INTO delegation (id, from_user, to_user, from_date, to_date, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(id, p.id, to.toLowerCase(), new Date(fromDate).toISOString(), new Date(toDate).toISOString(), nowIso()));
+  (await ledger.append({ kind: 'decision', data: { event: 'approval.delegated', from: p.id, to: to.toLowerCase(), from_date: fromDate, to_date: toDate } }));
+  (await notify(to.toLowerCase(), 'delegation', `${p.name} delegated approvals to you until ${toDate.slice(0, 10)}`, '/approvals'));
   return { id };
 }
 
 // Escalation (BP 7.3): reminder at 50% of the SLA, escalation at 100%, governance flag at 200%.
 // Runtime holds that pass their SLA are rejected, which is what a timeout means (RB-INV-11).
-export function sweep() {
+export async function sweep() {
   const now = Date.now();
-  for (const req of list({ status: 'pending', limit: 1000 })) {
+  for (const req of (await list({ status: 'pending', limit: 1000 }))) {
     const start = Date.parse(req.created_at);
     const due = Date.parse(req.sla_due);
     const used = (now - start) / Math.max(1, due - start);
     if (req.type === 'runtime_hitl') {
       if (now > due) {
-        db.prepare("UPDATE approval_request SET status = 'expired', outcome = 'timeout_reject', decided_at = ? WHERE id = ?").run(nowIso(), req.id);
-        ledger.append({ kind: 'decision', agent_id: req.agent_id, data: { event: 'approval.expired', approval_id: req.id, rule_id: 'RB-INV-11', result: 'rejected on timeout' } });
-        finish(get(req.id), 'expired', null);
+        (await db.prepare("UPDATE approval_request SET status = 'expired', outcome = 'timeout_reject', decided_at = ? WHERE id = ?").run(nowIso(), req.id));
+        (await ledger.append({ kind: 'decision', agent_id: req.agent_id, data: { event: 'approval.expired', approval_id: req.id, rule_id: 'RB-INV-11', result: 'rejected on timeout' } }));
+        (await finish((await get(req.id)), 'expired', null));
       }
       continue;
     }
     const level = used >= 2 ? 3 : used >= 1 ? 2 : used >= 0.5 ? 1 : 0;
     if (level > req.escalation) {
-      db.prepare('UPDATE approval_request SET escalation = ? WHERE id = ?').run(level, req.id);
+      (await db.prepare('UPDATE approval_request SET escalation = ? WHERE id = ?').run(level, req.id));
       const label = ['', 'reminder (50% of SLA)', 'escalated (SLA passed)', 'flagged on the governance dashboard (200% of SLA)'][level];
-      ledger.append({ kind: 'decision', agent_id: req.agent_id, data: { event: 'approval.escalation', approval_id: req.id, level, label } });
-      if (level === 1) for (const s of req.slots) if (!s.owner_only) notifyRoles(s.roles, 'reminder', `Reminder: ${req.title}`, `/approvals?id=${req.id}`);
-      if (level >= 2) notifyRoles(['governance_board'], 'escalation', `Escalated: ${req.title}`, `/approvals?id=${req.id}`);
+      (await ledger.append({ kind: 'decision', agent_id: req.agent_id, data: { event: 'approval.escalation', approval_id: req.id, level, label } }));
+      if (level === 1) for (const s of req.slots) if (!s.owner_only) (await notifyRoles(s.roles, 'reminder', `Reminder: ${req.title}`, `/approvals?id=${req.id}`));
+      if (level >= 2) (await notifyRoles(['governance_board'], 'escalation', `Escalated: ${req.title}`, `/approvals?id=${req.id}`));
     }
   }
 }
 
-export const hitlGrant = (sessionId: string, agentId: string, actionKey: string) =>
-  db.prepare('SELECT request_id FROM hitl_grant WHERE session_id = ? AND agent_id = ? AND action_key = ? AND expires_at > ?').get(sessionId, agentId, actionKey, nowIso()) as { request_id: string } | undefined;
+export const hitlGrant = async (sessionId: string, agentId: string, actionKey: string) =>
+  (await db.prepare('SELECT request_id FROM hitl_grant WHERE session_id = ? AND agent_id = ? AND action_key = ? AND expires_at > ?').get(sessionId, agentId, actionKey, nowIso())) as { request_id: string } | undefined;

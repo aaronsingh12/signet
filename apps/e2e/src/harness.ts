@@ -49,6 +49,7 @@ export async function startStack(label: string): Promise<Stack> {
   const dataDir = mkdtempSync(join(tmpdir(), `signet-e2e-${label}-`));
   const stackEnv: Record<string, string> = {
     SIGNET_DATA_DIR: dataDir,
+    SIGNET_DB_SCHEMA: `test_${Date.now().toString(36)}_${randomBytes(4).toString('hex')}`,
     SIGNET_CONTROL_PORT: String(PORTS.control),
     SIGNET_CONTROL_URL: `http://localhost:${PORTS.control}`,
     SIGNET_GATEWAY_URL: `http://localhost:${PORTS.gw1}`,

@@ -21,7 +21,7 @@ USER node
 VOLUME ["/data"]
 
 FROM runtime-base AS control
-RUN npm init -y >/dev/null && npm install --omit=dev --ignore-scripts express@4.21.2 && npm cache clean --force
+RUN npm init -y >/dev/null && npm install --omit=dev --ignore-scripts express@4.21.2 pg@8.23.1 && npm cache clean --force
 COPY --from=build /src/dist/control.mjs /src/dist/signet-verify.mjs ./
 EXPOSE 4100
 HEALTHCHECK CMD node -e "fetch('http://localhost:4100/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
@@ -47,3 +47,11 @@ USER node
 EXPOSE 8300
 HEALTHCHECK CMD node -e "fetch('http://127.0.0.1:'+process.env.SIGNET_SIDECAR_PORT+'/signet/status').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 CMD ["node", "signet-sidecar.mjs"]
+
+# Outbound-only private HTTP connector worker; mount its allowlist and inject its enrollment secret.
+FROM node:24-slim AS edge
+ENV NODE_ENV=production SIGNET_HOME=/app
+WORKDIR /app
+COPY --from=build --chown=node:node /src/dist/signet-edge.mjs ./
+USER node
+CMD ["node", "signet-edge.mjs"]

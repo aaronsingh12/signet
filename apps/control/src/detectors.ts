@@ -18,17 +18,17 @@ const SEED = [
 ];
 
 for (const d of SEED) {
-  db.prepare('INSERT OR IGNORE INTO detector (id, version, mode, notes) VALUES (?, ?, ?, ?)').run(d.id, d.version, d.version === 'not-deployed' ? 'off' : 'shadow', d.notes);
-  db.prepare("UPDATE detector SET shadow_since = COALESCE(shadow_since, ?) WHERE id = ? AND mode = 'shadow'").run(nowIso(), d.id);
+  (await db.prepare('INSERT INTO detector (id, version, mode, notes) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING').run(d.id, d.version, d.version === 'not-deployed' ? 'off' : 'shadow', d.notes));
+  (await db.prepare("UPDATE detector SET shadow_since = COALESCE(shadow_since, ?) WHERE id = ? AND mode = 'shadow'").run(nowIso(), d.id));
 }
 
-export const list = () => db.prepare('SELECT * FROM detector ORDER BY id').all();
+export const list = async () => (await db.prepare('SELECT * FROM detector ORDER BY id').all());
 
-export function setMode(id: string, mode: DetectorMode, p: Principal, opts: { reason: string; dev_override?: boolean; model_sha256?: string }) {
+export async function setMode(id: string, mode: DetectorMode, p: Principal, opts: { reason: string; dev_override?: boolean; model_sha256?: string }) {
   if (!['off', 'shadow', 'active'].includes(mode)) throw invalid('mode must be off, shadow or active');
   if (p.kind !== 'human') throw forbidden('RB-INV-10', 'detector promotion is human-only');
   if (!opts.reason?.trim()) throw invalid('a reason is required');
-  const d = db.prepare('SELECT * FROM detector WHERE id = ?').get(id) as { id: string; version: string; mode: DetectorMode; shadow_since: string | null } | undefined;
+  const d = (await db.prepare('SELECT * FROM detector WHERE id = ?').get(id)) as { id: string; version: string; mode: DetectorMode; shadow_since: string | null } | undefined;
   if (!d) throw notFound(`detector ${id}`);
   if (d.version === 'not-deployed' && mode !== 'off') throw new PolicyError('E39', `${id} has no model deployed`, 409);
   let override = false;
@@ -43,12 +43,12 @@ export function setMode(id: string, mode: DetectorMode, p: Principal, opts: { re
       override = true;
     }
   }
-  tx(() => {
-    db.prepare('UPDATE detector SET mode = ?, shadow_since = CASE WHEN ? = ? THEN ? ELSE shadow_since END, promoted_by = ?, promoted_at = ?, model_sha256 = COALESCE(?, model_sha256) WHERE id = ?').run(
+  (await tx(async () => {
+    (await db.prepare('UPDATE detector SET mode = ?, shadow_since = CASE WHEN ? = ? THEN ? ELSE shadow_since END, promoted_by = ?, promoted_at = ?, model_sha256 = COALESCE(?, model_sha256) WHERE id = ?').run(
       mode, mode, 'shadow', nowIso(), p.id, nowIso(), opts.model_sha256 ?? null, id,
-    );
-    ledger.append({ kind: 'admin', data: { event: 'detector.mode_changed', detector: id, version: d.version, from: d.mode, to: mode, reason: opts.reason, shadow_period_skipped: override, actor: p.id } });
-  });
+    ));
+    (await ledger.append({ kind: 'admin', data: { event: 'detector.mode_changed', detector: id, version: d.version, from: d.mode, to: mode, reason: opts.reason, shadow_period_skipped: override, actor: p.id } }));
+  }));
   hub.publish('bundle', { reason: 'detector.mode_changed', detector: id });
-  return db.prepare('SELECT * FROM detector WHERE id = ?').get(id);
+  return (await db.prepare('SELECT * FROM detector WHERE id = ?').get(id));
 }

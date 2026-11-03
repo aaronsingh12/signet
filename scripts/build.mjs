@@ -4,13 +4,14 @@ import { build } from 'esbuild';
 import { cpSync, mkdirSync, rmSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 
-const external = ['express', '@huggingface/transformers', 'onnxruntime-node', '@open-policy-agent/opa-wasm'];
+const external = ['express', 'pg', '@huggingface/transformers', 'onnxruntime-node', '@open-policy-agent/opa-wasm'];
 const entries = {
   control: 'apps/control/src/index.ts',
   gateway: 'apps/gateway/src/index.ts',
   'signet-verify': 'apps/cli/src/verify.ts',
   'signet-keysweep': 'apps/cli/src/keysweep.ts',
   'signet-sidecar': 'apps/sidecar/src/index.ts',
+  'signet-edge': 'apps/edge/src/index.ts',
 };
 
 rmSync('dist', { recursive: true, force: true });

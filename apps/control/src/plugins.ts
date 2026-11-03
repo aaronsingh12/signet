@@ -111,19 +111,19 @@ export async function completeVercelConnection(req: Request, res: Response, acto
   const tokens = await exchangeCode(code, connection.verifier);
   const profile = await userInfo(tokens.accessToken);
   const now = nowIso();
-  db.prepare(`INSERT INTO vercel_connection (id, tenant_id, principal_id, vercel_user_id, email, name, access_token_sealed, refresh_token_sealed, expires_at, created_at, updated_at)
+  (await db.prepare(`INSERT INTO vercel_connection (id, tenant_id, principal_id, vercel_user_id, email, name, access_token_sealed, refresh_token_sealed, expires_at, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(tenant_id, principal_id) DO UPDATE SET vercel_user_id = excluded.vercel_user_id, email = excluded.email, name = excluded.name, access_token_sealed = excluded.access_token_sealed, refresh_token_sealed = excluded.refresh_token_sealed, expires_at = excluded.expires_at, updated_at = excluded.updated_at)`)
-    .run(newId('vrc'), tenant.id, actor.id, profile.id, profile.email, profile.name, seal(tokens.accessToken, TOKEN_KEY), tokens.refreshToken ? seal(tokens.refreshToken, TOKEN_KEY) : null, tokens.expiresAt, now, now);
+    .run(newId('vrc'), tenant.id, actor.id, profile.id, profile.email, profile.name, seal(tokens.accessToken, TOKEN_KEY), tokens.refreshToken ? seal(tokens.refreshToken, TOKEN_KEY) : null, tokens.expiresAt, now, now));
   res.redirect(`${OIDC.publicUrl}/plugins?vercel=connected`);
 }
 
-export function vercelConnection(actor: Principal): { configured: boolean; connected: boolean; email: string | null; name: string | null; expires_at: string | null } {
-  const row = db.prepare('SELECT email, name, expires_at FROM vercel_connection WHERE tenant_id = ? AND principal_id = ?').get(tenant.id, actor.id) as { email: string | null; name: string | null; expires_at: string | null } | undefined;
+export async function vercelConnection(actor: Principal): Promise<{ configured: boolean; connected: boolean; email: string | null; name: string | null; expires_at: string | null }> {
+  const row = (await db.prepare('SELECT email, name, expires_at FROM vercel_connection WHERE tenant_id = ? AND principal_id = ?').get(tenant.id, actor.id)) as { email: string | null; name: string | null; expires_at: string | null } | undefined;
   return { configured: configured(), connected: Boolean(row), email: row?.email ?? null, name: row?.name ?? null, expires_at: row?.expires_at ?? null };
 }
 
-export function disconnectVercel(actor: Principal): { disconnected: true } {
-  db.prepare('DELETE FROM vercel_connection WHERE tenant_id = ? AND principal_id = ?').run(tenant.id, actor.id);
+export async function disconnectVercel(actor: Principal): Promise<{ disconnected: true }> {
+  (await db.prepare('DELETE FROM vercel_connection WHERE tenant_id = ? AND principal_id = ?').run(tenant.id, actor.id));
   return { disconnected: true };
 }

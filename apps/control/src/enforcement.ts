@@ -33,50 +33,50 @@ interface StateRow {
 
 const live = (r: StateRow) => r.level === 'killed' || r.level === 'quarantined' || !r.until_ms || r.until_ms > Date.now();
 
-export function statesFor(agentId: string): StateRow[] {
-  return (db.prepare('SELECT * FROM enforcement_state WHERE agent_id = ?').all(agentId) as unknown as StateRow[]).filter(live);
+export async function statesFor(agentId: string): Promise<StateRow[]> {
+  return ((await db.prepare('SELECT * FROM enforcement_state WHERE agent_id = ?').all(agentId)) as unknown as StateRow[]).filter(live);
 }
 
 // The strictest blocking level that applies to an agent, or to one instance of it.
-export function agentBlocked(agentId: string, instanceId?: string): 'killed' | 'quarantined' | null {
+export async function agentBlocked(agentId: string, instanceId?: string): Promise<'killed' | 'quarantined' | null> {
   const keys = [scopeKey.agent(agentId)];
   if (instanceId) {
     keys.push(scopeKey.instance(instanceId));
-    const inst = db.prepare('SELECT version FROM agent_instance WHERE id = ?').get(instanceId) as { version: string } | undefined;
+    const inst = (await db.prepare('SELECT version FROM agent_instance WHERE id = ?').get(instanceId)) as { version: string } | undefined;
     if (inst) keys.push(scopeKey.version(agentId, inst.version));
   }
   let worst: 'killed' | 'quarantined' | null = null;
   for (const k of keys) {
-    const r = db.prepare('SELECT level FROM enforcement_state WHERE scope_key = ?').get(k) as { level: EnforcementLevel } | undefined;
+    const r = (await db.prepare('SELECT level FROM enforcement_state WHERE scope_key = ?').get(k)) as { level: EnforcementLevel } | undefined;
     if (r?.level === 'killed') return 'killed';
     if (r?.level === 'quarantined') worst = 'quarantined';
   }
   return worst;
 }
 
-export function agentLevel(agentId: string): EnforcementLevel {
-  const r = db.prepare('SELECT level, until_ms FROM enforcement_state WHERE scope_key = ?').get(scopeKey.agent(agentId)) as { level: EnforcementLevel; until_ms: number | null } | undefined;
+export async function agentLevel(agentId: string): Promise<EnforcementLevel> {
+  const r = (await db.prepare('SELECT level, until_ms FROM enforcement_state WHERE scope_key = ?').get(scopeKey.agent(agentId))) as { level: EnforcementLevel; until_ms: number | null } | undefined;
   if (!r) return 'active';
   return live({ level: r.level, until_ms: r.until_ms } as StateRow) ? r.level : 'active';
 }
 
-function currentCert(agentId: string): CertificateBody | null {
-  const row = db.prepare("SELECT body FROM certificate WHERE agent_id = ? AND status = 'active'").get(agentId) as { body: string } | undefined;
+async function currentCert(agentId: string): Promise<CertificateBody | null> {
+  const row = (await db.prepare("SELECT body FROM certificate WHERE agent_id = ? AND status = 'active'").get(agentId)) as { body: string } | undefined;
   return row ? (JSON.parse(row.body) as CertificateBody) : null;
 }
 
 // Set by the lifecycle module at start-up (avoids an import cycle).
-let rolloutSource: () => PolicyBundle['rollouts'] = () => ({});
-export const setRolloutSource = (fn: () => PolicyBundle['rollouts']) => (rolloutSource = fn);
+let rolloutSource: () => Promise<PolicyBundle['rollouts']> = async () => ({});
+export const setRolloutSource = (fn: () => Promise<PolicyBundle['rollouts']>) => (rolloutSource = fn);
 
-export function buildBundle(): string {
+export async function buildBundle(): Promise<string> {
   const now = Date.now();
   const enforcement: Record<string, ScopeState> = {};
-  for (const r of (db.prepare("SELECT * FROM enforcement_state WHERE level != 'active'").all() as unknown as StateRow[]).filter(live)) {
+  for (const r of ((await db.prepare("SELECT * FROM enforcement_state WHERE level != 'active'").all()) as unknown as StateRow[]).filter(live)) {
     const params = r.params ? (JSON.parse(r.params) as { factor?: number }) : {};
     enforcement[r.scope_key] = { level: r.level, until_ms: r.until_ms, ...(params.factor ? { factor: params.factor } : {}) };
   }
-  const rows = db.prepare("SELECT body, jws FROM certificate WHERE status = 'active'").all() as { body: string; jws: string }[];
+  const rows = (await db.prepare("SELECT body, jws FROM certificate WHERE status = 'active'").all()) as { body: string; jws: string }[];
   const policies: PolicyBundle['policies'] = {};
   for (const r of rows) {
     const cert = JSON.parse(r.body) as CertificateBody;
@@ -98,14 +98,14 @@ export function buildBundle(): string {
     certificates: rows.filter((r) => policies[(JSON.parse(r.body) as CertificateBody).cert_id]).map((r) => r.jws),
     policies,
     enforcement,
-    revoked_jti: (db.prepare('SELECT jti FROM revoked_jti WHERE exp > ?').all(Math.floor(now / 1000)) as { jti: string }[]).map((r) => r.jti),
-    erased_agent_hashes: (db.prepare("SELECT DISTINCT json_extract(data, '$.subject_hash') AS hash FROM ledger_record WHERE tenant_id = ? AND json_extract(data, '$.event') = 'record.erased'").all(tenant.id) as { hash: string }[]).map((row) => row.hash),
+    revoked_jti: ((await db.prepare('SELECT jti FROM revoked_jti WHERE exp > ?').all(Math.floor(now / 1000))) as { jti: string }[]).map((r) => r.jti),
+    erased_agent_hashes: ((await db.prepare("SELECT DISTINCT jsonb_extract_path_text(data::jsonb, 'subject_hash') AS hash FROM ledger_record WHERE tenant_id = ? AND jsonb_extract_path_text(data::jsonb, 'event') = 'record.erased'").all(tenant.id)) as { hash: string }[]).map((row) => row.hash),
     catalogue: tenant.settings.catalogue,
-    tools: listTools(),
-    detectors: db.prepare('SELECT id, version, mode FROM detector').all() as unknown as DetectorConfig[],
-    rollouts: rolloutSource(),
+    tools: (await listTools()),
+    detectors: (await db.prepare('SELECT id, version, mode FROM detector').all()) as unknown as DetectorConfig[],
+    rollouts: await rolloutSource(),
     hitl_wait_seconds: tenant.settings.hitl_wait_seconds,
-    llm_credential: (db.prepare("SELECT id AS secret_id, version FROM secret WHERE tenant_id = ? AND kind = 'llm_provider' ORDER BY created_at LIMIT 1").get(tenant.id) as { secret_id: string; version: number } | undefined) ?? null,
+    llm_credential: ((await db.prepare("SELECT id AS secret_id, version FROM secret WHERE tenant_id = ? AND kind = 'llm_provider' ORDER BY created_at LIMIT 1").get(tenant.id)) as { secret_id: string; version: number } | undefined) ?? null,
   };
   return signJws(bundle, keys.ca, 'signet-bundle');
 }
@@ -131,11 +131,11 @@ export interface LadderOptions {
 
 // Response ladder levels 2-5 (BP 5.4). Automatic triggers must cite a deterministic rule (RB-INV-05);
 // release is human-only (RB-INV-10); a kill is never lifted (RB-INV-08).
-export function applyLadder(target: LadderTarget, action: LadderAction, opts: LadderOptions) {
+export async function applyLadder(target: LadderTarget, action: LadderAction, opts: LadderOptions) {
   if (!opts.reason?.trim()) throw invalid('a reason is required');
   if (opts.automatic && !opts.rule_id) throw new PolicyError('RB-INV-05', 'automatic enforcement must reference a rule ID', 400);
   if (action === 'release' && opts.automatic) throw forbidden('RB-INV-10', 'lifting a ladder state is human-only');
-  const agent = db.prepare('SELECT id, tier, status FROM agent WHERE id = ?').get(target.agentId) as { id: string; tier: Tier; status: string } | undefined;
+  const agent = (await db.prepare('SELECT id, tier, status FROM agent WHERE id = ?').get(target.agentId)) as { id: string; tier: Tier; status: string } | undefined;
   if (!agent) throw new PolicyError('NOT_FOUND', `agent ${target.agentId} not found`, 404);
   const scope = target.scope ?? 'agent';
   if (scope === 'version' && !target.version) throw invalid('version scope needs a version');
@@ -143,9 +143,9 @@ export function applyLadder(target: LadderTarget, action: LadderAction, opts: La
   if ((action === 'step_up' || action === 'throttle') && scope !== 'agent') throw invalid(`${action} applies to the whole agent`);
   const key = scope === 'agent' ? scopeKey.agent(agent.id) : scope === 'version' ? scopeKey.version(agent.id, target.version!) : scopeKey.instance(target.instanceId!);
 
-  const existing = db.prepare('SELECT * FROM enforcement_state WHERE scope_key = ?').get(key) as StateRow | undefined;
+  const existing = (await db.prepare('SELECT * FROM enforcement_state WHERE scope_key = ?').get(key)) as StateRow | undefined;
   const current: EnforcementLevel = existing && live(existing) ? existing.level : 'active';
-  if (agentLevel(agent.id) === 'killed' || current === 'killed') {
+  if ((await agentLevel(agent.id)) === 'killed' || current === 'killed') {
     if (action === 'kill') return { event_id: null, scope_key: key, level: 'killed' as const, already: true };
     throw new PolicyError('RB-INV-08', 'a kill is never lifted; the agent needs a new seal through Assess', 409);
   }
@@ -166,34 +166,34 @@ export function applyLadder(target: LadderTarget, action: LadderAction, opts: La
   let tokensRevoked = 0;
   let rotation: string[] = [];
 
-  tx(() => {
-    if (level === 'active') db.prepare('DELETE FROM enforcement_state WHERE scope_key = ?').run(key);
+  (await tx(async () => {
+    if (level === 'active') (await db.prepare('DELETE FROM enforcement_state WHERE scope_key = ?').run(key));
     else {
-      db.prepare(
+      (await db.prepare(
         `INSERT INTO enforcement_state (scope_key, agent_id, level, rule_id, reason, until_ms, params, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(scope_key) DO UPDATE SET level = excluded.level, rule_id = excluded.rule_id, reason = excluded.reason, until_ms = excluded.until_ms, params = excluded.params, updated_at = excluded.updated_at`,
-      ).run(key, agent.id, level, opts.rule_id ?? null, opts.reason, until, JSON.stringify(params), nowIso());
+      ).run(key, agent.id, level, opts.rule_id ?? null, opts.reason, until, JSON.stringify(params), nowIso()));
     }
     if (level === 'killed' || level === 'quarantined') {
-      tokensRevoked = revokeTokensFor(agent.id, scope, target);
-      if (scope === 'instance') db.prepare('UPDATE agent_instance SET state = ? WHERE id = ?').run(level, target.instanceId!);
+      tokensRevoked = (await revokeTokensFor(agent.id, scope, target));
+      if (scope === 'instance') (await db.prepare('UPDATE agent_instance SET state = ? WHERE id = ?').run(level, target.instanceId!));
     }
     if (level === 'killed') {
-      const cert = currentCert(agent.id);
+      const cert = (await currentCert(agent.id));
       if (scope === 'agent' || (scope === 'version' && cert?.version === target.version)) {
-        db.prepare("UPDATE certificate SET status = 'revoked' WHERE agent_id = ? AND status = 'active'").run(agent.id);
+        (await db.prepare("UPDATE certificate SET status = 'revoked' WHERE agent_id = ? AND status = 'active'").run(agent.id));
       }
-      if (scope === 'agent') db.prepare("UPDATE agent SET status = 'killed' WHERE id = ?").run(agent.id);
+      if (scope === 'agent') (await db.prepare("UPDATE agent SET status = 'killed' WHERE id = ?").run(agent.id));
       // BP 5.4: credentials the agent could use are rotated.
-      rotation = credentialsOf(cert);
-      if (rotation.length) db.prepare(`UPDATE secret SET rotation_due = ? WHERE id IN (${rotation.map(() => '?').join(',')}) AND rotation_due IS NULL`).run(`${nowIso()} · kill ${eventId}`, ...rotation);
+      rotation = (await credentialsOf(cert));
+      if (rotation.length) (await db.prepare(`UPDATE secret SET rotation_due = ? WHERE id IN (${rotation.map(() => '?').join(',')}) AND rotation_due IS NULL`).run(`${nowIso()} · kill ${eventId}`, ...rotation));
     } else if (scope === 'agent') {
-      db.prepare('UPDATE agent SET status = ? WHERE id = ?').run(level === 'quarantined' ? 'quarantined' : 'sealed', agent.id);
+      (await db.prepare('UPDATE agent SET status = ? WHERE id = ?').run(level === 'quarantined' ? 'quarantined' : 'sealed', agent.id));
     }
-    db.prepare('INSERT INTO enforcement_event (id, agent_id, scope_key, level, rule_id, actor, reason, published_at, published_ms, nodes_expected) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+    (await db.prepare('INSERT INTO enforcement_event (id, agent_id, scope_key, level, rule_id, actor, reason, published_at, published_ms, nodes_expected) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
       eventId, agent.id, key, level, opts.rule_id ?? null, opts.actor, opts.reason, new Date(ts).toISOString(), ts, nodes,
-    );
-    ledger.append({
+    ));
+    (await ledger.append({
       kind: 'enforcement',
       agent_id: agent.id,
       data: {
@@ -201,52 +201,52 @@ export function applyLadder(target: LadderTarget, action: LadderAction, opts: La
         actor: opts.actor, automatic: !!opts.automatic, reason: opts.reason, until: until ? new Date(until).toISOString() : null,
         params, tokens_revoked: tokensRevoked, credentials_flagged_for_rotation: rotation, nodes_expected: nodes, evidence: opts.evidence ?? {},
       },
-    });
-  });
+    }));
+  }));
   hub.publish('enforcement', { event_id: eventId, scope_key: key, agent_id: agent.id, state: { level, until_ms: until, ...params }, published_ms: ts });
   // BP 5.4: every level 4+ event raises a security incident and a GRC issue through connectors.
   if (level === 'quarantined' || level === 'killed') {
     const payload = { agent_id: agent.id, tier: agent.tier, level, rule_id: opts.rule_id ?? null, reason: opts.reason, actor: opts.actor, event_id: eventId, scope_key: key };
-    enqueue('incident.create', correlation('incident', eventId), payload);
-    enqueue('issue.upsert', correlation('violation', eventId), { ...payload, title: `Level ${level === 'killed' ? 5 : 4} ${level}: ${opts.reason}`, severity: level === 'killed' ? 'critical' : 'high', state: 'open' });
+    (await enqueue('incident.create', correlation('incident', eventId), payload));
+    (await enqueue('issue.upsert', correlation('violation', eventId), { ...payload, title: `Level ${level === 'killed' ? 5 : 4} ${level}: ${opts.reason}`, severity: level === 'killed' ? 'critical' : 'high', state: 'open' }));
   }
   return { event_id: eventId, scope_key: key, level, previous_level: current, until: until ? new Date(until).toISOString() : null, nodes_expected: nodes, tokens_revoked: tokensRevoked, credentials_flagged_for_rotation: rotation };
 }
 
-export function revokeTokensFor(agentId: string, scope: string, t: LadderTarget): number {
+export async function revokeTokensFor(agentId: string, scope: string, t: LadderTarget): Promise<number> {
   const now = Math.floor(Date.now() / 1000);
   const rows = (
     scope === 'instance'
-      ? db.prepare('SELECT jti, exp FROM issued_token WHERE instance_id = ? AND exp > ?').all(t.instanceId!, now)
+      ? (await db.prepare('SELECT jti, exp FROM issued_token WHERE instance_id = ? AND exp > ?').all(t.instanceId!, now))
       : scope === 'version'
-        ? db.prepare('SELECT t.jti, t.exp FROM issued_token t JOIN agent_instance i ON i.id = t.instance_id WHERE t.agent_id = ? AND i.version = ? AND t.exp > ?').all(agentId, t.version!, now)
-        : db.prepare('SELECT jti, exp FROM issued_token WHERE agent_id = ? AND exp > ?').all(agentId, now)
+        ? (await db.prepare('SELECT t.jti, t.exp FROM issued_token t JOIN agent_instance i ON i.id = t.instance_id WHERE t.agent_id = ? AND i.version = ? AND t.exp > ?').all(agentId, t.version!, now))
+        : (await db.prepare('SELECT jti, exp FROM issued_token WHERE agent_id = ? AND exp > ?').all(agentId, now))
   ) as { jti: string; exp: number }[];
-  for (const r of rows) db.prepare('INSERT OR IGNORE INTO revoked_jti (jti, exp) VALUES (?, ?)').run(r.jti, r.exp);
+  for (const r of rows) (await db.prepare('INSERT INTO revoked_jti (jti, exp) VALUES (?, ?) ON CONFLICT DO NOTHING').run(r.jti, r.exp));
   return rows.length;
 }
 
-function credentialsOf(cert: CertificateBody | null): string[] {
+async function credentialsOf(cert: CertificateBody | null): Promise<string[]> {
   if (!cert) return [];
   const aliases = cert.tools.map((t) => t.server.replace(/^(mcp|http):\/\//, ''));
   const ids = new Set<string>();
   for (const a of aliases) {
-    const r = db.prepare('SELECT secret_id FROM tool WHERE alias = ?').get(a) as { secret_id: string | null } | undefined;
+    const r = (await db.prepare('SELECT secret_id FROM tool WHERE alias = ?').get(a)) as { secret_id: string | null } | undefined;
     if (r?.secret_id) ids.add(r.secret_id);
   }
-  for (const r of db.prepare("SELECT id FROM secret WHERE kind = 'llm_provider'").all() as { id: string }[]) ids.add(r.id);
+  for (const r of (await db.prepare("SELECT id FROM secret WHERE kind = 'llm_provider'").all()) as { id: string }[]) ids.add(r.id);
   return [...ids];
 }
 
 // Windows that ran out (step-up, throttle) are cleared and recorded; gateways also ignore them.
-export function sweepExpired() {
-  const rows = db.prepare("SELECT * FROM enforcement_state WHERE level IN ('step_up', 'throttled') AND until_ms IS NOT NULL AND until_ms <= ?").all(Date.now()) as unknown as StateRow[];
+export async function sweepExpired() {
+  const rows = (await db.prepare("SELECT * FROM enforcement_state WHERE level IN ('step_up', 'throttled') AND until_ms IS NOT NULL AND until_ms <= ?").all(Date.now())) as unknown as StateRow[];
   for (const r of rows) {
-    tx(() => {
-      db.prepare('DELETE FROM enforcement_state WHERE scope_key = ?').run(r.scope_key);
-      ledger.append({ kind: 'enforcement', agent_id: r.agent_id, data: { event: 'ladder.expired', scope_key: r.scope_key, level: r.level, rule_id: r.rule_id } });
-      db.prepare("UPDATE agent SET status = 'sealed' WHERE id = ? AND status = 'quarantined'").run(r.agent_id);
-    });
+    (await tx(async () => {
+      (await db.prepare('DELETE FROM enforcement_state WHERE scope_key = ?').run(r.scope_key));
+      (await ledger.append({ kind: 'enforcement', agent_id: r.agent_id, data: { event: 'ladder.expired', scope_key: r.scope_key, level: r.level, rule_id: r.rule_id } }));
+      (await db.prepare("UPDATE agent SET status = 'sealed' WHERE id = ? AND status = 'quarantined'").run(r.agent_id));
+    }));
     hub.publish('bundle', { reason: 'ladder.expired', scope_key: r.scope_key });
   }
 }
@@ -260,10 +260,10 @@ export interface Selector {
   tier?: Tier;
 }
 
-export function matchSelector(sel: Selector) {
+export async function matchSelector(sel: Selector) {
   if (!sel.model && !sel.tool && !sel.tag && !sel.tier) throw invalid('a circuit breaker needs at least one condition');
   if ('provider' in sel) throw new PolicyError('D-20', 'there is no provider selector: with one cloud LLM it would stop every agent (use a Tenant stop)', 400);
-  const rows = db.prepare("SELECT body FROM certificate WHERE status = 'active'").all() as { body: string }[];
+  const rows = (await db.prepare("SELECT body FROM certificate WHERE status = 'active'").all()) as { body: string }[];
   const glob = (g: string, v: string) => new RegExp(`^${g.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}$`).test(v);
   return rows
     .map((r) => JSON.parse(r.body) as CertificateBody)
@@ -271,34 +271,34 @@ export function matchSelector(sel: Selector) {
     .map((c) => c.agent_id);
 }
 
-export function armBreaker(sel: Selector, action: 'quarantine' | 'kill', reason: string, p: Principal) {
+export async function armBreaker(sel: Selector, action: 'quarantine' | 'kill', reason: string, p: Principal) {
   if (p.kind !== 'human') throw forbidden('RB-KILL-13', 'circuit breakers are armed by people only');
-  const matched = matchSelector(sel);
+  const matched = (await matchSelector(sel));
   const id = newId('cbk');
-  db.prepare('INSERT INTO circuit_breaker (id, selector, action, armed_by, reason, matched, armed_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, JSON.stringify(sel), action, p.id, reason, JSON.stringify(matched), nowIso());
-  ledger.append({ kind: 'enforcement', data: { event: 'circuit_breaker.armed', breaker_id: id, selector: sel, action, matched, actor: p.id, reason } });
-  const results = matched.map((agentId) => applyLadder({ agentId }, action, { actor: p.id, reason: `circuit breaker ${id}: ${reason}`, rule_id: 'BP-5.4-L6' }));
+  (await db.prepare('INSERT INTO circuit_breaker (id, selector, action, armed_by, reason, matched, armed_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, JSON.stringify(sel), action, p.id, reason, JSON.stringify(matched), nowIso()));
+  (await ledger.append({ kind: 'enforcement', data: { event: 'circuit_breaker.armed', breaker_id: id, selector: sel, action, matched, actor: p.id, reason } }));
+  const results = (await Promise.all(matched.map(async (agentId) => (await applyLadder({ agentId }, action, { actor: p.id, reason: `circuit breaker ${id}: ${reason}`, rule_id: 'BP-5.4-L6' })))));
   return { breaker_id: id, matched: matched.length, results };
 }
 
-export function recordAck(eventId: string, nodeId: string) {
-  const ev = db.prepare('SELECT published_ms FROM enforcement_event WHERE id = ?').get(eventId) as { published_ms: number } | undefined;
+export async function recordAck(eventId: string, nodeId: string) {
+  const ev = (await db.prepare('SELECT published_ms FROM enforcement_event WHERE id = ?').get(eventId)) as { published_ms: number } | undefined;
   if (!ev) return;
-  db.prepare('INSERT OR IGNORE INTO kill_ack (event_id, gateway_node_id, acked_at, latency_ms) VALUES (?, ?, ?, ?)').run(eventId, nodeId, nowIso(), Date.now() - ev.published_ms);
+  (await db.prepare('INSERT INTO kill_ack (event_id, gateway_node_id, acked_at, latency_ms) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING').run(eventId, nodeId, nowIso(), Date.now() - ev.published_ms));
 }
 
-export function eventStatus(eventId: string) {
-  const ev = db.prepare('SELECT * FROM enforcement_event WHERE id = ?').get(eventId);
+export async function eventStatus(eventId: string) {
+  const ev = (await db.prepare('SELECT * FROM enforcement_event WHERE id = ?').get(eventId));
   if (!ev) throw new PolicyError('NOT_FOUND', 'event not found', 404);
-  const acks = db.prepare('SELECT gateway_node_id, acked_at, latency_ms FROM kill_ack WHERE event_id = ? ORDER BY latency_ms').all(eventId);
+  const acks = (await db.prepare('SELECT gateway_node_id, acked_at, latency_ms FROM kill_ack WHERE event_id = ? ORDER BY latency_ms').all(eventId));
   return { event: ev, acks };
 }
 
-export function recentEvents(limit: number, agentId?: string) {
+export async function recentEvents(limit: number, agentId?: string) {
   const rows = (agentId
-    ? db.prepare('SELECT * FROM enforcement_event WHERE agent_id = ? ORDER BY published_ms DESC LIMIT ?').all(agentId, limit)
-    : db.prepare('SELECT * FROM enforcement_event ORDER BY published_ms DESC LIMIT ?').all(limit)) as { id: string }[];
-  return rows.map((e) => ({ ...e, acks: db.prepare('SELECT gateway_node_id, latency_ms FROM kill_ack WHERE event_id = ? ORDER BY latency_ms').all(e.id) }));
+    ? (await db.prepare('SELECT * FROM enforcement_event WHERE agent_id = ? ORDER BY published_ms DESC LIMIT ?').all(agentId, limit))
+    : (await db.prepare('SELECT * FROM enforcement_event ORDER BY published_ms DESC LIMIT ?').all(limit))) as { id: string }[];
+  return (await Promise.all(rows.map(async (e) => ({ ...e, acks: (await db.prepare('SELECT gateway_node_id, latency_ms FROM kill_ack WHERE event_id = ? ORDER BY latency_ms').all(e.id)) }))));
 }
 
-export const breakers = () => db.prepare('SELECT * FROM circuit_breaker ORDER BY armed_at DESC LIMIT 20').all();
+export const breakers = async () => (await db.prepare('SELECT * FROM circuit_breaker ORDER BY armed_at DESC LIMIT 20').all());

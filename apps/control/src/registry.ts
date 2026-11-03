@@ -1,6 +1,6 @@
 import {
   DATA_TAGS, RESTRICTED_TAGS, canonicalize, newId, sha256, signJws,
-  type Autonomy, type CertificateBody, type DataTag, type HitlRule, type Impact, type Limits, type ModelGrant, type Tier, type ToolGrant,
+  type Autonomy, type CertificateBody, type ConnectionMethod, type DataTag, type HitlRule, type Impact, type Limits, type ModelGrant, type Tier, type ToolGrant,
 } from '@signet/core';
 import { compilePolicy, policyHash } from './compile';
 import { db, nowIso, tx } from './db';
@@ -30,6 +30,7 @@ export interface AgentRow {
   model_provider: string | null;
   vendor: string | null;
   vendor_details: string; // JSON
+  connection_method: ConnectionMethod | null;
 }
 
 // How an agent reaches Signet. Self-hosted, framework and no-code agents send their model and tool
@@ -44,14 +45,14 @@ const AUTONOMY: Autonomy[] = ['L0', 'L1', 'L2', 'L3', 'L4'];
 const IMPACTS: Impact[] = ['read', 'write', 'privileged', 'critical'];
 const VALIDITY_DAYS: Record<Tier, number> = { T1: 90, T2: 180, T3: 365, T4: 365 }; // BP 4.3
 
-export function getAgent(ref: string): AgentRow {
-  const row = db.prepare('SELECT * FROM agent WHERE tenant_id = ? AND (id = ? OR handle = ?)').get(tenant.id, ref, ref) as AgentRow | undefined;
+export async function getAgent(ref: string): Promise<AgentRow> {
+  const row = (await db.prepare('SELECT * FROM agent WHERE tenant_id = ? AND (id = ? OR handle = ?)').get(tenant.id, ref, ref)) as AgentRow | undefined;
   if (!row) throw notFound(`agent ${ref}`);
   return row;
 }
 
-export const teamOf = (agentId: string) =>
-  db.prepare('SELECT user, role FROM agent_team_member WHERE agent_id = ?').all(agentId) as { user: string; role: string }[];
+export const teamOf = async (agentId: string) =>
+  (await db.prepare('SELECT "user", role FROM agent_team_member WHERE agent_id = ?').all(agentId)) as { user: string; role: string }[];
 
 // Owners may act on their own agents with owner-scoped permissions; everyone else needs the role.
 export function assertCan(p: Principal, perm: Permission, agent: AgentRow) {
@@ -75,36 +76,40 @@ export interface RegisterInput {
   model_provider?: string;
   vendor?: string;
   vendor_details?: Record<string, string>;
+  connection_method?: ConnectionMethod;
 }
 
 // Stage 1 Propose: the agent gets its permanent ID; the tier is provisional until Classify (BP 6).
-export function registerAgent(input: RegisterInput, p: Principal): AgentRow {
+export async function registerAgent(input: RegisterInput, p: Principal): Promise<AgentRow> {
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(input.handle ?? '') || input.handle.length > 63) throw invalid('handle must be kebab-case, at most 63 characters');
-  for (const f of ['name', 'purpose', 'sponsor'] as const) if (!String(input[f] ?? '').trim()) throw invalid(`${f} is required`);
+  for (const f of ['name', 'purpose', 'sponsor'] as const) if (typeof input[f] !== 'string' || !input[f].trim()) throw invalid(`${f} must be a non-empty string`);
+  if (input.connection_method !== undefined && !['oauth', 'rest', 'bootstrap', 'hybrid'].includes(input.connection_method)) throw invalid('connection_method must be oauth, rest, bootstrap or hybrid');
   const tier: Tier = input.tier ?? 'T3';
   if (!TIERS.includes(tier)) throw invalid('tier must be T1-T4');
   if (!AUTONOMY.includes(input.autonomy_level)) throw invalid('autonomy_level must be L0-L4');
   const kind: AgentKind = input.kind ?? 'self_hosted';
   if (!AGENT_KINDS.includes(kind)) throw invalid(`kind must be one of ${AGENT_KINDS.join(', ')}`);
+  if (kind === 'third_party' && (input.connection_method === 'bootstrap' || input.connection_method === 'hybrid')) throw invalid('vendor-hosted agents connect through OAuth or REST for company tools');
   if (kind === 'third_party' && !shortText(input.vendor)) throw invalid('a third-party agent needs its vendor');
   const vendorDetails = Object.fromEntries(Object.entries(input.vendor_details ?? {}).filter(([k, v]) => /^[a-z_]{1,40}$/.test(k) && typeof v === 'string').map(([k, v]) => [k, String(v).slice(0, 500)]));
   const owner = (input.owner ?? p.id).toLowerCase();
   if (p.kind === 'human' && !can(p, 'certificates.approve') && owner !== p.id) throw forbidden('RBAC', 'agent owners can only propose agents they own');
   const id = newId('agt');
-  return tx(() => {
-    if (db.prepare('SELECT 1 FROM agent WHERE tenant_id = ? AND handle = ?').get(tenant.id, input.handle)) {
+  return (await tx(async () => {
+    if ((await db.prepare('SELECT 1 FROM agent WHERE tenant_id = ? AND handle = ?').get(tenant.id, input.handle))) {
       throw new PolicyError('VALIDATION', `handle ${input.handle} is taken`, 409);
     }
-    db.prepare(
+    (await db.prepare(
       'INSERT INTO agent (id, tenant_id, handle, name, purpose, owner, sponsor, tier, autonomy_level, status, created_at, created_by, kind, runtime, framework, model_provider, vendor, vendor_details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     ).run(
       id, tenant.id, input.handle, input.name.trim(), input.purpose.trim(), owner, input.sponsor.toLowerCase(), tier, input.autonomy_level, 'proposed', nowIso(), p.id,
       kind, shortText(input.runtime), shortText(input.framework), shortText(input.model_provider), kind === 'third_party' ? shortText(input.vendor) : null, JSON.stringify(vendorDetails),
-    );
-    for (const m of input.team ?? []) db.prepare('INSERT INTO agent_team_member (agent_id, user, role) VALUES (?, ?, ?)').run(id, m.user.toLowerCase(), m.role);
-    ledger.append({ kind: 'lifecycle', agent_id: id, data: { event: 'agent.registered', handle: input.handle, agent_kind: kind, vendor: input.vendor ?? null, provisional_tier: tier, autonomy_level: input.autonomy_level, owner, actor: p.id } });
-    return getAgent(id);
-  });
+    ));
+    (await db.prepare('UPDATE agent SET connection_method = ? WHERE id = ?').run(input.connection_method ?? (kind === 'third_party' ? 'oauth' : 'bootstrap'), id));
+    for (const m of input.team ?? []) (await db.prepare('INSERT INTO agent_team_member (agent_id, "user", role) VALUES (?, ?, ?)').run(id, m.user.toLowerCase(), m.role));
+    (await ledger.append({ kind: 'lifecycle', agent_id: id, data: { event: 'agent.registered', handle: input.handle, agent_kind: kind, vendor: input.vendor ?? null, provisional_tier: tier, autonomy_level: input.autonomy_level, owner, actor: p.id } }));
+    return (await getAgent(id));
+  }));
 }
 
 const globToRegex = (glob: string) => new RegExp(`^${glob.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}$`);
@@ -123,7 +128,7 @@ export interface SealInput {
 }
 
 // Seal validation: every check cites the rule it enforces.
-export function validateSeal(agent: Pick<AgentRow, 'tier'> & { kind?: AgentKind }, input: SealInput) {
+export async function validateSeal(agent: Pick<AgentRow, 'tier'> & { kind?: AgentKind }, input: SealInput) {
   if (agent.kind === 'third_party') {
     // The vendor's model runs outside Signet; a model grant would claim coverage Signet does not have.
     if (input.models?.length) throw new PolicyError('VALIDATION', 'a third-party agent uses its vendor\'s model, which Signet cannot route; list no models, only the company tools it may call');
@@ -139,7 +144,7 @@ export function validateSeal(agent: Pick<AgentRow, 'tier'> & { kind?: AgentKind 
   for (const t of input.tools ?? []) {
     const m = t.server.match(/^(mcp|http):\/\/([a-z0-9-]+)$/);
     if (!m) throw invalid(`tool server ${t.server} must look like mcp://<alias> or http://<alias>`);
-    const alias = getTool(m[2]!);
+    const alias = (await getTool(m[2]!));
     if (!alias) throw new PolicyError('BP-5.1', `tool alias ${m[2]} is not registered`);
     if (alias.kind !== m[1]) throw invalid(`tool alias ${m[2]} is a ${alias.kind} tool, not ${m[1]}`);
     for (const tag of t.data_scopes ?? []) {
@@ -191,21 +196,21 @@ export interface SealContext {
 }
 
 /** Preserve approvals for agents registered before lifecycle onboarding was introduced. */
-export function issueSeal(agentRef: string, input: SealInput, actor: Principal): ReturnType<typeof signSeal> {
-  const agent = getAgent(agentRef);
+export async function issueSeal(agentRef: string, input: SealInput, actor: Principal): Promise<Awaited<ReturnType<typeof signSeal>>> {
+  const agent = (await getAgent(agentRef));
   if (!can(actor, 'certificates.approve') || actor.kind !== 'human') throw forbidden('RBAC', 'a human certificate approver is required');
-  if ([agent.owner, agent.created_by, ...teamOf(agent.id).map((member) => member.user)].includes(actor.id)) throw forbidden('RB-INV-09', 'owners, proposers and builders cannot approve their own agent');
-  if (db.prepare('SELECT 1 FROM lifecycle WHERE agent_id = ?').get(agent.id)) throw new PolicyError('BP-6', 'Complete this agent’s lifecycle approval matrix before issuing its seal', 409);
-  return signSeal(agent.id, input, { approvers: [{ user: actor.id, at: nowIso() }], evidence_refs: {}, regulatory_category: 'legacy', minor: false, actor: actor.id });
+  if ([agent.owner, agent.created_by, ...(await teamOf(agent.id)).map((member) => member.user)].includes(actor.id)) throw forbidden('RB-INV-09', 'owners, proposers and builders cannot approve their own agent');
+  if ((await db.prepare('SELECT 1 FROM lifecycle WHERE agent_id = ?').get(agent.id))) throw new PolicyError('BP-6', 'Complete this agent’s lifecycle approval matrix before issuing its seal', 409);
+  return (await signSeal(agent.id, input, { approvers: [{ user: actor.id, at: nowIso() }], evidence_refs: {}, regulatory_category: 'legacy', minor: false, actor: actor.id }));
 }
 
-export function signSeal(agentRef: string, input: SealInput, ctx: SealContext) {
-  const agent = getAgent(agentRef);
+export async function signSeal(agentRef: string, input: SealInput, ctx: SealContext) {
+  const agent = (await getAgent(agentRef));
   if (agent.status === 'killed') throw new PolicyError('RB-INV-08', 'a killed agent re-enters only through a new lifecycle from Assess', 409);
   if (agent.status === 'retired') throw new PolicyError('VALIDATION', 'agent is retired', 409);
-  validateSeal(agent, input);
+  (await validateSeal(agent, input));
   const issued = new Date();
-  const prev = db.prepare("SELECT version FROM certificate WHERE agent_id = ? ORDER BY issued_at DESC LIMIT 1").get(agent.id) as { version: string } | undefined;
+  const prev = (await db.prepare("SELECT version FROM certificate WHERE agent_id = ? ORDER BY issued_at DESC LIMIT 1").get(agent.id)) as { version: string } | undefined;
   const [maj, min] = (prev?.version ?? 'v0.0').slice(1).split('.').map(Number) as [number, number];
   const version = !prev ? 'v1.0' : ctx.minor ? `v${maj}.${min + 1}` : `v${maj + 1}.0`;
   const draft: Omit<CertificateBody, 'policy_sha256'> = {
@@ -235,34 +240,34 @@ export function signSeal(agentRef: string, input: SealInput, ctx: SealContext) {
   const policy = compilePolicy(draft, tenant.settings.baseline);
   const body: CertificateBody = { ...draft, policy_sha256: policyHash(policy) };
   const jws = signJws(body, keys.ca, 'signet-seal');
-  tx(() => {
-    db.prepare("UPDATE certificate SET status = 'superseded' WHERE agent_id = ? AND status = 'active'").run(agent.id);
-    db.prepare('INSERT INTO certificate (id, agent_id, version, body, jws, policy_hash, status, valid_from, valid_to, issued_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+  (await tx(async () => {
+    (await db.prepare("UPDATE certificate SET status = 'superseded' WHERE agent_id = ? AND status = 'active'").run(agent.id));
+    (await db.prepare('INSERT INTO certificate (id, agent_id, version, body, jws, policy_hash, status, valid_from, valid_to, issued_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
       body.cert_id, agent.id, body.version, JSON.stringify(body), jws, body.policy_sha256, 'active', body.valid_from, body.valid_to, body.issued_at,
-    );
-    db.prepare("UPDATE agent SET status = 'sealed' WHERE id = ?").run(agent.id);
-    ledger.append({
+    ));
+    (await db.prepare("UPDATE agent SET status = 'sealed' WHERE id = ?").run(agent.id));
+    (await ledger.append({
       kind: 'lifecycle',
       agent_id: agent.id,
       cert_id: body.cert_id,
       data: { event: 'certificate.issued', version: body.version, cert_sha256: sha256(canonicalize(body)), policy_sha256: body.policy_sha256, approvers: ctx.approvers.map((a) => a.user), evidence_refs: ctx.evidence_refs, valid_to: body.valid_to, actor: ctx.actor },
-    });
-  });
+    }));
+  }));
   return { certificate: body, jws, policy };
 }
 
-export function activeCertificate(agentId: string) {
-  const row = db.prepare("SELECT body, jws FROM certificate WHERE agent_id = ? AND status = 'active'").get(agentId) as { body: string; jws: string } | undefined;
+export async function activeCertificate(agentId: string) {
+  const row = (await db.prepare("SELECT body, jws FROM certificate WHERE agent_id = ? AND status = 'active'").get(agentId)) as { body: string; jws: string } | undefined;
   return row ? { certificate: JSON.parse(row.body) as CertificateBody, jws: row.jws } : null;
 }
 
-export function certificates(agentId: string) {
-  return (db.prepare('SELECT id, version, status, valid_from, valid_to, issued_at FROM certificate WHERE agent_id = ? ORDER BY issued_at DESC').all(agentId)) as {
+export async function certificates(agentId: string) {
+  return ((await db.prepare('SELECT id, version, status, valid_from, valid_to, issued_at FROM certificate WHERE agent_id = ? ORDER BY issued_at DESC').all(agentId))) as {
     id: string; version: string; status: string; valid_from: string; valid_to: string; issued_at: string;
   }[];
 }
 
-export function listAgents(opts: { tier?: string; status?: string; q?: string; cursor?: string | null; limit: number }) {
+export async function listAgents(opts: { tier?: string; status?: string; q?: string; cursor?: string | null; limit: number }) {
   const where = ['a.tenant_id = ?'];
   const args: (string | number)[] = [tenant.id];
   if (opts.tier) (where.push('a.tier = ?'), args.push(opts.tier));
@@ -270,14 +275,14 @@ export function listAgents(opts: { tier?: string; status?: string; q?: string; c
   if (opts.q) (where.push('(a.handle LIKE ? OR a.name LIKE ? OR a.owner LIKE ?)'), args.push(`%${opts.q}%`, `%${opts.q}%`, `%${opts.q}%`));
   if (opts.cursor) (where.push('a.id < ?'), args.push(opts.cursor));
   args.push(opts.limit + 1);
-  const rows = db
+  const rows = (await db
     .prepare(
       `SELECT a.*, c.id AS cert_id, c.version, c.valid_to,
               (SELECT MAX(ts) FROM ledger_record l WHERE l.agent_id = a.id AND l.kind = 'transaction') AS last_activity
        FROM agent a LEFT JOIN certificate c ON c.agent_id = a.id AND c.status = 'active'
        WHERE ${where.join(' AND ')} ORDER BY a.id DESC LIMIT ?`,
     )
-    .all(...args) as unknown as (AgentRow & { cert_id: string | null; version: string | null; valid_to: string | null; last_activity: string | null })[];
+    .all(...args)) as unknown as (AgentRow & { cert_id: string | null; version: string | null; valid_to: string | null; last_activity: string | null })[];
   const more = rows.length > opts.limit;
   const items = rows.slice(0, opts.limit);
   return { items, next_cursor: more ? items[items.length - 1]!.id : null };

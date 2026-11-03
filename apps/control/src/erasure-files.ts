@@ -11,8 +11,8 @@ interface WorkloadArtifact { agent_id?: string; claims?: { agent_id: string } }
 interface PackageLine { type: string; record?: LedgerRecord; format?: string }
 
 /** Rewrite only Signet-owned evidence copies; signed roots still commit to the unchanged record hashes. */
-export function eraseEvidenceFiles(days: string[]): void {
-  const records = [...ledger.all()];
+export async function eraseEvidenceFiles(days: string[]): Promise<void> {
+  const records = [...(await ledger.all())];
   for (const day of days) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new TypeError(`Invalid evidence day: ${day}`);
     const file = join(DATA_DIR, 'worm', tenant.id, 'segments', `${day}.jsonl`);

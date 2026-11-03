@@ -7,6 +7,7 @@ export * from './devauth';
 export * from './dlp';
 export * from './env';
 export * from './http';
+export * from './http-tool';
 export * from './ids';
 export * from './jwt';
 export * from './ledger';

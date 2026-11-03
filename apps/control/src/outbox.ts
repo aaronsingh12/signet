@@ -16,12 +16,12 @@ export type OutboundEvent =
 
 export const correlation = (object: string, id: string) => `signet:${tenant.id}:${object}:${id}`;
 
-export function enqueue(event: OutboundEvent, objectKey: string, payload: Record<string, unknown>) {
-  const connectors = db.prepare("SELECT id FROM connector WHERE status = 'active'").all() as { id: string }[];
+export async function enqueue(event: OutboundEvent, objectKey: string, payload: Record<string, unknown>) {
+  const connectors = (await db.prepare("SELECT id FROM connector WHERE status = 'active'").all()) as { id: string }[];
   for (const c of connectors) {
-    db.prepare('INSERT INTO connector_outbox (id, connector_id, event, object_key, payload, status, next_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
+    (await db.prepare('INSERT INTO connector_outbox (id, connector_id, event, object_key, payload, status, next_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
       newId('evt').replace('evt_', 'obx_'), c.id, event, objectKey, JSON.stringify(payload), 'pending', Date.now(), nowIso(),
-    );
+    ));
   }
   return connectors.length;
 }

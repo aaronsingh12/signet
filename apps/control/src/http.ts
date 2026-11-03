@@ -12,8 +12,15 @@ export const route =
     try {
       const out = await fn(req, res);
       if (res.headersSent || out === undefined) return;
-      if (Array.isArray(out) && out.length === 2 && typeof out[0] === 'number') res.status(out[0]).json(out[1]);
-      else res.json(out);
+      const pair = Array.isArray(out) && out.length === 2 && typeof out[0] === 'number';
+      const status: number = pair ? out[0] : res.statusCode;
+      const body: unknown = pair ? out[1] : out;
+      const pending = res.locals.idempotency as { key: string; principal: string } | undefined;
+      if (pending && status < 500 && res.getHeader('cache-control') !== 'no-store') {
+        await db.prepare('INSERT INTO idempotency_key (key, principal, method, path, status, body, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING')
+          .run(pending.key, pending.principal, req.method, req.originalUrl, status, JSON.stringify(body), nowIso());
+      }
+      res.status(status).json(body);
     } catch (e) {
       next(e);
     }
@@ -39,29 +46,23 @@ export function problemHandler(err: unknown, req: Request, res: Response, _next:
 }
 
 // Replays the stored response when a POST is retried with the same Idempotency-Key by the same caller.
-export function idempotency(req: Request, res: Response, next: NextFunction) {
-  const key = req.headers['idempotency-key'];
-  const principal = (res.locals.principal as Principal | undefined)?.id;
-  if (req.method !== 'POST' || typeof key !== 'string' || !principal) return next();
-  if (key.length > 200) return next(new PolicyError('VALIDATION', 'Idempotency-Key too long', 400));
-  const prior = db.prepare('SELECT method, path, status, body FROM idempotency_key WHERE key = ? AND principal = ?').get(key, principal) as
-    | { method: string; path: string; status: number; body: string }
-    | undefined;
-  if (prior) {
-    if (prior.path !== req.originalUrl) return next(new PolicyError('IDEMPOTENCY', 'this Idempotency-Key was used for a different request', 422));
-    res.setHeader('idempotency-replayed', 'true');
-    return res.status(prior.status).type('application/json').send(prior.body);
-  }
-  const json = res.json.bind(res);
-  res.json = (body: unknown) => {
-    if (res.statusCode < 500) {
-      db.prepare('INSERT OR IGNORE INTO idempotency_key (key, principal, method, path, status, body, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
-        key, principal, req.method, req.originalUrl, res.statusCode, JSON.stringify(body), nowIso(),
-      );
+export async function idempotency(req: Request, res: Response, next: NextFunction) {
+  try {
+    const key = req.headers['idempotency-key'];
+    const principal = (res.locals.principal as Principal | undefined)?.id;
+    if (req.method !== 'POST' || typeof key !== 'string' || !principal) return next();
+    if (key.length > 200) return next(new PolicyError('VALIDATION', 'Idempotency-Key too long', 400));
+    const prior = (await db.prepare('SELECT method, path, status, body FROM idempotency_key WHERE key = ? AND principal = ?').get(key, principal)) as
+      | { method: string; path: string; status: number; body: string }
+      | undefined;
+    if (prior) {
+      if (prior.path !== req.originalUrl) return next(new PolicyError('IDEMPOTENCY', 'this Idempotency-Key was used for a different request', 422));
+      res.setHeader('idempotency-replayed', 'true');
+      return res.status(prior.status).type('application/json').send(prior.body);
     }
-    return json(body);
-  };
-  next();
+    res.locals.idempotency = { key, principal };
+    next();
+  } catch (error) { next(error); }
 }
 
 export const cursor = {

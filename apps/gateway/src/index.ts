@@ -1,5 +1,5 @@
 import express, { type Request, type Response } from 'express';
-import { destinationPolicyFromEnv, request, type ToolAlias } from '@signet/core';
+import { destinationPolicyFromEnv, httpToolRequest, request, type ToolAlias } from '@signet/core';
 import { handleChat } from './chat';
 import { type Done, Halt, hitlDecided, newCtx, preflight } from './ctx';
 import { modelInfo, startRuntime } from './detectors';
@@ -7,6 +7,7 @@ import { engineName, initEngine } from './engine';
 import { llmStatus, probe, type ChatResponse } from './provider';
 import * as state from './state';
 import { handleTool } from './toolcall';
+import { forwardEdge } from './edge';
 
 const app = express();
 app.disable('x-powered-by');
@@ -139,28 +140,9 @@ app.all('/v1/tools/http/:alias/:action', guard(async (req, res) => {
     action: req.params.action!,
     args,
     forward: async (tool, cred, signal) => {
-      const spec = tool.actions[req.params.action!];
-      if (!spec) throw new Error('action not mapped on the tool alias');
-      const rest = { ...args };
-      const path = spec.path.replace(/\{(\w+)\}/g, (_m, k: string) => {
-        const v = String(rest[k] ?? '');
-        delete rest[k];
-        // encodeURIComponent keeps "." and "..", which would climb out of the action's path.
-        if (v === '' || v === '.' || v === '..') throw new Error(`path parameter ${k} is empty or a dot segment`);
-        return encodeURIComponent(v);
-      });
-      const url = new URL(tool.url + path);
-      const base = new URL(tool.url);
-      if (url.origin !== base.origin || !url.pathname.startsWith(base.pathname.replace(/\/$/, ''))) throw new Error('the action resolves outside the registered tool address');
-      const headers: Record<string, string> = { accept: 'application/json' };
-      if (cred) headers[tool.auth_header] = tool.auth_header.toLowerCase() === 'authorization' ? `Bearer ${cred}` : cred;
-      let body: string | undefined;
-      if (spec.method === 'GET' || spec.method === 'DELETE') for (const [k, v] of Object.entries(rest)) url.searchParams.set(k, String(v));
-      else {
-        headers['content-type'] = 'application/json';
-        body = JSON.stringify(rest);
-      }
-      const r = await request(url, { method: spec.method, headers, body, signal, destination: DESTINATIONS, maxBytes: TOOL_MAX_BYTES });
+      if (tool.runner_id) return forwardEdge(tool.alias, req.params.action!, args, String(req.headers.authorization ?? '').replace(/^Bearer\s+/i, ''), signal);
+      const target = httpToolRequest(tool, req.params.action!, args, cred);
+      const r = await request(target.url, { method: target.method, headers: target.headers, body: target.body, signal, destination: DESTINATIONS, maxBytes: TOOL_MAX_BYTES });
       const text = r.text();
       if (!r.ok) throw new Error(`tool returned ${r.status}`);
       try {

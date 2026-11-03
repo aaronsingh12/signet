@@ -41,16 +41,16 @@ const defaultSettings = (): TenantSettings => ({
 });
 
 // Phase 1 runs a single tenant; multi-tenancy arrives with the SaaS cells (Phase 4).
-function ensureTenant() {
-  const row = db.prepare('SELECT id, name, settings FROM tenant LIMIT 1').get() as { id: string; name: string; settings: string } | undefined;
+async function ensureTenant() {
+  const row = (await db.prepare('SELECT id, name, settings FROM tenant LIMIT 1').get()) as { id: string; name: string; settings: string } | undefined;
   if (row) {
     const name = env('SIGNET_TENANT_NAME', row.name);
-    if (name !== row.name) db.prepare('UPDATE tenant SET name = ? WHERE id = ?').run(name, row.id);
+    if (name !== row.name) (await db.prepare('UPDATE tenant SET name = ? WHERE id = ?').run(name, row.id));
     return { id: row.id, name, settings: { ...defaultSettings(), ...(JSON.parse(row.settings) as Partial<TenantSettings>) } };
   }
   const t = { id: newId('tnt'), name: env('SIGNET_TENANT_NAME', 'Signet'), settings: defaultSettings() };
-  db.prepare('INSERT INTO tenant (id, name, settings, created_at) VALUES (?, ?, ?, ?)').run(t.id, t.name, JSON.stringify(t.settings), nowIso());
+  (await db.prepare('INSERT INTO tenant (id, name, settings, created_at) VALUES (?, ?, ?, ?)').run(t.id, t.name, JSON.stringify(t.settings), nowIso()));
   return t;
 }
 
-export const tenant = ensureTenant();
+export const tenant = (await ensureTenant());

@@ -20,9 +20,9 @@ function eraseReferences(value: Json, identifiers: string[]): Json {
 }
 
 /** Replace erased payloads with signed, anonymous commitments without rewriting any chain hashes. Caller owns the transaction. */
-export function eraseAgentLedger(agentId: string, identifiers: string[]): { records: number; days: string[] } {
+export async function eraseAgentLedger(agentId: string, identifiers: string[]): Promise<{ records: number; days: string[] }> {
   const replacements: LedgerRecord[] = [];
-  for (const record of ledger.all()) {
+  for (const record of (await ledger.all())) {
     const { erasure_proof, ...original } = record;
     const redacted = eraseReferences(original.data as Json, identifiers);
     if (record.agent_id !== agentId && JSON.stringify(redacted) === JSON.stringify(original.data)) continue;
@@ -31,9 +31,9 @@ export function eraseAgentLedger(agentId: string, identifiers: string[]): { reco
       : { ...original, data: redacted as Record<string, Json> };
     replacements.push({ ...replacement, erasure_proof: signJws({ format: 'signet-ledger-erasure/1', record: replacement }, keys.ledger, 'signet-erasure') });
   }
-  db.exec('DROP TRIGGER ledger_no_update');
+  (await db.exec('ALTER TABLE ledger_record DISABLE TRIGGER ledger_no_update'));
   const update = db.prepare('UPDATE ledger_record SET record_id = ?, kind = ?, ts = ?, agent_id = ?, cert_id = ?, data = ?, erasure_proof = ? WHERE seq = ?');
-  for (const record of replacements) update.run(record.record_id, record.kind, record.ts, record.agent_id, record.cert_id, JSON.stringify(record.data), record.erasure_proof!, record.seq);
-  db.exec("CREATE TRIGGER ledger_no_update BEFORE UPDATE ON ledger_record BEGIN SELECT RAISE(ABORT, 'ledger_record is append-only'); END");
+  for (const record of replacements) (await update.run(record.record_id, record.kind, record.ts, record.agent_id, record.cert_id, JSON.stringify(record.data), record.erasure_proof!, record.seq));
+  (await db.exec('ALTER TABLE ledger_record ENABLE TRIGGER ledger_no_update'));
   return { records: replacements.length, days: [...new Set(replacements.map((record) => record.ts.slice(0, 10)))] };
 }

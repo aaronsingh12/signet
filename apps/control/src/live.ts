@@ -14,22 +14,22 @@ export function forgetAgent(agentId: string): void {
   for (const client of clients) client.write('event: reset\ndata: {}\n\n');
 }
 
-const handleOf = (agentId: string | null) => {
+const handleOf = async (agentId: string | null) => {
   if (!agentId) return null;
   if (!handles.has(agentId)) {
-    const r = db.prepare('SELECT handle FROM agent WHERE id = ?').get(agentId) as { handle: string } | undefined;
+    const r = (await db.prepare('SELECT handle FROM agent WHERE id = ?').get(agentId)) as { handle: string } | undefined;
     if (r) handles.set(agentId, r.handle);
   }
   return handles.get(agentId) ?? null;
 };
 
-export const summarise = (r: LedgerRecord) => ({
+export const summarise = async (r: LedgerRecord) => ({
   seq: r.seq,
   record_id: r.record_id,
   ts: r.ts,
   kind: r.kind,
   agent_id: r.agent_id,
-  handle: handleOf(r.agent_id),
+  handle: (await handleOf(r.agent_id)),
   event: r.data.event ?? null,
   action_type: r.data.action_type ?? null,
   target: r.data.target ?? null,
@@ -40,9 +40,9 @@ export const summarise = (r: LedgerRecord) => ({
   rule_ids: r.data.policy_rule_ids ?? (r.data.rule_id ? [r.data.rule_id] : []),
 });
 
-ledger.onAppend((r) => {
+ledger.onAppend(async (r) => {
   if (r.kind !== 'transaction' && r.kind !== 'enforcement') return;
-  const frame = `event: record\ndata: ${JSON.stringify(summarise(r))}\n\n`;
+  const frame = `event: record\ndata: ${JSON.stringify((await summarise(r)))}\n\n`;
   for (const c of clients) c.write(frame);
 });
 

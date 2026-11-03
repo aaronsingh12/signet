@@ -166,16 +166,16 @@ export async function login(req: Request, res: Response) {
 }
 
 /** Password authentication for the configured local administrator; never accepts credentials in URLs. */
-export function localLogin(req: Request, res: Response): { redirect_to: string } {
+export async function localLogin(req: Request, res: Response): Promise<{ redirect_to: string }> {
   if (!localAuthEnabled()) throw new PolicyError('AUTH', 'local administrator authentication is disabled', 404);
   if (typeof req.body?.username !== 'string' || typeof req.body?.password !== 'string') throw new PolicyError('AUTH', 'administrator ID and password are required', 400);
   verifyLocalAdminCredentials(req.body.username, req.body.password);
   const principal = principalFromClaims(localClaims(req.body.username, OIDC.clientId), 'session');
   const sid = randomBytes(32).toString('base64url');
   const now = Date.now();
-  db.prepare('INSERT INTO session (id_hash, tenant_id, principal, id_token, created_at, expires_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+  (await db.prepare('INSERT INTO session (id_hash, tenant_id, principal, id_token, created_at, expires_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
     sha256(sid), tenant.id, JSON.stringify(principal), null, nowIso(), new Date(now + ABSOLUTE_MS).toISOString(), nowIso(),
-  );
+  ));
   res.cookie(SESSION_COOKIE, sid, { httpOnly: true, sameSite: 'lax', secure: OIDC.publicUrl.startsWith('https'), path: '/', maxAge: ABSOLUTE_MS });
   const requested = req.body.return_to;
   const returnTo = typeof requested === 'string' && requested.startsWith('/') && !requested.startsWith('//') ? requested : '/';
@@ -224,9 +224,9 @@ export async function callback(req: Request, res: Response) {
   const principal = principalFromClaims(claims, 'session');
   const sid = randomBytes(32).toString('base64url');
   const now = Date.now();
-  db.prepare('INSERT INTO session (id_hash, tenant_id, principal, id_token, created_at, expires_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+  (await db.prepare('INSERT INTO session (id_hash, tenant_id, principal, id_token, created_at, expires_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
     sha256(sid), tenant.id, JSON.stringify(principal), tokens.id_token, nowIso(), new Date(now + ABSOLUTE_MS).toISOString(), nowIso(),
-  );
+  ));
   res.cookie(SESSION_COOKIE, sid, { httpOnly: true, sameSite: 'lax', secure: OIDC.publicUrl.startsWith('https'), path: '/', maxAge: ABSOLUTE_MS });
   res.redirect(`${OIDC.publicUrl}${p.returnTo}`);
 }
@@ -235,9 +235,9 @@ export async function logout(req: Request, res: Response) {
   const sid = readCookie(req, SESSION_COOKIE);
   let idToken: string | null = null;
   if (sid) {
-    const row = db.prepare('SELECT id_token FROM session WHERE id_hash = ?').get(sha256(sid)) as { id_token: string | null } | undefined;
+    const row = (await db.prepare('SELECT id_token FROM session WHERE id_hash = ?').get(sha256(sid))) as { id_token: string | null } | undefined;
     idToken = row?.id_token ?? null;
-    db.prepare('DELETE FROM session WHERE id_hash = ?').run(sha256(sid));
+    (await db.prepare('DELETE FROM session WHERE id_hash = ?').run(sha256(sid)));
   }
   res.clearCookie(SESSION_COOKIE, { path: '/' });
   const d = await getDiscovery().catch(() => null);
@@ -270,7 +270,7 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
     } else {
       const sid = readCookie(req, SESSION_COOKIE);
       if (sid) {
-        const row = db.prepare('SELECT principal, expires_at, last_seen_at FROM session WHERE id_hash = ?').get(sha256(sid)) as
+        const row = (await db.prepare('SELECT principal, expires_at, last_seen_at FROM session WHERE id_hash = ?').get(sha256(sid))) as
           | { principal: string; expires_at: string; last_seen_at: string }
           | undefined;
         const now = Date.now();
@@ -279,12 +279,12 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
           if (req.method !== 'GET' && !String(req.headers['content-type'] ?? '').includes('application/json')) {
             throw new PolicyError('AUTH', 'state-changing requests must be application/json', 415);
           }
-          db.prepare('UPDATE session SET last_seen_at = ? WHERE id_hash = ?').run(nowIso(), sha256(sid));
+          (await db.prepare('UPDATE session SET last_seen_at = ? WHERE id_hash = ?').run(nowIso(), sha256(sid)));
           const principal = JSON.parse(row.principal) as Principal;
           if (localAuthEnabled() && principal.kind === 'human' && principal.id !== localAdminProfile().id) throw new PolicyError('AUTH', 'local account is no longer configured', 401);
           res.locals.principal = { ...principal, permissions: permissionsFor(principal.roles) };
         } else if (row) {
-          db.prepare('DELETE FROM session WHERE id_hash = ?').run(sha256(sid));
+          (await db.prepare('DELETE FROM session WHERE id_hash = ?').run(sha256(sid)));
         }
       }
     }

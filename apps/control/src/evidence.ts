@@ -43,20 +43,20 @@ function writeOnce(rel: string, content: string) {
 const dayOf = (ts: string) => ts.slice(0, 10);
 const today = () => new Date().toISOString().slice(0, 10);
 
-function recordsOfDay(day: string) {
-  return (db.prepare('SELECT seq, record_hash FROM ledger_record WHERE ts >= ? AND ts < ? ORDER BY seq').all(`${day}T00:00:00.000Z`, `${day}T99`) as { seq: number; record_hash: string }[]);
+async function recordsOfDay(day: string) {
+  return ((await db.prepare('SELECT seq, record_hash FROM ledger_record WHERE ts >= ? AND ts < ? ORDER BY seq').all(`${day}T00:00:00.000Z`, `${day}T99`)) as { seq: number; record_hash: string }[]);
 }
 
 // Seals every finished day that has records but no root yet. Runs at start and every 10 minutes,
 // so the root for a day lands shortly after 00:00 UTC.
-export function sealFinishedDays(): string[] {
-  const days = (db.prepare('SELECT DISTINCT substr(ts, 1, 10) AS d FROM ledger_record WHERE substr(ts, 1, 10) < ? AND substr(ts, 1, 10) NOT IN (SELECT day FROM daily_root) ORDER BY d').all(today()) as { d: string }[]).map((r) => r.d);
-  for (const day of days) sealDay(day);
+export async function sealFinishedDays(): Promise<string[]> {
+  const days = ((await db.prepare('SELECT DISTINCT substr(ts, 1, 10) AS d FROM ledger_record WHERE substr(ts, 1, 10) < ? AND substr(ts, 1, 10) NOT IN (SELECT day FROM daily_root) ORDER BY d').all(today())) as { d: string }[]).map((r) => r.d);
+  for (const day of days) (await sealDay(day));
   return days;
 }
 
-export function sealDay(day: string) {
-  const recs = recordsOfDay(day);
+export async function sealDay(day: string) {
+  const recs = (await recordsOfDay(day));
   if (!recs.length) return null;
   const payload: RootPayload = {
     format: 'signet-daily-root/1',
@@ -70,28 +70,28 @@ export function sealDay(day: string) {
     signed_at: nowIso(),
   };
   const jws = signJws(payload, keys.ledger, 'signet-root');
-  db.prepare('INSERT INTO daily_root (day, first_seq, last_seq, count, merkle_root, jws, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(day, payload.first_seq, payload.last_seq, payload.count, payload.merkle_root, jws, nowIso());
+  (await db.prepare('INSERT INTO daily_root (day, first_seq, last_seq, count, merkle_root, jws, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(day, payload.first_seq, payload.last_seq, payload.count, payload.merkle_root, jws, nowIso()));
   writeOnce(`roots/${day}.jws`, jws);
-  writeOnce(`segments/${day}.jsonl`, [...ledger.range(payload.first_seq, payload.last_seq)].map((r) => JSON.stringify(r)).join('\n') + '\n');
-  ledger.append({ kind: 'admin', data: { event: 'ledger.daily_root', day, count: payload.count, merkle_root: payload.merkle_root, key: keys.ledger.kid } });
+  writeOnce(`segments/${day}.jsonl`, [...(await ledger.range(payload.first_seq, payload.last_seq))].map((r) => JSON.stringify(r)).join('\n') + '\n');
+  (await ledger.append({ kind: 'admin', data: { event: 'ledger.daily_root', day, count: payload.count, merkle_root: payload.merkle_root, key: keys.ledger.kid } }));
   return payload;
 }
 
-export function roots(limit = 30) {
-  return (db.prepare('SELECT day, first_seq, last_seq, count, merkle_root, jws, created_at FROM daily_root ORDER BY day DESC LIMIT ?').all(limit) as { jws: string }[]).map((r) => ({
+export async function roots(limit = 30) {
+  return ((await db.prepare('SELECT day, first_seq, last_seq, count, merkle_root, jws, created_at FROM daily_root ORDER BY day DESC LIMIT ?').all(limit)) as { jws: string }[]).map((r) => ({
     ...r,
     worm: existsSync(join(WORM_DIR, `roots/${(r as unknown as { day: string }).day}.jws`)),
   }));
 }
 
 // Inclusion proof for one record against its day's signed root (or today's provisional root).
-export function proofFor(recordId: string) {
-  const rec = ledger.get(recordId);
+export async function proofFor(recordId: string) {
+  const rec = (await ledger.get(recordId));
   const day = dayOf(rec.ts);
-  const recs = recordsOfDay(day);
+  const recs = (await recordsOfDay(day));
   const index = recs.findIndex((r) => r.seq === rec.seq);
   if (index < 0) throw notFound('record in its day');
-  const root = db.prepare('SELECT jws, count FROM daily_root WHERE day = ?').get(day) as { jws: string; count: number } | undefined;
+  const root = (await db.prepare('SELECT jws, count FROM daily_root WHERE day = ?').get(day)) as { jws: string; count: number } | undefined;
   const hashes = recs.slice(0, root ? root.count : recs.length).map((r) => r.record_hash);
   return {
     record_id: rec.record_id,
@@ -109,11 +109,11 @@ export function proofFor(recordId: string) {
 // Evidence Package (.sep, format signet-evidence-package/1): gzip of newline-delimited JSON.
 // Lines: one manifest, the signed daily roots, the records, then an end line whose signature covers
 // the SHA-256 of every preceding line. Specified in docs/evidence-package.md.
-export function writePackage(out: Writable, opts: { fromDay?: string; toDay?: string; actor: string }) {
+export async function writePackage(out: Writable, opts: { fromDay?: string; toDay?: string; actor: string }) {
   const from = opts.fromDay ?? '0000-00-00';
   const to = opts.toDay ?? '9999-99-99';
-  const span = db.prepare('SELECT MIN(seq) AS a, MAX(seq) AS b, COUNT(*) AS n FROM ledger_record WHERE substr(ts, 1, 10) BETWEEN ? AND ?').get(from, to) as { a: number | null; b: number | null; n: number };
-  const rootRows = db.prepare('SELECT day, jws FROM daily_root WHERE day BETWEEN ? AND ? ORDER BY day').all(from, to) as { day: string; jws: string }[];
+  const span = (await db.prepare('SELECT MIN(seq) AS a, MAX(seq) AS b, COUNT(*) AS n FROM ledger_record WHERE substr(ts, 1, 10) BETWEEN ? AND ?').get(from, to)) as { a: number | null; b: number | null; n: number };
+  const rootRows = (await db.prepare('SELECT day, jws FROM daily_root WHERE day BETWEEN ? AND ? ORDER BY day').all(from, to)) as { day: string; jws: string }[];
   const gz = createGzip();
   gz.pipe(out);
   const hash = createHash('sha256');
@@ -131,16 +131,16 @@ export function writePackage(out: Writable, opts: { fromDay?: string; toDay?: st
     created_by: opts.actor,
     range: { from_day: opts.fromDay ?? null, to_day: opts.toDay ?? null, from_seq: span.a, to_seq: span.b },
     record_count: span.n,
-    start_prev_hash: span.a ? ledger.prevHashOf(span.a) : null,
+    start_prev_hash: span.a ? (await ledger.prevHashOf(span.a)) : null,
     keys: { ledger: toJwk(keys.ledger), ca: toJwk(keys.ca) },
     payloads_included: false,
   });
   for (const r of rootRows) line({ type: 'root', day: r.day, jws: r.jws });
-  if (span.a && span.b) for (const r of ledger.range(span.a, span.b)) line({ type: 'record', record: r });
+  if (span.a && span.b) for (const r of (await ledger.range(span.a, span.b))) line({ type: 'record', record: r });
   const digest = hash.digest('hex');
   const sig = signJws({ format: 'signet-evidence-package/1', sha256: digest, record_count: span.n, roots: rootRows.length }, keys.ledger, 'signet-sep');
   gz.end(`${JSON.stringify({ type: 'end', sha256: digest, signature: sig })}\n`);
-  ledger.append({ kind: 'admin', data: { event: 'evidence.exported', from_seq: span.a, to_seq: span.b, record_count: span.n, roots: rootRows.length, sha256: digest, actor: opts.actor } });
+  (await ledger.append({ kind: 'admin', data: { event: 'evidence.exported', from_seq: span.a, to_seq: span.b, record_count: span.n, roots: rootRows.length, sha256: digest, actor: opts.actor } }));
 }
 
 export function verifyRootJws(jws: string) {

@@ -17,6 +17,7 @@ export function Agent360() {
   const { data, reload, error } = useApi<any>(`/agents/${id}`);
   const [params] = useSearchParams();
   const [tab, setTab] = useState(params.get('tab') ?? 'overview');
+  useEffect(() => { setTab(params.get('tab') ?? 'overview'); }, [params]);
   const [ladder, setLadder] = useState<Ladder | null>(null);
   if (error) return <ErrorNote error={error} />;
   if (!data) return null;

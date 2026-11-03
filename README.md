@@ -12,8 +12,10 @@ has the detail.
 
 ## Run it
 
-Requirements: Node 22.13+ (uses the built-in `node:sqlite`) and Ollama signed in with access to
-`gpt-oss:120b-cloud`. Docker is not required for local development.
+Requirements: Node 22.13+, PostgreSQL configured through `DATABASE_URL` in the ignored `.env`,
+and Ollama Cloud access for `gpt-oss:120b-cloud`. Docker is not required for local development.
+The control plane requires PostgreSQL and does not fall back to a local database. Tests create
+isolated `test_*` schemas in the configured database; CI reads `DATABASE_URL` from its secret.
 
 The DET-INJ detector model (about 700 MB, Apache-2.0) is not in git. Download it once; without it the
 gateway runs and reports the detector as unavailable:
@@ -133,4 +135,4 @@ keys are generated on first start under `data/` (git-ignored); delete `data/` to
 - With DET-JB and DET-PII not deployed, **every T1/T2 model call is held for a person** (RB-INV-06), which is the correct fail-safe; "approve for session" keeps a conversation usable.
 - DET-JB and DET-PII models; a faster DET-INJ that fits the 15 ms budget (E39); detector benchmarks and release process (E40).
 - Seal Transparency Log, Regulator Portal (Phase 3); SaaS, Hybrid, air-gapped, licensing (Phase 4).
-- Postgres profile, RFC 3161 timestamps, live stream scanning (streaming clients get the checked answer as chunks), MFA enforcement in the dev realm (supported by setting `SIGNET_REQUIRE_MFA=true`).
+- RFC 3161 timestamps, live stream scanning (streaming clients get the checked answer as chunks), MFA enforcement in the dev realm (supported by setting `SIGNET_REQUIRE_MFA=true`).

@@ -33,7 +33,7 @@ export function Tools() {
                 {tools.items.map((t: any) => (
                   <tr key={t.alias}>
                     <td className="td mono">{t.kind}://{t.alias}</td>
-                    <td className="td mono text-xs">{t.url}</td>
+                    <td className="td mono text-xs">{t.url}{t.runner_id && <div className="mt-1 text-ink-3">via runner {t.runner_id}</div>}</td>
                     <td className="td mono text-xs">{t.secret_id ?? 'none'}</td>
                     <td className="td text-xs">{t.kind === 'http' ? Object.entries(t.actions).map(([k, v]: any) => `${k} (${v.method} ${v.path})`).join(', ') : 'from tools/list, filtered by each seal'}</td>
                   </tr>

@@ -74,30 +74,30 @@ interface LcRow {
 export type Lifecycle = Omit<LcRow, 'data'> & { data: LcData };
 const parse = (r: LcRow): Lifecycle => ({ ...r, data: JSON.parse(r.data) as LcData });
 
-export function get(id: string): Lifecycle {
-  const r = db.prepare('SELECT * FROM lifecycle WHERE id = ?').get(id) as LcRow | undefined;
+export async function get(id: string): Promise<Lifecycle> {
+  const r = (await db.prepare('SELECT * FROM lifecycle WHERE id = ?').get(id)) as LcRow | undefined;
   if (!r) throw notFound(`lifecycle ${id}`);
   return parse(r);
 }
 
-export function forAgent(agentId: string): Lifecycle[] {
-  return (db.prepare('SELECT * FROM lifecycle WHERE agent_id = ? ORDER BY started_at DESC').all(agentId) as unknown as LcRow[]).map(parse);
+export async function forAgent(agentId: string): Promise<Lifecycle[]> {
+  return ((await db.prepare('SELECT * FROM lifecycle WHERE agent_id = ? ORDER BY started_at DESC').all(agentId)) as unknown as LcRow[]).map(parse);
 }
 
-const saveData = (id: string, data: LcData) => db.prepare('UPDATE lifecycle SET data = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(data), nowIso(), id);
+const saveData = async (id: string, data: LcData) => (await db.prepare('UPDATE lifecycle SET data = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(data), nowIso(), id));
 
-function move(lc: Lifecycle, to: Stage | null, outcome: 'passed' | 'returned' | 'rejected' | 'skipped', actor: string, gate: Record<string, unknown>, status?: Lifecycle['status']) {
+async function move(lc: Lifecycle, to: Stage | null, outcome: 'passed' | 'returned' | 'rejected' | 'skipped', actor: string, gate: Record<string, unknown>, status?: Lifecycle['status']) {
   const now = nowIso();
-  db.prepare('INSERT INTO stage_record (id, lifecycle_id, stage, outcome, actor, gate, entered_at, exited_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
+  (await db.prepare('INSERT INTO stage_record (id, lifecycle_id, stage, outcome, actor, gate, entered_at, exited_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
     newId('evt').replace('evt_', 'stg_'), lc.id, lc.stage, outcome, actor, JSON.stringify(gate), lc.stage_entered_at, now,
-  );
-  db.prepare('UPDATE lifecycle SET stage = ?, status = ?, stage_entered_at = ?, updated_at = ? WHERE id = ?').run(to ?? lc.stage, status ?? lc.status, now, now, lc.id);
-  ledger.append({ kind: 'lifecycle', agent_id: lc.agent_id, data: { event: `stage.${lc.stage}.${outcome}`, lifecycle_id: lc.id, from: lc.stage, to: to ?? lc.stage, actor, gate } });
-  if (to && to !== lc.stage) notify(getAgent(lc.agent_id).owner, 'lifecycle', `${getAgent(lc.agent_id).handle}: ${lc.stage} ${outcome}, now in ${to}`, `/agents/${lc.agent_id}?tab=lifecycle`);
+  ));
+  (await db.prepare('UPDATE lifecycle SET stage = ?, status = ?, stage_entered_at = ?, updated_at = ? WHERE id = ?').run(to ?? lc.stage, status ?? lc.status, now, now, lc.id));
+  (await ledger.append({ kind: 'lifecycle', agent_id: lc.agent_id, data: { event: `stage.${lc.stage}.${outcome}`, lifecycle_id: lc.id, from: lc.stage, to: to ?? lc.stage, actor, gate } }));
+  if (to && to !== lc.stage) (await notify((await getAgent(lc.agent_id)).owner, 'lifecycle', `${(await getAgent(lc.agent_id)).handle}: ${lc.stage} ${outcome}, now in ${to}`, `/agents/${lc.agent_id}?tab=lifecycle`));
 }
 
-function current(agentId: string): Lifecycle {
-  const lcs = forAgent(agentId).filter((l) => l.status === 'in_progress');
+async function current(agentId: string): Promise<Lifecycle> {
+  const lcs = (await forAgent(agentId)).filter((l) => l.status === 'in_progress');
   if (!lcs.length) throw new PolicyError('BP-6', 'this agent has no lifecycle in progress', 409);
   return lcs[0]!;
 }
@@ -107,15 +107,15 @@ function assertStage(lc: Lifecycle, stage: Stage) {
   if (lc.stage !== stage) throw new PolicyError('BP-6', `the agent is in ${lc.stage}, not ${stage}`, 409);
 }
 
-const isTeam = (agent: AgentRow, p: Principal) => agent.owner === p.id || agent.created_by === p.id || teamOf(agent.id).some((t) => t.user === p.id);
-function assertOwnerSide(agent: AgentRow, p: Principal) {
-  if (isTeam(agent, p) || can(p, 'certificates.approve') || p.roles.includes('platform_admin')) return;
+const isTeam = async (agent: AgentRow, p: Principal) => agent.owner === p.id || agent.created_by === p.id || (await teamOf(agent.id)).some((t) => t.user === p.id);
+async function assertOwnerSide(agent: AgentRow, p: Principal) {
+  if ((await isTeam(agent, p)) || can(p, 'certificates.approve') || p.roles.includes('platform_admin')) return;
   throw forbidden('RBAC', 'only the owner, build team, Risk or Security can work on this stage');
 }
 
 // --- Stage 1: Propose ---------------------------------------------------------------------------
 
-export function start(agent: AgentRow, intakeIn: Partial<Intake>, p: Principal, kind: Lifecycle['kind'] = 'initial', manifest?: SealInput | null): Lifecycle {
+export async function start(agent: AgentRow, intakeIn: Partial<Intake>, p: Principal, kind: Lifecycle['kind'] = 'initial', manifest?: SealInput | null): Promise<Lifecycle> {
   const tpl = getTemplate(intakeIn.template ?? undefined);
   const intake: Intake = {
     users_affected: intakeIn.users_affected ?? tpl?.users_affected ?? [],
@@ -135,21 +135,21 @@ export function start(agent: AgentRow, intakeIn: Partial<Intake>, p: Principal, 
   const draft = manifest ?? manifestFrom(tpl);
   // A vendor-hosted agent's model is outside Signet: its manifest lists only the company tools it calls.
   const data: LcData = { intake, manifest: draft && agent.kind === 'third_party' ? { ...draft, models: [] } : draft };
-  db.prepare('INSERT INTO lifecycle (id, agent_id, kind, stage, status, data, started_at, stage_entered_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(id, agent.id, kind, 'propose', 'in_progress', JSON.stringify(data), now, now, now);
-  ledger.append({ kind: 'lifecycle', agent_id: agent.id, data: { event: 'lifecycle.started', lifecycle_id: id, kind, template: intake.template, actor: p.id } });
-  return get(id);
+  (await db.prepare('INSERT INTO lifecycle (id, agent_id, kind, stage, status, data, started_at, stage_entered_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(id, agent.id, kind, 'propose', 'in_progress', JSON.stringify(data), now, now, now));
+  (await ledger.append({ kind: 'lifecycle', agent_id: agent.id, data: { event: 'lifecycle.started', lifecycle_id: id, kind, template: intake.template, actor: p.id } }));
+  return (await get(id));
 }
 
-export function updateIntake(lcId: string, patch: Partial<Intake>, p: Principal) {
-  const lc = get(lcId);
+export async function updateIntake(lcId: string, patch: Partial<Intake>, p: Principal) {
+  const lc = (await get(lcId));
   assertStage(lc, 'propose');
-  assertOwnerSide(getAgent(lc.agent_id), p);
-  saveData(lc.id, { ...lc.data, intake: { ...lc.data.intake, ...patch } });
-  return view(lc.id);
+  (await assertOwnerSide((await getAgent(lc.agent_id)), p));
+  (await saveData(lc.id, { ...lc.data, intake: { ...lc.data.intake, ...patch } }));
+  return (await view(lc.id));
 }
 
-function proposeGate(lc: Lifecycle) {
-  const a = getAgent(lc.agent_id);
+async function proposeGate(lc: Lifecycle) {
+  const a = (await getAgent(lc.agent_id));
   const i = lc.data.intake;
   return {
     owner_and_sponsor: !!a.owner && !!a.sponsor,
@@ -160,18 +160,18 @@ function proposeGate(lc: Lifecycle) {
   };
 }
 
-export function submitPropose(lcId: string, p: Principal) {
-  const lc = get(lcId);
+export async function submitPropose(lcId: string, p: Principal) {
+  const lc = (await get(lcId));
   assertStage(lc, 'propose');
-  assertOwnerSide(getAgent(lc.agent_id), p);
-  const gate = proposeGate(lc);
+  (await assertOwnerSide((await getAgent(lc.agent_id)), p));
+  const gate = (await proposeGate(lc));
   const failed = Object.entries(gate).filter(([, v]) => !v).map(([k]) => k);
   if (failed.length) throw new PolicyError('BP-6-S1', `exit gate not met: ${failed.join(', ')}`, 422, { gate });
-  tx(() => {
-    writeClassification(lc, {}, null);
-    move(lc, 'classify', 'passed', p.id, gate);
-  });
-  return view(lc.id);
+  (await tx(async () => {
+    (await writeClassification(lc, {}, null));
+    (await move(lc, 'classify', 'passed', p.id, gate));
+  }));
+  return (await view(lc.id));
 }
 
 // --- Stage 2: Classify --------------------------------------------------------------------------
@@ -197,8 +197,8 @@ export function scoreToTier(score: number): Tier {
   return score >= 4 ? 'T1' : score >= 3 ? 'T2' : score >= 2 ? 'T3' : 'T4';
 }
 
-function writeClassification(lc: Lifecycle, overrides: Partial<Record<Factor, { value: number; reason: string; by: string }>>, confirmedBy: string | null) {
-  const agent = getAgent(lc.agent_id);
+async function writeClassification(lc: Lifecycle, overrides: Partial<Record<Factor, { value: number; reason: string; by: string }>>, confirmedBy: string | null) {
+  const agent = (await getAgent(lc.agent_id));
   const i = lc.data.intake;
   const factors = suggestFactors(agent, i);
   for (const [k, o] of Object.entries(overrides)) if (o) factors[k as Factor] = o.value;
@@ -216,16 +216,16 @@ function writeClassification(lc: Lifecycle, overrides: Partial<Record<Factor, { 
   const frameworks = ['NIST AI RMF 1.0', 'OWASP LLM Top 10', 'ISO/IEC 42001'];
   if (category !== 'eu_ai_act:minimal_risk') frameworks.push('EU AI Act');
   if (i.data_touched.some((t) => t === 'personal' || t === 'special_category')) frameworks.push('GDPR');
-  db.prepare(
+  (await db.prepare(
     `INSERT INTO classification (lifecycle_id, factors, score, tier, regulatory_category, frameworks, reasons, overrides, confirmed_by, confirmed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(lifecycle_id) DO UPDATE SET factors = excluded.factors, score = excluded.score, tier = excluded.tier, regulatory_category = excluded.regulatory_category,
        frameworks = excluded.frameworks, reasons = excluded.reasons, overrides = excluded.overrides, confirmed_by = excluded.confirmed_by, confirmed_at = excluded.confirmed_at`,
-  ).run(lc.id, JSON.stringify(factors), score, tier, category, JSON.stringify(frameworks), JSON.stringify(reasons), JSON.stringify(overrides), confirmedBy, confirmedBy ? nowIso() : null);
+  ).run(lc.id, JSON.stringify(factors), score, tier, category, JSON.stringify(frameworks), JSON.stringify(reasons), JSON.stringify(overrides), confirmedBy, confirmedBy ? nowIso() : null));
   return { factors, score, tier, category, frameworks, reasons };
 }
 
-export function classificationOf(lcId: string) {
-  const r = db.prepare('SELECT * FROM classification WHERE lifecycle_id = ?').get(lcId) as Record<string, string | number | null> | undefined;
+export async function classificationOf(lcId: string) {
+  const r = (await db.prepare('SELECT * FROM classification WHERE lifecycle_id = ?').get(lcId)) as Record<string, string | number | null> | undefined;
   if (!r) return null;
   return { ...r, factors: JSON.parse(String(r.factors)), frameworks: JSON.parse(String(r.frameworks)), reasons: JSON.parse(String(r.reasons)), overrides: JSON.parse(String(r.overrides)) } as {
     factors: Record<Factor, number>; score: number; tier: Tier; regulatory_category: string; frameworks: string[]; reasons: string[]; overrides: Record<string, unknown>; confirmed_by: string | null;
@@ -234,46 +234,46 @@ export function classificationOf(lcId: string) {
 
 // Overrides need Risk/Compliance and a reason (BP 6 Stage 2). T1/T2 are confirmed by the risk team;
 // T3/T4 by the owner.
-export function classify(lcId: string, p: Principal, input: { overrides?: Partial<Record<Factor, number>>; reason?: string; confirm?: boolean }) {
-  const lc = get(lcId);
+export async function classify(lcId: string, p: Principal, input: { overrides?: Partial<Record<Factor, number>>; reason?: string; confirm?: boolean }) {
+  const lc = (await get(lcId));
   assertStage(lc, 'classify');
-  const agent = getAgent(lc.agent_id);
-  const existing = classificationOf(lc.id)?.overrides ?? {};
+  const agent = (await getAgent(lc.agent_id));
+  const existing = (await classificationOf(lc.id))?.overrides ?? {};
   const overrides = { ...(existing as Record<string, { value: number; reason: string; by: string }>) };
   if (input.overrides && Object.keys(input.overrides).length) {
     if (!p.roles.includes('risk_officer') && !p.roles.includes('governance_board')) throw forbidden('BP-6-S2', 'only Risk/Compliance can override classification factors');
-    if (isTeam(agent, p)) throw forbidden('RB-INV-09', `${p.id} proposed, owns or builds this agent and cannot change its classification`);
+    if ((await isTeam(agent, p))) throw forbidden('RB-INV-09', `${p.id} proposed, owns or builds this agent and cannot change its classification`);
     if (!input.reason?.trim()) throw invalid('an override needs a reason');
     for (const [k, v] of Object.entries(input.overrides)) {
       if (!FACTORS.includes(k as Factor) || !(Number(v) >= 1 && Number(v) <= 5)) throw invalid(`factor ${k} must be 1-5`);
       overrides[k] = { value: Number(v), reason: input.reason, by: p.id };
     }
   }
-  let result = writeClassification(lc, overrides as never, null);
-  if (!input.confirm) return view(lc.id);
+  let result = (await writeClassification(lc, overrides as never, null));
+  if (!input.confirm) return (await view(lc.id));
   if (result.category === 'eu_ai_act:prohibited') {
-    tx(() => {
-      move(lc, null, 'rejected', p.id, { regulatory_category: result.category, rule: 'RB-INV-13' }, 'rejected');
-      db.prepare("UPDATE agent SET status = 'rejected' WHERE id = ?").run(agent.id);
-    });
+    (await tx(async () => {
+      (await move(lc, null, 'rejected', p.id, { regulatory_category: result.category, rule: 'RB-INV-13' }, 'rejected'));
+      (await db.prepare("UPDATE agent SET status = 'rejected' WHERE id = ?").run(agent.id));
+    }));
     throw new PolicyError('RB-INV-13', 'an EU AI Act prohibited use is rejected at Classify', 422);
   }
   const riskTeam = p.roles.includes('risk_officer') || p.roles.includes('governance_board');
   if ((result.tier === 'T1' || result.tier === 'T2') && !riskTeam) throw forbidden('BP-6-S2', `${result.tier} classifications are confirmed by the risk team`);
-  if ((result.tier === 'T1' || result.tier === 'T2') && isTeam(agent, p)) throw forbidden('RB-INV-09', `${p.id} proposed, owns or builds this agent and cannot confirm its ${result.tier} classification`);
+  if ((result.tier === 'T1' || result.tier === 'T2') && (await isTeam(agent, p))) throw forbidden('RB-INV-09', `${p.id} proposed, owns or builds this agent and cannot confirm its ${result.tier} classification`);
   if (!riskTeam && agent.owner !== p.id) throw forbidden('BP-6-S2', 'the owner or the risk team confirms the classification');
-  tx(() => {
-    result = writeClassification(lc, overrides as never, p.id);
-    db.prepare('UPDATE agent SET tier = ? WHERE id = ?').run(result.tier, agent.id);
+  (await tx(async () => {
+    result = (await writeClassification(lc, overrides as never, p.id));
+    (await db.prepare('UPDATE agent SET tier = ? WHERE id = ?').run(result.tier, agent.id));
     for (const type of requiredAssessments(result.tier)) {
-      db.prepare('INSERT OR IGNORE INTO assessment (id, lifecycle_id, type, status, content, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+      (await db.prepare('INSERT INTO assessment (id, lifecycle_id, type, status, content, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING').run(
         newId('evt').replace('evt_', 'asm_'), lc.id, type, 'draft', JSON.stringify(type === 'questionnaire' ? questionnaireFor(lc.data.intake, agent) : {}), 'system', nowIso(),
-      );
+      ));
     }
-    move(lc, 'assess', 'passed', p.id, { tier: result.tier, score: result.score, regulatory_category: result.category, frameworks: result.frameworks });
-  });
-  if (result.tier !== 'T4') enqueue('risk.upsert', correlation('risk', agent.id), { agent_id: agent.id, handle: agent.handle, tier: result.tier, score: result.score, regulatory_category: result.category, owner: agent.owner, statement: `AI agent ${agent.handle}: ${result.reasons.join('; ')}` });
-  return view(lc.id);
+    (await move(lc, 'assess', 'passed', p.id, { tier: result.tier, score: result.score, regulatory_category: result.category, frameworks: result.frameworks }));
+  }));
+  if (result.tier !== 'T4') (await enqueue('risk.upsert', correlation('risk', agent.id), { agent_id: agent.id, handle: agent.handle, tier: result.tier, score: result.score, regulatory_category: result.category, owner: agent.owner, statement: `AI agent ${agent.handle}: ${result.reasons.join('; ')}` }));
+  return (await view(lc.id));
 }
 
 // --- Stage 3: Assess ----------------------------------------------------------------------------
@@ -302,16 +302,16 @@ function questionnaireFor(i: Intake, a: AgentRow) {
   return { questions: QUESTIONS, answers: Object.fromEntries(QUESTIONS.map((q) => [q.id, { answer: pre[q.id] ?? '', note: '' }])) };
 }
 
-export function assessments(lcId: string) {
-  return (db.prepare('SELECT * FROM assessment WHERE lifecycle_id = ? ORDER BY type').all(lcId) as { content: string }[]).map((a) => ({ ...a, content: JSON.parse(a.content) }));
+export async function assessments(lcId: string) {
+  return ((await db.prepare('SELECT * FROM assessment WHERE lifecycle_id = ? ORDER BY type').all(lcId)) as { content: string }[]).map((a) => ({ ...a, content: JSON.parse(a.content) }));
 }
 
-export function saveAssessment(lcId: string, type: string, content: Record<string, unknown>, complete: boolean, p: Principal) {
-  const lc = get(lcId);
+export async function saveAssessment(lcId: string, type: string, content: Record<string, unknown>, complete: boolean, p: Principal) {
+  const lc = (await get(lcId));
   assertStage(lc, 'assess');
-  const agent = getAgent(lc.agent_id);
-  if (!isTeam(agent, p) && !p.roles.includes('risk_officer') && !p.roles.includes('security_officer')) throw forbidden('RBAC', 'only the build team, Risk or Security edit assessments');
-  const row = db.prepare('SELECT id FROM assessment WHERE lifecycle_id = ? AND type = ?').get(lc.id, type) as { id: string } | undefined;
+  const agent = (await getAgent(lc.agent_id));
+  if (!(await isTeam(agent, p)) && !p.roles.includes('risk_officer') && !p.roles.includes('security_officer')) throw forbidden('RBAC', 'only the build team, Risk or Security edit assessments');
+  const row = (await db.prepare('SELECT id FROM assessment WHERE lifecycle_id = ? AND type = ?').get(lc.id, type)) as { id: string } | undefined;
   if (!row) throw notFound(`assessment ${type}`);
   if (complete) {
     if (type === 'questionnaire') {
@@ -320,94 +320,94 @@ export function saveAssessment(lcId: string, type: string, content: Record<strin
       if (missing.length) throw invalid(`answer every question (${missing.map((q) => q.id).join(', ')})`);
       // Each "no" becomes a gap against its control (BP 6 Stage 3 gap handling).
       for (const q of QUESTIONS.filter((x) => answers[x.id]!.answer === 'no')) {
-        if (!db.prepare("SELECT 1 FROM gap WHERE lifecycle_id = ? AND control_id = ? AND status != 'closed'").get(lc.id, q.control)) addGap(lc.id, { control_id: q.control, severity: q.severity, title: q.text.replace(/\?$/, ': not yet') }, p);
+        if (!(await db.prepare("SELECT 1 FROM gap WHERE lifecycle_id = ? AND control_id = ? AND status != 'closed'").get(lc.id, q.control))) (await addGap(lc.id, { control_id: q.control, severity: q.severity, title: q.text.replace(/\?$/, ': not yet') }, p));
       }
     } else {
       const empty = Object.values(content).filter((v) => typeof v === 'string' && !v.trim());
       if (!Object.keys(content).length || empty.length) throw invalid(`complete every field of the ${type.replace('_', ' ')}`);
     }
   }
-  db.prepare('UPDATE assessment SET content = ?, status = ?, updated_by = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(content), complete ? 'complete' : 'draft', p.id, nowIso(), row.id);
-  if (complete) ledger.append({ kind: 'lifecycle', agent_id: lc.agent_id, data: { event: 'assessment.completed', lifecycle_id: lc.id, type, content_sha256: sha256(canonicalize(content)), actor: p.id } });
-  return view(lc.id);
+  (await db.prepare('UPDATE assessment SET content = ?, status = ?, updated_by = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(content), complete ? 'complete' : 'draft', p.id, nowIso(), row.id));
+  if (complete) (await ledger.append({ kind: 'lifecycle', agent_id: lc.agent_id, data: { event: 'assessment.completed', lifecycle_id: lc.id, type, content_sha256: sha256(canonicalize(content)), actor: p.id } }));
+  return (await view(lc.id));
 }
 
-export function setManifest(lcId: string, manifest: SealInput, p: Principal) {
-  const lc = get(lcId);
+export async function setManifest(lcId: string, manifest: SealInput, p: Principal) {
+  const lc = (await get(lcId));
   if (lc.stage !== 'assess' && lc.stage !== 'propose') throw new PolicyError('BP-6-S3', 'the manifest is drafted in Propose or Assess; later changes need a new version', 409);
-  const agent = getAgent(lc.agent_id);
-  assertOwnerSide(agent, p);
-  validateSeal(agent, manifest);
-  saveData(lc.id, { ...lc.data, manifest });
-  ledger.append({ kind: 'lifecycle', agent_id: lc.agent_id, data: { event: 'manifest.drafted', lifecycle_id: lc.id, manifest_sha256: sha256(canonicalize(manifest)), actor: p.id } });
-  return view(lc.id);
+  const agent = (await getAgent(lc.agent_id));
+  (await assertOwnerSide(agent, p));
+  (await validateSeal(agent, manifest));
+  (await saveData(lc.id, { ...lc.data, manifest }));
+  (await ledger.append({ kind: 'lifecycle', agent_id: lc.agent_id, data: { event: 'manifest.drafted', lifecycle_id: lc.id, manifest_sha256: sha256(canonicalize(manifest)), actor: p.id } }));
+  return (await view(lc.id));
 }
 
-export const gapsOf = (lcId: string) => db.prepare('SELECT * FROM gap WHERE lifecycle_id = ? ORDER BY CASE severity WHEN \'critical\' THEN 0 WHEN \'high\' THEN 1 WHEN \'medium\' THEN 2 ELSE 3 END, created_at').all(lcId);
+export const gapsOf = async (lcId: string) => (await db.prepare('SELECT * FROM gap WHERE lifecycle_id = ? ORDER BY CASE severity WHEN \'critical\' THEN 0 WHEN \'high\' THEN 1 WHEN \'medium\' THEN 2 ELSE 3 END, created_at').all(lcId));
 
-export function addGap(lcId: string, input: { control_id?: string; severity: string; title: string; mitigation?: string }, p: Principal) {
-  const lc = get(lcId);
+export async function addGap(lcId: string, input: { control_id?: string; severity: string; title: string; mitigation?: string }, p: Principal) {
+  const lc = (await get(lcId));
   if (!['critical', 'high', 'medium', 'low'].includes(input.severity)) throw invalid('severity must be critical, high, medium or low');
   if (!input.title?.trim()) throw invalid('a gap needs a title');
   const id = newId('evt').replace('evt_', 'gap_');
-  db.prepare('INSERT INTO gap (id, lifecycle_id, agent_id, control_id, severity, title, mitigation, status, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+  (await db.prepare('INSERT INTO gap (id, lifecycle_id, agent_id, control_id, severity, title, mitigation, status, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
     id, lc.id, lc.agent_id, input.control_id ?? null, input.severity, input.title.trim(), input.mitigation ?? null, 'open', p.id, nowIso(), nowIso(),
-  );
-  ledger.append({ kind: 'lifecycle', agent_id: lc.agent_id, data: { event: 'gap.created', gap_id: id, control_id: input.control_id ?? null, severity: input.severity, actor: p.id } });
-  enqueue('issue.upsert', correlation('gap', id), { agent_id: lc.agent_id, handle: getAgent(lc.agent_id).handle, control_id: input.control_id, severity: input.severity, title: input.title, state: 'open' });
+  ));
+  (await ledger.append({ kind: 'lifecycle', agent_id: lc.agent_id, data: { event: 'gap.created', gap_id: id, control_id: input.control_id ?? null, severity: input.severity, actor: p.id } }));
+  (await enqueue('issue.upsert', correlation('gap', id), { agent_id: lc.agent_id, handle: (await getAgent(lc.agent_id)).handle, control_id: input.control_id, severity: input.severity, title: input.title, state: 'open' }));
   return id;
 }
 
-export function updateGap(gapId: string, input: { status: 'mitigated' | 'closed' | 'open'; mitigation?: string }, p: Principal) {
-  const g = db.prepare('SELECT * FROM gap WHERE id = ?').get(gapId) as { lifecycle_id: string; agent_id: string; status: string; title: string; severity: string } | undefined;
+export async function updateGap(gapId: string, input: { status: 'mitigated' | 'closed' | 'open'; mitigation?: string }, p: Principal) {
+  const g = (await db.prepare('SELECT * FROM gap WHERE id = ?').get(gapId)) as { lifecycle_id: string; agent_id: string; status: string; title: string; severity: string } | undefined;
   if (!g) throw notFound(`gap ${gapId}`);
   if (!['mitigated', 'closed', 'open'].includes(input.status)) throw invalid('status must be mitigated, closed or open');
   if (input.status === 'mitigated' && !input.mitigation?.trim()) throw invalid('describe the mitigation');
-  assertOwnerSide(getAgent(g.agent_id), p);
-  db.prepare('UPDATE gap SET status = ?, mitigation = COALESCE(?, mitigation), updated_at = ? WHERE id = ?').run(input.status, input.mitigation ?? null, nowIso(), gapId);
-  ledger.append({ kind: 'lifecycle', agent_id: g.agent_id, data: { event: `gap.${input.status}`, gap_id: gapId, mitigation: input.mitigation ?? null, actor: p.id } });
-  enqueue('issue.upsert', correlation('gap', gapId), { agent_id: g.agent_id, title: g.title, severity: g.severity, state: input.status });
-  return db.prepare('SELECT * FROM gap WHERE id = ?').get(gapId);
+  (await assertOwnerSide((await getAgent(g.agent_id)), p));
+  (await db.prepare('UPDATE gap SET status = ?, mitigation = COALESCE(?, mitigation), updated_at = ? WHERE id = ?').run(input.status, input.mitigation ?? null, nowIso(), gapId));
+  (await ledger.append({ kind: 'lifecycle', agent_id: g.agent_id, data: { event: `gap.${input.status}`, gap_id: gapId, mitigation: input.mitigation ?? null, actor: p.id } }));
+  (await enqueue('issue.upsert', correlation('gap', gapId), { agent_id: g.agent_id, title: g.title, severity: g.severity, state: input.status }));
+  return (await db.prepare('SELECT * FROM gap WHERE id = ?').get(gapId));
 }
 
 // Risk acceptance of a High gap goes to the approvals engine (BP 7.2 matrix row "Risk acceptance").
-export function requestAcceptance(gapId: string, p: Principal, input: { reason: string; until: string }) {
-  const g = db.prepare('SELECT * FROM gap WHERE id = ?').get(gapId) as { id: string; lifecycle_id: string; agent_id: string; severity: string; title: string; control_id: string | null; status: string } | undefined;
+export async function requestAcceptance(gapId: string, p: Principal, input: { reason: string; until: string }) {
+  const g = (await db.prepare('SELECT * FROM gap WHERE id = ?').get(gapId)) as { id: string; lifecycle_id: string; agent_id: string; severity: string; title: string; control_id: string | null; status: string } | undefined;
   if (!g) throw notFound(`gap ${gapId}`);
   if (g.severity === 'critical') throw new PolicyError('BP-6-S3', 'critical gaps cannot be risk-accepted; they must be closed', 422);
   if (g.status !== 'open') throw new PolicyError('BP-6-S3', `gap is ${g.status}`, 409);
   if (!input.reason?.trim()) throw invalid('a reason is required');
   const until = Date.parse(input.until);
   if (!(until > Date.now() && until < Date.now() + 366 * DAY)) throw invalid('acceptance needs an expiry date within a year');
-  const agent = getAgent(g.agent_id);
+  const agent = (await getAgent(g.agent_id));
   const slots: approvals.Slot[] =
     agent.tier === 'T4' ? [{ slot: 'owner', label: 'Owner', roles: [], count: 1, owner_only: true }]
     : agent.tier === 'T3' ? [{ slot: 'owner', label: 'Owner', roles: [], count: 1, owner_only: true }, { slot: 'security', label: 'Security', roles: ['security_officer'], count: 1 }]
     : agent.tier === 'T2' ? [{ slot: 'risk', label: 'Risk/Compliance', roles: ['risk_officer'], count: 1 }]
     : [{ slot: 'cro', label: 'CRO or delegate', roles: ['risk_officer', 'governance_board'], count: 1 }];
-  const req = approvals.create({
+  const req = (await approvals.create({
     type: 'risk_acceptance', agent_id: agent.id, subject_ref: gapId, tier: agent.tier, created_by: p.id, sla_ms: 5 * DAY,
     title: `Risk acceptance · ${g.severity} gap · ${agent.handle}`, summary: `${g.control_id ?? 'gap'}: ${g.title}. Accept until ${input.until.slice(0, 10)}. ${input.reason}`,
     pack: { gap: g, agent: { id: agent.id, handle: agent.handle, tier: agent.tier }, reason: input.reason, until: new Date(until).toISOString() }, slots,
-  });
-  db.prepare('UPDATE gap SET acceptance_request_id = ?, updated_at = ? WHERE id = ?').run(req.id, nowIso(), gapId);
+  }));
+  (await db.prepare('UPDATE gap SET acceptance_request_id = ?, updated_at = ? WHERE id = ?').run(req.id, nowIso(), gapId));
   return req;
 }
 
-approvals.onDecision('risk_acceptance', (req, outcome) => {
+approvals.onDecision('risk_acceptance', async (req, outcome) => {
   if (outcome !== 'approved') return;
   const until = String((req.pack as { until: string }).until);
-  db.prepare("UPDATE gap SET status = 'accepted', accepted_until = ?, updated_at = ? WHERE id = ?").run(until, nowIso(), req.subject_ref);
-  ledger.append({ kind: 'lifecycle', agent_id: req.agent_id, data: { event: 'gap.accepted', gap_id: req.subject_ref, until, approval_id: req.id } });
+  (await db.prepare("UPDATE gap SET status = 'accepted', accepted_until = ?, updated_at = ? WHERE id = ?").run(until, nowIso(), req.subject_ref));
+  (await ledger.append({ kind: 'lifecycle', agent_id: req.agent_id, data: { event: 'gap.accepted', gap_id: req.subject_ref, until, approval_id: req.id } }));
 });
 
-function assessGate(lc: Lifecycle) {
-  const agent = getAgent(lc.agent_id);
-  const asm = assessments(lc.id) as unknown as { type: string; status: string }[];
-  const gaps = gapsOf(lc.id) as { severity: string; status: string }[];
+async function assessGate(lc: Lifecycle) {
+  const agent = (await getAgent(lc.agent_id));
+  const asm = (await assessments(lc.id)) as unknown as { type: string; status: string }[];
+  const gaps = (await gapsOf(lc.id)) as { severity: string; status: string }[];
   let manifestOk = false;
   try {
-    if (lc.data.manifest) validateSeal(agent, lc.data.manifest), (manifestOk = true);
+    if (lc.data.manifest) (await validateSeal(agent, lc.data.manifest)), (manifestOk = true);
   } catch {
     manifestOk = false;
   }
@@ -419,15 +419,15 @@ function assessGate(lc: Lifecycle) {
   };
 }
 
-export function submitAssess(lcId: string, p: Principal) {
-  const lc = get(lcId);
+export async function submitAssess(lcId: string, p: Principal) {
+  const lc = (await get(lcId));
   assertStage(lc, 'assess');
-  assertOwnerSide(getAgent(lc.agent_id), p);
-  const gate = assessGate(lc);
+  (await assertOwnerSide((await getAgent(lc.agent_id)), p));
+  const gate = (await assessGate(lc));
   const failed = Object.entries(gate).filter(([, v]) => !v).map(([k]) => k);
   if (failed.length) throw new PolicyError('BP-6-S3', `exit gate not met: ${failed.join(', ')}`, 422, { gate });
-  move(lc, 'test', 'passed', p.id, gate);
-  return view(lc.id);
+  (await move(lc, 'test', 'passed', p.id, gate));
+  return (await view(lc.id));
 }
 
 // --- Stage 4: Test ------------------------------------------------------------------------------
@@ -511,30 +511,30 @@ export function runBaselineSuites(agent: AgentRow, manifest: SealInput, intake: 
   return results;
 }
 
-export function runTests(lcId: string, p: Principal, evidence: { functional_score?: number; bias_ratio?: number; red_team_report_sha256?: string }) {
-  const lc = get(lcId);
+export async function runTests(lcId: string, p: Principal, evidence: { functional_score?: number; bias_ratio?: number; red_team_report_sha256?: string }) {
+  const lc = (await get(lcId));
   assertStage(lc, 'test');
-  const agent = getAgent(lc.agent_id);
-  assertOwnerSide(agent, p);
+  const agent = (await getAgent(lc.agent_id));
+  (await assertOwnerSide(agent, p));
   const suites = runBaselineSuites(agent, lc.data.manifest!, lc.data.intake, evidence);
   const passed = suites.filter((s) => s.required).every((s) => s.passed);
   const report = { agent_id: agent.id, lifecycle_id: lc.id, tier: agent.tier, manifest_sha256: sha256(canonicalize(lc.data.manifest)), suites, passed, run_at: nowIso(), runner: 'signet-baseline/2' };
   const hash = sha256(canonicalize(report));
   const id = newId('evt').replace('evt_', 'tst_');
-  tx(() => {
-    db.prepare('INSERT INTO test_run (id, lifecycle_id, status, suites, report_sha256, actor, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, lc.id, passed ? 'passed' : 'failed', JSON.stringify(report), hash, p.id, nowIso());
-    ledger.append({ kind: 'lifecycle', agent_id: agent.id, data: { event: 'test.completed', lifecycle_id: lc.id, test_run_id: id, passed, report_sha256: hash, suites: suites.map((s) => `${s.suite}:${s.required ? (s.passed ? 'pass' : 'FAIL') : 'n/a'}`), actor: p.id } });
-    saveData(lc.id, { ...lc.data, test_run_id: id });
-    if (passed) move(get(lc.id), 'approve', 'passed', p.id, { test_run_id: id, report_sha256: hash });
+  (await tx(async () => {
+    (await db.prepare('INSERT INTO test_run (id, lifecycle_id, status, suites, report_sha256, actor, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, lc.id, passed ? 'passed' : 'failed', JSON.stringify(report), hash, p.id, nowIso()));
+    (await ledger.append({ kind: 'lifecycle', agent_id: agent.id, data: { event: 'test.completed', lifecycle_id: lc.id, test_run_id: id, passed, report_sha256: hash, suites: suites.map((s) => `${s.suite}:${s.required ? (s.passed ? 'pass' : 'FAIL') : 'n/a'}`), actor: p.id } }));
+    (await saveData(lc.id, { ...lc.data, test_run_id: id }));
+    if (passed) (await move((await get(lc.id)), 'approve', 'passed', p.id, { test_run_id: id, report_sha256: hash }));
     else {
       // Failures return the agent to Assess with findings linked (BP 6 Stage 4).
-      for (const s of suites.filter((x) => x.required && !x.passed)) addGap(lc.id, { control_id: 'SGC-SEC-001', severity: 'high', title: `Test suite ${s.suite} failed: ${s.failures.slice(0, 3).join('; ')}` }, p);
-      move(get(lc.id), 'assess', 'returned', p.id, { test_run_id: id, failed: suites.filter((x) => x.required && !x.passed).map((x) => x.suite) });
+      for (const s of suites.filter((x) => x.required && !x.passed)) (await addGap(lc.id, { control_id: 'SGC-SEC-001', severity: 'high', title: `Test suite ${s.suite} failed: ${s.failures.slice(0, 3).join('; ')}` }, p));
+      (await move((await get(lc.id)), 'assess', 'returned', p.id, { test_run_id: id, failed: suites.filter((x) => x.required && !x.passed).map((x) => x.suite) }));
     }
-  });
-  enqueue('control_test.create', correlation('test', id), { agent_id: agent.id, handle: agent.handle, result: passed ? 'pass' : 'fail', report_sha256: hash, suites: suites.map((s) => `${s.suite}:${s.passed}`) });
-  if (passed) enterApprove(get(lc.id), p);
-  return { test_run_id: id, passed, report_sha256: hash, suites, lifecycle: view(lc.id) };
+  }));
+  (await enqueue('control_test.create', correlation('test', id), { agent_id: agent.id, handle: agent.handle, result: passed ? 'pass' : 'fail', report_sha256: hash, suites: suites.map((s) => `${s.suite}:${s.passed}`) }));
+  if (passed) (await enterApprove((await get(lc.id)), p));
+  return { test_run_id: id, passed, report_sha256: hash, suites, lifecycle: (await view(lc.id)) };
 }
 
 // --- Stage 5: Approve ---------------------------------------------------------------------------
@@ -548,15 +548,15 @@ function certificateSlots(tier: Tier): approvals.Slot[] {
   return { T4: [], T3: [owner, security], T2: [owner, security, risk], T1: [owner, security, risk, board] }[tier];
 }
 
-function approvalPack(lc: Lifecycle) {
-  const agent = getAgent(lc.agent_id);
-  const cls = classificationOf(lc.id);
-  const test = lc.data.test_run_id ? (db.prepare('SELECT report_sha256, suites FROM test_run WHERE id = ?').get(lc.data.test_run_id) as { report_sha256: string; suites: string }) : null;
+async function approvalPack(lc: Lifecycle) {
+  const agent = (await getAgent(lc.agent_id));
+  const cls = (await classificationOf(lc.id));
+  const test = lc.data.test_run_id ? ((await db.prepare('SELECT report_sha256, suites FROM test_run WHERE id = ?').get(lc.data.test_run_id)) as { report_sha256: string; suites: string }) : null;
   return {
-    agent: { id: agent.id, handle: agent.handle, name: agent.name, purpose: agent.purpose, owner: agent.owner, sponsor: agent.sponsor, tier: agent.tier, autonomy_level: agent.autonomy_level, team: teamOf(agent.id) },
+    agent: { id: agent.id, handle: agent.handle, name: agent.name, purpose: agent.purpose, owner: agent.owner, sponsor: agent.sponsor, tier: agent.tier, autonomy_level: agent.autonomy_level, team: (await teamOf(agent.id)) },
     classification: cls && { score: cls.score, tier: cls.tier, factors: cls.factors, regulatory_category: cls.regulatory_category, frameworks: cls.frameworks, reasons: cls.reasons },
-    assessments: (assessments(lc.id) as unknown as { type: string; status: string }[]).map((a) => ({ type: a.type, status: a.status })),
-    gaps: gapsOf(lc.id),
+    assessments: ((await assessments(lc.id)) as unknown as { type: string; status: string }[]).map((a) => ({ type: a.type, status: a.status })),
+    gaps: (await gapsOf(lc.id)),
     test_report: test && { sha256: test.report_sha256, suites: (JSON.parse(test.suites) as { suites: SuiteResult[] }).suites.map((s) => ({ suite: s.suite, required: s.required, passed: s.passed, value: s.value ?? null })) },
     manifest: lc.data.manifest,
     intake: lc.data.intake,
@@ -564,54 +564,54 @@ function approvalPack(lc: Lifecycle) {
   };
 }
 
-function enterApprove(lc: Lifecycle, p: Principal) {
-  const agent = getAgent(lc.agent_id);
-  const pack = approvalPack(lc);
+async function enterApprove(lc: Lifecycle, p: Principal) {
+  const agent = (await getAgent(lc.agent_id));
+  const pack = (await approvalPack(lc));
   const slots = certificateSlots(agent.tier);
   if (!slots.length) {
     // T4: automatic on pass (BP 7.2).
-    issueFromLifecycle(lc, [{ user: 'system:auto (T4 on passing tests, BP 7.2)', at: nowIso() }], sha256(canonicalize(pack)), p.id);
+    (await issueFromLifecycle(lc, [{ user: 'system:auto (T4 on passing tests, BP 7.2)', at: nowIso() }], sha256(canonicalize(pack)), p.id));
     return;
   }
-  const req = approvals.create({
+  const req = (await approvals.create({
     type: 'certificate', agent_id: agent.id, subject_ref: lc.id, tier: agent.tier, created_by: p.id, sla_ms: 5 * DAY,
     title: `Certificate approval · ${agent.tier} · ${agent.handle} ${lc.kind === 'initial' ? 'v1' : `(${lc.kind} change)`}`,
     summary: `${agent.name}: ${agent.purpose}`, pack, slots,
-  });
-  saveData(lc.id, { ...get(lc.id).data, approval_id: req.id });
+  }));
+  (await saveData(lc.id, { ...(await get(lc.id)).data, approval_id: req.id }));
 }
 
-approvals.onDecision('certificate', (req, outcome, p) => {
-  const lc = get(req.subject_ref);
+approvals.onDecision('certificate', async (req, outcome, p) => {
+  const lc = (await get(req.subject_ref));
   if (lc.stage !== 'approve' || lc.status !== 'in_progress') return;
   const actor = p?.id ?? 'system';
   if (outcome === 'approved') {
     const approvers = (req.decisions ?? []).filter((d) => d.decision === 'approve').map((d) => ({ user: d.approver, at: d.ts }));
     const conditions = (req.decisions ?? []).map((d) => d.conditions).filter(Boolean);
-    issueFromLifecycle(lc, approvers, req.pack_hash, actor, conditions as string[]);
+    (await issueFromLifecycle(lc, approvers, req.pack_hash, actor, conditions as string[]));
   } else if (outcome === 'sent_back') {
-    move(lc, 'assess', 'returned', actor, { approval_id: req.id, reason: (req.decisions ?? []).at(-1)?.comment ?? '' });
+    (await move(lc, 'assess', 'returned', actor, { approval_id: req.id, reason: (req.decisions ?? []).at(-1)?.comment ?? '' }));
   } else {
-    move(lc, null, 'rejected', actor, { approval_id: req.id, reason: (req.decisions ?? []).at(-1)?.comment ?? '' }, 'rejected');
-    if (!activeCertificate(lc.agent_id)) db.prepare("UPDATE agent SET status = 'rejected' WHERE id = ?").run(lc.agent_id);
+    (await move(lc, null, 'rejected', actor, { approval_id: req.id, reason: (req.decisions ?? []).at(-1)?.comment ?? '' }, 'rejected'));
+    if (!(await activeCertificate(lc.agent_id))) (await db.prepare("UPDATE agent SET status = 'rejected' WHERE id = ?").run(lc.agent_id));
   }
 });
 
-function issueFromLifecycle(lc: Lifecycle, approvers: { user: string; at: string }[], packHash: string, actor: string, conditions: string[] = []) {
-  const cls = classificationOf(lc.id);
-  const test = db.prepare('SELECT report_sha256 FROM test_run WHERE id = ?').get(lc.data.test_run_id ?? '') as { report_sha256: string } | undefined;
-  const issued = signSeal(lc.agent_id, lc.data.manifest!, {
+async function issueFromLifecycle(lc: Lifecycle, approvers: { user: string; at: string }[], packHash: string, actor: string, conditions: string[] = []) {
+  const cls = (await classificationOf(lc.id));
+  const test = (await db.prepare('SELECT report_sha256 FROM test_run WHERE id = ?').get(lc.data.test_run_id ?? '')) as { report_sha256: string } | undefined;
+  const issued = (await signSeal(lc.agent_id, lc.data.manifest!, {
     approvers,
     evidence_refs: { approval_pack_sha256: packHash, test_report_sha256: test?.report_sha256 ?? '', classification_sha256: sha256(canonicalize(cls)), ...(conditions.length ? { conditions_sha256: sha256(conditions.join('\n')) } : {}) },
     regulatory_category: cls?.regulatory_category ?? 'unclassified',
     minor: lc.kind === 'minor',
     actor,
-  });
+  }));
   const plan = deployPlanFor(issued.certificate.tier);
-  saveData(lc.id, { ...get(lc.id).data, cert_id: issued.certificate.cert_id, deploy: plan });
-  move(get(lc.id), 'deploy', 'passed', actor, { cert_id: issued.certificate.cert_id, approvers: approvers.map((a) => a.user), conditions, rollout: plan.mode });
+  (await saveData(lc.id, { ...(await get(lc.id)).data, cert_id: issued.certificate.cert_id, deploy: plan }));
+  (await move((await get(lc.id)), 'deploy', 'passed', actor, { cert_id: issued.certificate.cert_id, approvers: approvers.map((a) => a.user), conditions, rollout: plan.mode }));
   hub.publish('bundle', { reason: 'certificate.issued', cert_id: issued.certificate.cert_id });
-  enqueue('ci.upsert', correlation('agent', lc.agent_id), ciPayload(lc.agent_id, 'Installed'));
+  (await enqueue('ci.upsert', correlation('agent', lc.agent_id), (await ciPayload(lc.agent_id, 'Installed'))));
   return issued;
 }
 
@@ -623,31 +623,31 @@ function deployPlanFor(tier: Tier): DeployPlan {
   return { mode: 'shadow', canary: tier === 'T1' || tier === 'T2', canary_pct: 10, shadow_days: days, mode_since: nowIso(), overrides: [] };
 }
 
-export function rollouts(): Record<string, Rollout> {
+export async function rollouts(): Promise<Record<string, Rollout>> {
   const out: Record<string, Rollout> = {};
-  for (const r of db.prepare("SELECT data FROM lifecycle WHERE stage = 'deploy' AND status = 'in_progress'").all() as { data: string }[]) {
+  for (const r of (await db.prepare("SELECT data FROM lifecycle WHERE stage = 'deploy' AND status = 'in_progress'").all()) as { data: string }[]) {
     const d = JSON.parse(r.data) as LcData;
     if (d.cert_id && d.deploy) out[d.cert_id] = { mode: d.deploy.mode, canary_pct: d.deploy.canary_pct };
   }
   return out;
 }
 
-function deployStats(certId: string, since: string) {
-  const rows = db.prepare("SELECT json_extract(data, '$.policy_decision') AS d, json_extract(data, '$.outcome') AS o, json_extract(data, '$.shadow_rule_ids') AS r FROM ledger_record WHERE kind = 'transaction' AND cert_id = ? AND ts >= ?").all(certId, since) as { d: string; o: string; r: string | null }[];
+async function deployStats(certId: string, since: string) {
+  const rows = (await db.prepare("SELECT jsonb_extract_path_text(data::jsonb, 'policy_decision') AS d, jsonb_extract_path_text(data::jsonb, 'outcome') AS o, jsonb_extract_path_text(data::jsonb, 'shadow_rule_ids') AS r FROM ledger_record WHERE kind = 'transaction' AND cert_id = ? AND ts >= ?").all(certId, since)) as { d: string; o: string; r: string | null }[];
   const wouldBlock = rows.filter((x) => x.d === 'would_block');
   const critical = wouldBlock.filter((x) => /RB-KILL|RB-INV-16|RB-INV-19/.test(x.r ?? ''));
   return { transactions: rows.length, would_block: wouldBlock.length, critical_would_block: critical.length, upstream_errors: rows.filter((x) => x.o === 'upstream_error').length };
 }
 
-export function advanceDeploy(lcId: string, p: Principal, input: { to: 'canary' | 'enforce'; acknowledge_would_blocks?: boolean; dev_override?: boolean; reason?: string }) {
-  const lc = get(lcId);
+export async function advanceDeploy(lcId: string, p: Principal, input: { to: 'canary' | 'enforce'; acknowledge_would_blocks?: boolean; dev_override?: boolean; reason?: string }) {
+  const lc = (await get(lcId));
   assertStage(lc, 'deploy');
-  const agent = getAgent(lc.agent_id);
+  const agent = (await getAgent(lc.agent_id));
   if (agent.owner !== p.id && !p.roles.includes('security_officer')) throw forbidden('BP-6-S6', 'the owner or Security moves a deployment forward');
-  const level = enforcement.agentLevel(agent.id);
+  const level = (await enforcement.agentLevel(agent.id));
   if (level === 'killed' || level === 'quarantined') throw new PolicyError('BP-5.4', `the agent is ${level}; a deployment cannot move forward`, 409);
   const plan = lc.data.deploy!;
-  const stats = deployStats(lc.data.cert_id!, plan.mode_since);
+  const stats = (await deployStats(lc.data.cert_id!, plan.mode_since));
   const ageDays = (Date.now() - Date.parse(plan.mode_since)) / DAY;
   const overrides = [...plan.overrides];
   if (input.to === 'canary' && !plan.canary) throw invalid(`${agent.tier} deployments go from shadow straight to enforce`);
@@ -663,26 +663,26 @@ export function advanceDeploy(lcId: string, p: Principal, input: { to: 'canary' 
   }
   if (plan.mode === 'canary' && stats.transactions >= 20 && stats.upstream_errors / stats.transactions > 0.05) throw new PolicyError('BP-6-S6', 'canary error rate is above 5%', 422, { stats });
   const gate = { from: plan.mode, to: input.to, stats, overrides: overrides.slice(plan.overrides.length) };
-  tx(() => {
+  (await tx(async () => {
     if (input.to === 'canary') {
-      saveData(lc.id, { ...lc.data, deploy: { ...plan, mode: 'canary', mode_since: nowIso(), overrides } });
-      ledger.append({ kind: 'lifecycle', agent_id: agent.id, cert_id: lc.data.cert_id, data: { event: 'deploy.canary', lifecycle_id: lc.id, canary_pct: plan.canary_pct, gate, actor: p.id } });
+      (await saveData(lc.id, { ...lc.data, deploy: { ...plan, mode: 'canary', mode_since: nowIso(), overrides } }));
+      (await ledger.append({ kind: 'lifecycle', agent_id: agent.id, cert_id: lc.data.cert_id, data: { event: 'deploy.canary', lifecycle_id: lc.id, canary_pct: plan.canary_pct, gate, actor: p.id } }));
     } else {
-      saveData(lc.id, { ...lc.data, deploy: { ...plan, mode: 'enforce', mode_since: nowIso(), overrides } });
-      move(get(lc.id), 'monitor', 'passed', p.id, gate, 'complete');
+      (await saveData(lc.id, { ...lc.data, deploy: { ...plan, mode: 'enforce', mode_since: nowIso(), overrides } }));
+      (await move((await get(lc.id)), 'monitor', 'passed', p.id, gate, 'complete'));
     }
-  });
+  }));
   hub.publish('bundle', { reason: `deploy.${input.to}`, cert_id: lc.data.cert_id });
-  enqueue('ci.upsert', correlation('agent', agent.id), ciPayload(agent.id, 'Operational'));
-  return view(lc.id);
+  (await enqueue('ci.upsert', correlation('agent', agent.id), (await ciPayload(agent.id, 'Operational'))));
+  return (await view(lc.id));
 }
 
 // --- Stage 7: Monitor ---------------------------------------------------------------------------
 
-export function attest(agentId: string, p: Principal, input: { purpose_unchanged: boolean; manifest_minimal: boolean; owner_accountable: boolean; note?: string }) {
-  const agent = getAgent(agentId);
+export async function attest(agentId: string, p: Principal, input: { purpose_unchanged: boolean; manifest_minimal: boolean; owner_accountable: boolean; note?: string }) {
+  const agent = (await getAgent(agentId));
   if (agent.owner !== p.id) throw forbidden('BP-6-S7', 'the owner attests');
-  const active = activeCertificate(agent.id);
+  const active = (await activeCertificate(agent.id));
   if (!active) throw new PolicyError('BP-6-S7', 'no active seal to re-attest', 409);
   if (!(input.purpose_unchanged && input.manifest_minimal && input.owner_accountable)) {
     throw new PolicyError('BP-6-S7', 'a change in purpose, manifest or accountability needs a change request, not an attestation', 422);
@@ -690,161 +690,161 @@ export function attest(agentId: string, p: Principal, input: { purpose_unchanged
   const content = { ...input, cert_id: active.certificate.cert_id, version: active.certificate.version };
   const hash = sha256(canonicalize(content));
   const id = newId('evt').replace('evt_', 'att_');
-  db.prepare('INSERT INTO attestation (id, agent_id, type, signer, content, content_hash, signed_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, agent.id, 're_attestation', p.id, JSON.stringify(content), hash, nowIso());
-  ledger.append({ kind: 'decision', agent_id: agent.id, cert_id: active.certificate.cert_id, data: { event: 'attestation.signed', attestation_id: id, type: 're_attestation', content_sha256: hash, signer: p.id } });
+  (await db.prepare('INSERT INTO attestation (id, agent_id, type, signer, content, content_hash, signed_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, agent.id, 're_attestation', p.id, JSON.stringify(content), hash, nowIso()));
+  (await ledger.append({ kind: 'decision', agent_id: agent.id, cert_id: active.certificate.cert_id, data: { event: 'attestation.signed', attestation_id: id, type: 're_attestation', content_sha256: hash, signer: p.id } }));
   // Renewal (BP 4.3): inside the 30-day window an attestation renews the seal with the same manifest.
   const daysLeft = (Date.parse(active.certificate.valid_to) - Date.now()) / DAY;
   let renewed: string | null = null;
   if (daysLeft <= 30) {
     const c = active.certificate;
     const manifest: SealInput = { models: c.models, tools: c.tools, data_classes: c.data_classes, hitl: c.hitl, limits: c.limits, environments: c.environments, tags: c.tags, ai_disclosure: c.ai_disclosure };
-    const issued = signSeal(agent.id, manifest, { approvers: [...c.approvers, { user: `${p.id} (re-attestation)`, at: nowIso() }], evidence_refs: { ...(c.evidence_refs ?? {}), attestation_sha256: hash }, regulatory_category: c.regulatory_category ?? 'unclassified', minor: true, actor: p.id });
+    const issued = (await signSeal(agent.id, manifest, { approvers: [...c.approvers, { user: `${p.id} (re-attestation)`, at: nowIso() }], evidence_refs: { ...(c.evidence_refs ?? {}), attestation_sha256: hash }, regulatory_category: c.regulatory_category ?? 'unclassified', minor: true, actor: p.id }));
     renewed = issued.certificate.cert_id;
     hub.publish('bundle', { reason: 'certificate.renewed', cert_id: renewed });
   }
   return { attestation_id: id, content_sha256: hash, renewed_cert_id: renewed };
 }
 
-export function requestChange(agentId: string, p: Principal, input: { kind: 'minor' | 'major'; manifest?: SealInput; reason: string }) {
-  const agent = getAgent(agentId);
-  assertOwnerSide(agent, p);
-  if (forAgent(agent.id).some((l) => l.status === 'in_progress')) throw new PolicyError('BP-6-S7', 'a lifecycle is already in progress for this agent', 409);
-  if (!activeCertificate(agent.id)) throw new PolicyError('BP-6-S7', 'changes apply to a sealed agent', 409);
+export async function requestChange(agentId: string, p: Principal, input: { kind: 'minor' | 'major'; manifest?: SealInput; reason: string }) {
+  const agent = (await getAgent(agentId));
+  (await assertOwnerSide(agent, p));
+  if ((await forAgent(agent.id)).some((l) => l.status === 'in_progress')) throw new PolicyError('BP-6-S7', 'a lifecycle is already in progress for this agent', 409);
+  if (!(await activeCertificate(agent.id))) throw new PolicyError('BP-6-S7', 'changes apply to a sealed agent', 409);
   if (!input.reason?.trim()) throw invalid('describe the change');
-  const prevLc = forAgent(agent.id)[0]!;
+  const prevLc = (await forAgent(agent.id))[0]!;
   const manifest = input.manifest ?? prevLc.data.manifest;
-  if (input.manifest) validateSeal(agent, input.manifest);
+  if (input.manifest) (await validateSeal(agent, input.manifest));
   // BP 6 Stage 7 change table: minor (prompt, config, model version) re-runs tests; major
   // (new model family, tool, data class, higher autonomy) goes back to Classify.
-  const lc = start(agent, prevLc.data.intake, p, input.kind, manifest);
-  tx(() => {
+  const lc = (await start(agent, prevLc.data.intake, p, input.kind, manifest));
+  (await tx(async () => {
     if (input.kind === 'minor') {
-      const cls = classificationOf(prevLc.id);
-      if (cls) db.prepare('INSERT INTO classification (lifecycle_id, factors, score, tier, regulatory_category, frameworks, reasons, overrides, confirmed_by, confirmed_at) SELECT ?, factors, score, tier, regulatory_category, frameworks, reasons, overrides, confirmed_by, confirmed_at FROM classification WHERE lifecycle_id = ?').run(lc.id, prevLc.id);
-      move(lc, 'test', 'skipped', p.id, { change: 'minor', reason: input.reason });
+      const cls = (await classificationOf(prevLc.id));
+      if (cls) (await db.prepare('INSERT INTO classification (lifecycle_id, factors, score, tier, regulatory_category, frameworks, reasons, overrides, confirmed_by, confirmed_at) SELECT ?, factors, score, tier, regulatory_category, frameworks, reasons, overrides, confirmed_by, confirmed_at FROM classification WHERE lifecycle_id = ?').run(lc.id, prevLc.id));
+      (await move(lc, 'test', 'skipped', p.id, { change: 'minor', reason: input.reason }));
     } else {
-      writeClassification(lc, {}, null);
-      move(lc, 'classify', 'skipped', p.id, { change: 'major', reason: input.reason });
+      (await writeClassification(lc, {}, null));
+      (await move(lc, 'classify', 'skipped', p.id, { change: 'major', reason: input.reason }));
     }
-  });
-  return view(lc.id);
+  }));
+  return (await view(lc.id));
 }
 
 // --- Stage 8: Retire ----------------------------------------------------------------------------
 
-export function requestRetire(agentId: string, p: Principal, reason: string) {
-  const agent = getAgent(agentId);
+export async function requestRetire(agentId: string, p: Principal, reason: string) {
+  const agent = (await getAgent(agentId));
   if (agent.owner !== p.id && !p.roles.includes('security_officer')) throw forbidden('BP-6-S8', 'the owner or Security requests retirement');
   if (agent.status === 'retired') throw new PolicyError('BP-6-S8', 'agent is already retired', 409);
   if (!reason?.trim()) throw invalid('a reason is required');
-  return approvals.create({
+  return (await approvals.create({
     type: 'retirement', agent_id: agent.id, subject_ref: agent.id, tier: agent.tier, created_by: p.id, sla_ms: 5 * DAY,
     title: `Retirement · ${agent.handle}`, summary: reason,
-    pack: { agent: { id: agent.id, handle: agent.handle, tier: agent.tier }, reason, certificate: activeCertificate(agent.id)?.certificate.cert_id ?? null },
+    pack: { agent: { id: agent.id, handle: agent.handle, tier: agent.tier }, reason, certificate: (await activeCertificate(agent.id))?.certificate.cert_id ?? null },
     // BP 6 Stage 8: owner and Security sign the decommission attestation.
     slots: [{ slot: 'owner', label: 'Owner', roles: [], count: 1, owner_only: true }, { slot: 'security', label: 'Security', roles: ['security_officer'], count: 1 }],
-  });
+  }));
 }
 
-approvals.onDecision('retirement', (req, outcome) => {
+approvals.onDecision('retirement', async (req, outcome) => {
   if (outcome !== 'approved' || !req.agent_id) return;
-  const agent = getAgent(req.agent_id);
-  const certs = db.prepare('SELECT id, version, status FROM certificate WHERE agent_id = ?').all(agent.id);
+  const agent = (await getAgent(req.agent_id));
+  const certs = (await db.prepare('SELECT id, version, status FROM certificate WHERE agent_id = ?').all(agent.id));
   const now = Math.floor(Date.now() / 1000);
-  tx(() => {
-    db.prepare("UPDATE certificate SET status = 'retired' WHERE agent_id = ? AND status = 'active'").run(agent.id);
-    for (const t of db.prepare('SELECT jti, exp FROM issued_token WHERE agent_id = ? AND exp > ?').all(agent.id, now) as { jti: string; exp: number }[]) db.prepare('INSERT OR IGNORE INTO revoked_jti (jti, exp) VALUES (?, ?)').run(t.jti, t.exp);
-    db.prepare("UPDATE agent_instance SET state = 'retired' WHERE agent_id = ?").run(agent.id);
-    db.prepare("UPDATE agent SET status = 'retired' WHERE id = ?").run(agent.id);
-    db.prepare("UPDATE lifecycle SET status = 'retired', stage = 'retire', updated_at = ? WHERE agent_id = ? AND status IN ('complete', 'in_progress')").run(nowIso(), agent.id);
-    const toolSecrets = (db.prepare('SELECT secret_id FROM tool WHERE secret_id IS NOT NULL').all() as { secret_id: string }[]).map((r) => r.secret_id);
-    markRotationDue(toolSecrets, `retirement of ${agent.handle}`);
+  (await tx(async () => {
+    (await db.prepare("UPDATE certificate SET status = 'retired' WHERE agent_id = ? AND status = 'active'").run(agent.id));
+    for (const t of (await db.prepare('SELECT jti, exp FROM issued_token WHERE agent_id = ? AND exp > ?').all(agent.id, now)) as { jti: string; exp: number }[]) (await db.prepare('INSERT INTO revoked_jti (jti, exp) VALUES (?, ?) ON CONFLICT DO NOTHING').run(t.jti, t.exp));
+    (await db.prepare("UPDATE agent_instance SET state = 'retired' WHERE agent_id = ?").run(agent.id));
+    (await db.prepare("UPDATE agent SET status = 'retired' WHERE id = ?").run(agent.id));
+    (await db.prepare("UPDATE lifecycle SET status = 'retired', stage = 'retire', updated_at = ? WHERE agent_id = ? AND status IN ('complete', 'in_progress')").run(nowIso(), agent.id));
+    const toolSecrets = ((await db.prepare('SELECT secret_id FROM tool WHERE secret_id IS NOT NULL').all()) as { secret_id: string }[]).map((r) => r.secret_id);
+    (await markRotationDue(toolSecrets, `retirement of ${agent.handle}`));
     const pack = { agent, certificates: certs, approvals: (req.decisions ?? []).map((d) => ({ approver: d.approver, slot: d.slot, ts: d.ts })), retired_at: nowIso(), reason: req.summary };
     const hash = sha256(canonicalize(pack));
-    db.prepare('INSERT INTO attestation (id, agent_id, type, signer, content, content_hash, signed_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(newId('evt').replace('evt_', 'att_'), agent.id, 'decommission', (req.decisions ?? []).map((d) => d.approver).join(','), JSON.stringify(pack), hash, nowIso());
-    ledger.append({ kind: 'lifecycle', agent_id: agent.id, data: { event: 'agent.retired', decommission_pack_sha256: hash, approval_id: req.id, note: 'Agent ID is never reused' } });
-  });
+    (await db.prepare('INSERT INTO attestation (id, agent_id, type, signer, content, content_hash, signed_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(newId('evt').replace('evt_', 'att_'), agent.id, 'decommission', (req.decisions ?? []).map((d) => d.approver).join(','), JSON.stringify(pack), hash, nowIso()));
+    (await ledger.append({ kind: 'lifecycle', agent_id: agent.id, data: { event: 'agent.retired', decommission_pack_sha256: hash, approval_id: req.id, note: 'Agent ID is never reused' } }));
+  }));
   hub.publish('bundle', { reason: 'agent.retired', agent_id: agent.id });
-  enqueue('ci.upsert', correlation('agent', agent.id), ciPayload(agent.id, 'Retired'));
+  (await enqueue('ci.upsert', correlation('agent', agent.id), (await ciPayload(agent.id, 'Retired'))));
 });
 
 // Quarantine release goes through approvals (BP 7.2: T1 needs Owner + Security + Risk, two-person).
-export function requestRelease(agentId: string, p: Principal, reason: string) {
-  const agent = getAgent(agentId);
-  if (enforcement.agentLevel(agent.id) === 'active') throw new PolicyError('BP-5.4', 'nothing to release', 409);
-  if (enforcement.agentLevel(agent.id) === 'killed') throw new PolicyError('RB-INV-08', 'a kill is never lifted', 409);
+export async function requestRelease(agentId: string, p: Principal, reason: string) {
+  const agent = (await getAgent(agentId));
+  if ((await enforcement.agentLevel(agent.id)) === 'active') throw new PolicyError('BP-5.4', 'nothing to release', 409);
+  if ((await enforcement.agentLevel(agent.id)) === 'killed') throw new PolicyError('RB-INV-08', 'a kill is never lifted', 409);
   if (!reason?.trim()) throw invalid('a reason is required');
   const owner: approvals.Slot = { slot: 'owner', label: 'Owner', roles: [], count: 1, owner_only: true };
   const security: approvals.Slot = { slot: 'security', label: 'Security', roles: ['security_officer'], count: 1 };
   const risk: approvals.Slot = { slot: 'risk', label: 'Risk', roles: ['risk_officer'], count: 1 };
   const slots = { T4: [owner], T3: [owner, security], T2: [owner, security], T1: [owner, security, risk] }[agent.tier];
-  return approvals.create({
+  return (await approvals.create({
     type: 'quarantine_release', agent_id: agent.id, subject_ref: agent.id, tier: agent.tier, created_by: p.id, sla_ms: DAY,
     title: `Quarantine release · ${agent.tier} · ${agent.handle}`, summary: reason,
-    pack: { agent: { id: agent.id, handle: agent.handle, tier: agent.tier }, states: enforcement.statesFor(agent.id), reason }, slots,
-  });
+    pack: { agent: { id: agent.id, handle: agent.handle, tier: agent.tier }, states: (await enforcement.statesFor(agent.id)), reason }, slots,
+  }));
 }
 
-approvals.onDecision('quarantine_release', (req, outcome) => {
+approvals.onDecision('quarantine_release', async (req, outcome) => {
   if (outcome !== 'approved' || !req.agent_id) return;
   const approvers = (req.decisions ?? []).map((d) => d.approver).join(' + ');
-  for (const s of enforcement.statesFor(req.agent_id)) {
+  for (const s of (await enforcement.statesFor(req.agent_id))) {
     if (s.level === 'quarantined' || s.level === 'step_up' || s.level === 'throttled') {
       const [kind, ref] = s.scope_key.split(':') as [string, string];
-      enforcement.applyLadder(
+      (await enforcement.applyLadder(
         { agentId: req.agent_id, scope: kind as 'agent' | 'version' | 'instance', version: kind === 'version' ? ref.split('@')[1] : undefined, instanceId: kind === 'instance' ? ref : undefined },
         'release',
         { actor: approvers, reason: `approval ${req.id}: ${req.summary}` },
-      );
+      ));
     }
   }
 });
 
 // --- Background: re-attestation reminders, expiry suspension ------------------------------------
 
-export function sweep() {
-  for (const c of db.prepare("SELECT c.id, c.agent_id, c.valid_to, a.owner, a.handle FROM certificate c JOIN agent a ON a.id = c.agent_id WHERE c.status = 'active'").all() as { id: string; agent_id: string; valid_to: string; owner: string; handle: string }[]) {
+export async function sweep() {
+  for (const c of (await db.prepare("SELECT c.id, c.agent_id, c.valid_to, a.owner, a.handle FROM certificate c JOIN agent a ON a.id = c.agent_id WHERE c.status = 'active'").all()) as { id: string; agent_id: string; valid_to: string; owner: string; handle: string }[]) {
     const left = (Date.parse(c.valid_to) - Date.now()) / DAY;
     if (left <= 0) {
       // RB-KILL-11: an expired seal suspends the agent (same effect as quarantine).
-      if (enforcement.agentLevel(c.agent_id) === 'active') enforcement.applyLadder({ agentId: c.agent_id }, 'quarantine', { actor: 'system:expiry', reason: 'seal expired without re-attestation', rule_id: 'RB-KILL-11', automatic: true });
+      if ((await enforcement.agentLevel(c.agent_id)) === 'active') (await enforcement.applyLadder({ agentId: c.agent_id }, 'quarantine', { actor: 'system:expiry', reason: 'seal expired without re-attestation', rule_id: 'RB-KILL-11', automatic: true }));
       continue;
     }
     for (const mark of [30, 14, 7]) {
       if (left <= mark && left > mark - 1) {
         const key = `reattest:${c.id}:${mark}`;
-        if (!db.prepare('SELECT 1 FROM notification WHERE kind = ? AND link = ?').get(key, `/agents/${c.agent_id}`)) notify(c.owner, key, `${c.handle}: seal expires in ${Math.ceil(left)} days; re-attest to renew`, `/agents/${c.agent_id}`);
+        if (!(await db.prepare('SELECT 1 FROM notification WHERE kind = ? AND link = ?').get(key, `/agents/${c.agent_id}`))) (await notify(c.owner, key, `${c.handle}: seal expires in ${Math.ceil(left)} days; re-attest to renew`, `/agents/${c.agent_id}`));
       }
     }
   }
 }
 
-function ciPayload(agentId: string, installStatus: 'On order' | 'Installed' | 'Operational' | 'Non-operational' | 'Retired') {
-  const a = getAgent(agentId);
-  const c = activeCertificate(agentId)?.certificate;
+async function ciPayload(agentId: string, installStatus: 'On order' | 'Installed' | 'Operational' | 'Non-operational' | 'Retired') {
+  const a = (await getAgent(agentId));
+  const c = (await activeCertificate(agentId))?.certificate;
   return { agent_id: a.id, handle: a.handle, name: a.name, tier: a.tier, autonomy_level: a.autonomy_level, owner: a.owner, certificate_status: c ? 'active' : a.status, certificate_expiry: c?.valid_to ?? null, regulatory_category: c?.regulatory_category ?? null, install_status: installStatus };
 }
 
 // --- View ---------------------------------------------------------------------------------------
 
-export function view(lcId: string) {
-  const lc = get(lcId);
-  const agent = getAgent(lc.agent_id);
-  const stages = db.prepare('SELECT stage, outcome, actor, gate, entered_at, exited_at FROM stage_record WHERE lifecycle_id = ? ORDER BY exited_at').all(lc.id) as { gate: string }[];
-  const tests = (db.prepare('SELECT id, status, suites, report_sha256, actor, created_at FROM test_run WHERE lifecycle_id = ? ORDER BY created_at DESC').all(lc.id) as { suites: string }[]).map((t) => ({ ...t, suites: JSON.parse(t.suites) }));
-  const gate = lc.stage === 'propose' ? proposeGate(lc) : lc.stage === 'assess' ? assessGate(lc) : null;
-  const deploy = lc.data.deploy && lc.data.cert_id ? { ...lc.data.deploy, stats: deployStats(lc.data.cert_id, lc.data.deploy.mode_since), days_in_mode: (Date.now() - Date.parse(lc.data.deploy.mode_since)) / DAY } : null;
+export async function view(lcId: string) {
+  const lc = (await get(lcId));
+  const agent = (await getAgent(lc.agent_id));
+  const stages = (await db.prepare('SELECT stage, outcome, actor, gate, entered_at, exited_at FROM stage_record WHERE lifecycle_id = ? ORDER BY exited_at').all(lc.id)) as { gate: string }[];
+  const tests = ((await db.prepare('SELECT id, status, suites, report_sha256, actor, created_at FROM test_run WHERE lifecycle_id = ? ORDER BY created_at DESC').all(lc.id)) as { suites: string }[]).map((t) => ({ ...t, suites: JSON.parse(t.suites) }));
+  const gate = lc.stage === 'propose' ? (await proposeGate(lc)) : lc.stage === 'assess' ? (await assessGate(lc)) : null;
+  const deploy = lc.data.deploy && lc.data.cert_id ? { ...lc.data.deploy, stats: (await deployStats(lc.data.cert_id, lc.data.deploy.mode_since)), days_in_mode: (Date.now() - Date.parse(lc.data.deploy.mode_since)) / DAY } : null;
   return {
     lifecycle: lc,
     agent: { id: agent.id, handle: agent.handle, tier: agent.tier, owner: agent.owner, status: agent.status },
     stages: stages.map((s) => ({ ...s, gate: JSON.parse(s.gate) })),
     gate,
-    classification: classificationOf(lc.id),
-    assessments: assessments(lc.id),
+    classification: (await classificationOf(lc.id)),
+    assessments: (await assessments(lc.id)),
     required_assessments: requiredAssessments(agent.tier),
-    gaps: gapsOf(lc.id),
+    gaps: (await gapsOf(lc.id)),
     tests,
-    approval: lc.data.approval_id ? approvals.get(lc.data.approval_id) : null,
+    approval: lc.data.approval_id ? (await approvals.get(lc.data.approval_id)) : null,
     deploy,
   };
 }

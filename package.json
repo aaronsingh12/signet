@@ -23,11 +23,14 @@
     "ci": "npm run typecheck && npm test",
     "test:e2e": "npm run e2e -w @signet/e2e --",
     "sidecar": "npm run start -w @signet/sidecar",
-    "test:sdk": "cd sdk/python && uv run --with httpx --with pytest --with openai pytest -q tests"
+    "edge": "npm run start -w @signet/edge",
+    "test:sdk": "cd sdk/python && uv run --with httpx --with pytest --with openai pytest -q tests",
+    "db:migrate-sqlite": "node --import tsx apps/control/src/migrate-sqlite.ts"
   },
   "devDependencies": {
     "@types/express": "4.17.21",
     "@types/node": "24.10.1",
+    "@types/pg": "^8.23.1",
     "concurrently": "9.2.1",
     "cross-env": "^7.0.3",
     "tsx": "4.20.6",

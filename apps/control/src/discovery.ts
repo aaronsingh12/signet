@@ -16,55 +16,55 @@ export interface FindingInput {
   fingerprint: string;
 }
 
-export function ingest(source: string, items: FindingInput[], p: Principal) {
+export async function ingest(source: string, items: FindingInput[], p: Principal) {
   if (!source || !Array.isArray(items)) throw invalid('source and items[] are required');
   let added = 0;
-  tx(() => {
+  (await tx(async () => {
     for (const f of items) {
       if (!/^[0-9a-f]{16}$/.test(f.fingerprint ?? '')) throw invalid('fingerprint must be 16 hex characters (sha256 prefix)');
-      const existing = db.prepare('SELECT id FROM discovered_asset WHERE tenant_id = ? AND fingerprint = ? AND location = ?').get(tenant.id, f.fingerprint, f.location) as { id: string } | undefined;
-      if (existing) db.prepare('UPDATE discovered_asset SET last_seen = ? WHERE id = ?').run(nowIso(), existing.id);
+      const existing = (await db.prepare('SELECT id FROM discovered_asset WHERE tenant_id = ? AND fingerprint = ? AND location = ?').get(tenant.id, f.fingerprint, f.location)) as { id: string } | undefined;
+      if (existing) (await db.prepare('UPDATE discovered_asset SET last_seen = ? WHERE id = ?').run(nowIso(), existing.id));
       else {
         // Already in the broker under the same fingerprint: the copy in code is a leftover to remove.
-        const brokered = db.prepare('SELECT name FROM secret WHERE tenant_id = ? AND fingerprint = ?').get(tenant.id, f.fingerprint) as { name: string } | undefined;
-        db.prepare('INSERT INTO discovered_asset (id, tenant_id, source, type, summary, location, fingerprint, status, first_seen, last_seen) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+        const brokered = (await db.prepare('SELECT name FROM secret WHERE tenant_id = ? AND fingerprint = ?').get(tenant.id, f.fingerprint)) as { name: string } | undefined;
+        (await db.prepare('INSERT INTO discovered_asset (id, tenant_id, source, type, summary, location, fingerprint, status, first_seen, last_seen) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
           newId('fnd'), tenant.id, source, f.type, brokered ? `${f.summary} (brokered as ${brokered.name}; remove this copy)` : f.summary, f.location, f.fingerprint, 'open', nowIso(), nowIso(),
-        );
+        ));
         added++;
       }
     }
-    if (source.startsWith('keysweep')) touchSource('keysweep', items.length);
-    ledger.append({ kind: 'admin', data: { event: 'discovery.scan_ingested', source, findings: items.length, new: added, actor: p.id } });
-  });
+    if (source.startsWith('keysweep')) (await touchSource('keysweep', items.length));
+    (await ledger.append({ kind: 'admin', data: { event: 'discovery.scan_ingested', source, findings: items.length, new: added, actor: p.id } }));
+  }));
   return { received: items.length, new: added };
 }
 
-export function list(status?: string) {
+export async function list(status?: string) {
   return status
-    ? db.prepare('SELECT * FROM discovered_asset WHERE tenant_id = ? AND status = ? ORDER BY last_seen DESC').all(tenant.id, status)
-    : db.prepare('SELECT * FROM discovered_asset WHERE tenant_id = ? ORDER BY status, last_seen DESC').all(tenant.id);
+    ? (await db.prepare('SELECT * FROM discovered_asset WHERE tenant_id = ? AND status = ? ORDER BY last_seen DESC').all(tenant.id, status))
+    : (await db.prepare('SELECT * FROM discovered_asset WHERE tenant_id = ? ORDER BY status, last_seen DESC').all(tenant.id));
 }
 
-export function resolve(id: string, status: 'migrated' | 'blocked' | 'dismissed', note: string, p: Principal) {
-  const row = db.prepare('SELECT * FROM discovered_asset WHERE tenant_id = ? AND id = ?').get(tenant.id, id);
+export async function resolve(id: string, status: 'migrated' | 'blocked' | 'dismissed', note: string, p: Principal) {
+  const row = (await db.prepare('SELECT * FROM discovered_asset WHERE tenant_id = ? AND id = ?').get(tenant.id, id));
   if (!row) throw notFound(`finding ${id}`);
-  db.prepare('UPDATE discovered_asset SET status = ?, resolved_by = ? WHERE id = ?').run(status, p.id, id);
-  ledger.append({ kind: 'admin', data: { event: `discovery.${status}`, finding_id: id, note, actor: p.id } });
-  return db.prepare('SELECT * FROM discovered_asset WHERE id = ?').get(id);
+  (await db.prepare('UPDATE discovered_asset SET status = ?, resolved_by = ? WHERE id = ?').run(status, p.id, id));
+  (await ledger.append({ kind: 'admin', data: { event: `discovery.${status}`, finding_id: id, note, actor: p.id } }));
+  return (await db.prepare('SELECT * FROM discovered_asset WHERE id = ?').get(id));
 }
 
 // Findings whose fingerprint now lives in the broker are marked migrated automatically.
-export function reconcileWithBroker() {
-  return db.prepare("UPDATE discovered_asset SET status = 'migrated', resolved_by = 'broker-match' WHERE status = 'open' AND fingerprint IN (SELECT fingerprint FROM secret)").run().changes;
+export async function reconcileWithBroker() {
+  return (await db.prepare("UPDATE discovered_asset SET status = 'migrated', resolved_by = 'broker-match' WHERE status = 'open' AND fingerprint IN (SELECT fingerprint FROM secret)").run()).changes;
 }
 
-export function keylessKpi() {
-  const open = (db.prepare("SELECT COUNT(*) AS n FROM discovered_asset WHERE tenant_id = ? AND type = 'unmanaged_key' AND status = 'open'").get(tenant.id) as { n: number }).n;
-  const total = (db.prepare("SELECT COUNT(*) AS n FROM discovered_asset WHERE tenant_id = ? AND type = 'unmanaged_key'").get(tenant.id) as { n: number }).n;
-  const sealed = (db.prepare("SELECT COUNT(*) AS n FROM agent WHERE tenant_id = ? AND status IN ('sealed', 'quarantined')").get(tenant.id) as { n: number }).n;
+export async function keylessKpi() {
+  const open = ((await db.prepare("SELECT COUNT(*) AS n FROM discovered_asset WHERE tenant_id = ? AND type = 'unmanaged_key' AND status = 'open'").get(tenant.id)) as { n: number }).n;
+  const total = ((await db.prepare("SELECT COUNT(*) AS n FROM discovered_asset WHERE tenant_id = ? AND type = 'unmanaged_key'").get(tenant.id)) as { n: number }).n;
+  const sealed = ((await db.prepare("SELECT COUNT(*) AS n FROM agent WHERE tenant_id = ? AND status IN ('sealed', 'quarantined')").get(tenant.id)) as { n: number }).n;
   // Keyless is counted only where the SDK or sidecar reported the runtime: the latest report per agent
   // decides. Sealed agents that never reported are unverified, not assumed keyless.
-  const latest = db.prepare("SELECT d.agent_id, d.bypass_risk FROM agent_diagnostic d JOIN agent a ON a.id = d.agent_id WHERE a.tenant_id = ? AND a.status IN ('sealed', 'quarantined') AND d.reported_at = (SELECT MAX(reported_at) FROM agent_diagnostic x WHERE x.agent_id = d.agent_id)").all(tenant.id) as { agent_id: string; bypass_risk: number }[];
+  const latest = (await db.prepare("SELECT d.agent_id, d.bypass_risk FROM agent_diagnostic d JOIN agent a ON a.id = d.agent_id WHERE a.tenant_id = ? AND a.status IN ('sealed', 'quarantined') AND d.reported_at = (SELECT MAX(reported_at) FROM agent_diagnostic x WHERE x.agent_id = d.agent_id)").all(tenant.id)) as { agent_id: string; bypass_risk: number }[];
   const verified = latest.filter((r) => !r.bypass_risk).length;
   const risky = latest.filter((r) => r.bypass_risk).length;
   return { sealed_agents: sealed, keyless_verified: verified, bypass_risk_agents: risky, unverified_agents: Math.max(0, sealed - latest.length), unmanaged_keys_open: open, unmanaged_keys_total: total };
@@ -80,13 +80,13 @@ const SOURCES = [
   { id: 'saas-audit', kind: 'saas', label: 'SaaS audit logs (e.g. Microsoft 365, Google Workspace, Okta app usage)' },
   { id: 'sdk-diagnostics', kind: 'runtime', label: 'Signet SDK and sidecar start-up diagnostics' },
 ];
-for (const s of SOURCES) db.prepare('INSERT OR IGNORE INTO discovery_source (id, kind, label) VALUES (?, ?, ?)').run(s.id, s.kind, s.label);
+for (const s of SOURCES) (await db.prepare('INSERT INTO discovery_source (id, kind, label) VALUES (?, ?, ?) ON CONFLICT DO NOTHING').run(s.id, s.kind, s.label));
 
-export const sources = () =>
-  (db.prepare('SELECT * FROM discovery_source ORDER BY id').all() as { id: string; last_ingest_at: string | null }[]).map((s) => ({ ...s, connected: !!s.last_ingest_at }));
+export const sources = async () =>
+  ((await db.prepare('SELECT * FROM discovery_source ORDER BY id').all()) as { id: string; last_ingest_at: string | null }[]).map((s) => ({ ...s, connected: !!s.last_ingest_at }));
 
-function touchSource(id: string, count: number) {
-  db.prepare('UPDATE discovery_source SET last_ingest_at = ?, last_count = ?, total = total + ? WHERE id = ?').run(nowIso(), count, count, id);
+async function touchSource(id: string, count: number) {
+  (await db.prepare('UPDATE discovery_source SET last_ingest_at = ?, last_count = ?, total = total + ? WHERE id = ?').run(nowIso(), count, count, id));
 }
 
 // Public endpoints of AI services. Traffic from a host to one of these that does not come from a Signet
@@ -130,7 +130,7 @@ export interface LogRecord {
 
 // Network or SaaS log export → findings for AI traffic that bypasses Signet. Hosts listed in
 // gateway_hosts (the Signet gateway nodes, egress NAT addresses) are expected and skipped.
-export function ingestLogs(sourceId: 'network-logs' | 'saas-audit', records: LogRecord[], p: Principal, gatewayHosts: string[] = []) {
+export async function ingestLogs(sourceId: 'network-logs' | 'saas-audit', records: LogRecord[], p: Principal, gatewayHosts: string[] = []) {
   if (!Array.isArray(records)) throw invalid('records[] is required');
   if (records.length > 50_000) throw invalid('at most 50,000 records per upload');
   const skip = new Set(gatewayHosts.map((h) => h.toLowerCase()));
@@ -159,24 +159,24 @@ export function ingestLogs(sourceId: 'network-logs' | 'saas-audit', records: Log
     groups.set(key, g);
   }
   let added = 0;
-  tx(() => {
+  (await tx(async () => {
     for (const g of groups.values()) {
       const fingerprint = sha256(`${g.src}|${g.provider}`).slice(0, 16);
       const location = `${g.src} → ${g.domain}`;
       const evidence = JSON.stringify({ source: sourceId, provider: g.provider, kind: g.kind, domain: g.domain, requests: g.count, first_seen: g.first, last_seen: g.last });
-      const existing = db.prepare('SELECT id FROM discovered_asset WHERE tenant_id = ? AND fingerprint = ? AND location = ?').get(tenant.id, fingerprint, location) as { id: string } | undefined;
-      if (existing) db.prepare('UPDATE discovered_asset SET last_seen = ?, evidence = ? WHERE id = ?').run(g.last, evidence, existing.id);
+      const existing = (await db.prepare('SELECT id FROM discovered_asset WHERE tenant_id = ? AND fingerprint = ? AND location = ?').get(tenant.id, fingerprint, location)) as { id: string } | undefined;
+      if (existing) (await db.prepare('UPDATE discovered_asset SET last_seen = ?, evidence = ? WHERE id = ?').run(g.last, evidence, existing.id));
       else {
-        db.prepare('INSERT INTO discovered_asset (id, tenant_id, source, type, summary, location, fingerprint, status, first_seen, last_seen, evidence, owner_hint) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+        (await db.prepare('INSERT INTO discovered_asset (id, tenant_id, source, type, summary, location, fingerprint, status, first_seen, last_seen, evidence, owner_hint) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
           newId('fnd'), tenant.id, sourceId, g.kind === 'app' ? 'ai_app_usage' : 'direct_traffic',
           `${g.kind === 'app' ? 'AI app used' : 'Direct AI API traffic, not through Signet'}: ${g.provider} from ${g.src} (${g.count} request${g.count === 1 ? '' : 's'})`,
           location, fingerprint, 'open', g.first, g.last, evidence, g.user ?? g.src,
-        );
+        ));
         added++;
       }
     }
-    touchSource(sourceId, records.length);
-    ledger.append({ kind: 'admin', data: { event: 'discovery.logs_ingested', source: sourceId, records: records.length, ai_matches: matched, new_findings: added, actor: p.id } });
-  });
+    (await touchSource(sourceId, records.length));
+    (await ledger.append({ kind: 'admin', data: { event: 'discovery.logs_ingested', source: sourceId, records: records.length, ai_matches: matched, new_findings: added, actor: p.id } }));
+  }));
   return { received: records.length, ai_matches: matched, groups: groups.size, new: added };
 }
