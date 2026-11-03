@@ -53,13 +53,14 @@ async function call<T>(platform: string, url: URL, init: { method?: string; head
   }
   const text = r.text();
   if (!r.ok) {
-    let msg = text.slice(0, 300);
+    // AWS answers errors in XML: show its <Message>, not the document.
+    let msg = text.trimStart().startsWith('<') ? (text.match(/<Message>([^<]+)<\/Message>/)?.[1] ?? text.match(/<Code>([^<]+)<\/Code>/)?.[1] ?? 'error') : text.slice(0, 300);
     try {
       const j = JSON.parse(text) as { error?: { message?: string } | string; message?: string; Message?: string; error_description?: string };
       msg = (typeof j.error === 'object' ? j.error?.message : j.error_description ?? j.error) ?? j.message ?? j.Message ?? msg;
     } catch { /* not JSON */ }
     const auth = r.status === 401 || r.status === 403;
-    throw new PolicyError(auth ? 'PLATFORM_AUTH' : 'PLATFORM_API', `${platform} ${init.method ?? 'GET'} ${url.pathname} failed (${r.status}): ${msg}`, auth ? 401 : 502);
+    throw new PolicyError(auth ? 'PLATFORM_AUTH' : 'PLATFORM_API', `${platform} ${init.method ?? 'GET'} ${url.pathname} failed (${r.status}): ${msg}`, auth ? 422 : 502);
   }
   return (text ? (text.trimStart().startsWith('<') ? (text as unknown) : JSON.parse(text)) : {}) as T;
 }
@@ -145,7 +146,7 @@ const awsDriver: Driver = {
     const url = new URL('https://sts.amazonaws.com/?Action=GetCallerIdentity&Version=2011-06-15');
     const xml = await aws<string>(s, 'us-east-1', 'sts', 'GET', url);
     const arn = String(xml).match(/<Arn>([^<]+)<\/Arn>/)?.[1];
-    if (!arn) throw new PolicyError('PLATFORM_AUTH', 'AWS did not confirm the identity of these credentials', 401);
+    if (!arn) throw new PolicyError('PLATFORM_AUTH', 'AWS did not confirm the identity of these credentials', 422);
     return `signed in as ${arn}`;
   },
   async workloads(secret, scope) {
@@ -234,7 +235,7 @@ function azureSecret(secret: string): AzureSecret {
 async function azureToken(s: AzureSecret): Promise<string> {
   const body = new URLSearchParams({ grant_type: 'client_credentials', client_id: s.client_id, client_secret: s.client_secret, scope: 'https://management.azure.com/.default' }).toString();
   const t = await call<{ access_token?: string }>('Azure', new URL(`https://login.microsoftonline.com/${encodeURIComponent(s.tenant_id)}/oauth2/v2.0/token`), { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body });
-  if (!t.access_token) throw new PolicyError('PLATFORM_AUTH', 'Azure returned no access token', 401);
+  if (!t.access_token) throw new PolicyError('PLATFORM_AUTH', 'Azure returned no access token', 422);
   return t.access_token;
 }
 const arm = (path: string) => new URL(`https://management.azure.com${path}`);
@@ -337,7 +338,7 @@ async function gcpToken(s: GcpSecret): Promise<string> {
   const sig = createSign('RSA-SHA256').update(unsigned).sign(s.private_key).toString('base64url');
   const body = new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion: `${unsigned}.${sig}` }).toString();
   const t = await call<{ access_token?: string }>('Google Cloud', new URL('https://oauth2.googleapis.com/token'), { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body });
-  if (!t.access_token) throw new PolicyError('PLATFORM_AUTH', 'Google returned no access token', 401);
+  if (!t.access_token) throw new PolicyError('PLATFORM_AUTH', 'Google returned no access token', 422);
   return t.access_token;
 }
 const gcpRegions = (s: GcpSecret, scope: Record<string, string>) => (scope.regions ?? s.regions?.join(',') ?? 'us-central1').split(',').map((r) => r.trim()).filter(Boolean);
@@ -440,7 +441,7 @@ async function dataverse<T>(s: CopilotSecret, path: string): Promise<T> {
   const env = new URL(s.environment_url);
   const body = new URLSearchParams({ grant_type: 'client_credentials', client_id: s.client_id, client_secret: s.client_secret, scope: `${env.origin}/.default` }).toString();
   const t = await call<{ access_token?: string }>('Microsoft', new URL(`https://login.microsoftonline.com/${encodeURIComponent(s.tenant_id)}/oauth2/v2.0/token`), { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body });
-  if (!t.access_token) throw new PolicyError('PLATFORM_AUTH', 'Microsoft returned no access token', 401);
+  if (!t.access_token) throw new PolicyError('PLATFORM_AUTH', 'Microsoft returned no access token', 422);
   return call<T>('Copilot Studio', new URL(`${env.origin}/api/data/v9.2${path}`), { headers: { authorization: `Bearer ${t.access_token}`, accept: 'application/json', 'OData-Version': '4.0' } });
 }
 
