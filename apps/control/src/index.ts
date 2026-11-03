@@ -39,7 +39,9 @@ const INTERNAL_TOKEN = devSecret('SIGNET_INTERNAL_TOKEN');
 const PORT = Number(process.env.PORT ?? env('SIGNET_CONTROL_PORT', '4100'));
 
 const app = express();
+const initialized = controls.seed();
 app.disable('x-powered-by');
+app.use((_req, _res, next) => { void initialized.then(() => next(), next); });
 // Log uploads for discovery have their own, larger limit on their route.
 const jsonBody = express.json({ limit: '1mb' });
 const edgeResultBody = express.json({ limit: '6mb' });
@@ -426,7 +428,7 @@ app.use(problemHandler);
 
 // Background jobs: ladder windows, approval escalation and timeouts, re-attestation and expiry,
 // continuous control tests, connector outbox, daily roots.
-(await controls.seed());
+// Requests await initialization above; the listening socket can open during cloud cold starts.
 enforcement.setRolloutSource(workflow.rollouts);
 // Cloud maintenance runs in the dedicated daemon rather than request-scoped function timers.
 if (!process.env.VERCEL) {

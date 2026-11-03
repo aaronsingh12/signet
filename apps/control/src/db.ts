@@ -7,7 +7,9 @@ mkdirSync(DATA_DIR, { recursive: true });
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) throw new Error('DATABASE_URL is required: configure the Neon PostgreSQL connection string in .env');
 export const db = new PostgresDatabase(connectionString, process.env.SIGNET_DB_SCHEMA ?? 'public');
+console.info('Initializing PostgreSQL schema', { schema: db.schema });
 await db.initialize(SCHEMA_SQL);
+console.info('PostgreSQL schema ready', { schema: db.schema });
 
 export const nowIso = (): string => new Date().toISOString();
 export const tx = <T>(operation: () => Promise<T>): Promise<T> => db.transaction(operation);
