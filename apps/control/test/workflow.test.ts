@@ -50,6 +50,22 @@ async function propose(intake: Record<string, unknown>) {
 
 after(dropTestDatabase);
 
+test('a discovered agent can complete empty intake before classification without bypassing ownership or later-stage restrictions', async () => {
+  const agent = await registry.registerAgent({ handle: 'discovered-intake', name: 'Discovered refund agent', purpose: 'Review the scope of a discovered external customer support agent', sponsor: owner.id, autonomy_level: 'L0', kind: 'third_party', vendor: 'Support Lab', connection_method: 'rest' }, owner);
+  const lifecycle = await workflow.start(agent, {}, owner);
+  await assert.rejects(workflow.submitPropose(lifecycle.id, owner), /users_affected/);
+  await assert.rejects(workflow.updateIntake(lifecycle.id, { users_affected: ['customers'] }, person('unrelated@x.example', ['agent_owner'])), /only the owner/);
+  await workflow.updateIntake(lifecycle.id, { users_affected: ['customers'], data_touched: ['personal'], decisions_about_individuals: false, planned_tools: ['lookup_order (read)'], reversibility: 'partly', business_value: 'Monitor customer support execution and permissions' }, owner);
+  const saved = await workflow.get(lifecycle.id);
+  assert.deepEqual(saved.data.intake.users_affected, ['customers']);
+  assert.deepEqual(saved.data.intake.data_touched, ['personal']);
+  assert.equal(saved.data.intake.business_value, 'Monitor customer support execution and permissions');
+  await workflow.submitPropose(lifecycle.id, owner);
+  assert.equal((await workflow.get(lifecycle.id)).stage, 'classify');
+  assert.equal(await registry.activeCertificate(agent.id), null, 'Saving intake must not certify discovered agents');
+  await assert.rejects(workflow.updateIntake(lifecycle.id, { users_affected: ['internal'] }, owner), (error: { status?: number; rule?: string }) => error.status === 409 && error.rule === 'BP-6');
+});
+
 test('classification: weighted score sets the tier; decisions about individuals floor at T2 (RB-INV-14)', async () => {
   assert.equal(workflow.scoreToTier(4), 'T1');
   assert.equal(workflow.scoreToTier(3.65), 'T2');
