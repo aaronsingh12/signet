@@ -13,7 +13,7 @@ import { eraseAgentLedgerQueue } from './ledgerclient';
 // Gateway-side cache of the signed policy bundle (BP 3, 5.2). Gateways are stateless apart from this
 // cache: they enforce from memory and keep enforcing on the last bundle if the control plane is down.
 
-export const CONTROL_URL = env('SIGNET_CONTROL_URL', 'http://localhost:4100');
+export const CONTROL_URL = env('SIGNET_CONTROL_URL', 'http://localhost:4100').replace(/\/+$/, '');
 const INTERNAL_TOKEN = devSecret('SIGNET_INTERNAL_TOKEN');
 export const PORT = Number(process.env.PORT ?? env('SIGNET_GATEWAY_PORT', '8100'));
 export const NODE_ID = env('SIGNET_NODE_ID', `gw-${hostname().toLowerCase()}-${PORT}`);
