@@ -10,14 +10,12 @@
     "control": {
       "root": ".",
       "runtime": "container",
-      "entrypoint": "Dockerfile.vercel",
-      "command": ["node", "control.mjs"]
+      "entrypoint": "Dockerfile.vercel"
     },
     "gateway": {
       "root": ".",
       "runtime": "container",
-      "entrypoint": "Dockerfile.vercel",
-      "command": ["node", "gateway.mjs"],
+      "entrypoint": "Dockerfile.gateway",
       "bindings": [{ "type": "service", "service": "control", "format": "url", "env": "SIGNET_CONTROL_URL" }]
     }
   },
