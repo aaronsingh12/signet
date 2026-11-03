@@ -3,6 +3,23 @@
 type Op = { summary: string; permission?: string; public?: boolean; body?: string; runner?: boolean };
 
 const ops: Record<string, Record<string, Op>> = {
+  '/connections': {
+    get: { summary: 'List outbound platform connections, separate capabilities and verified coverage', permission: 'agents.read' },
+    post: { summary: 'Save encrypted external connection config and credentials in Secrets Broker; requires agent_id, config and credential', permission: 'connectors.manage', body: 'ExternalConnectionInput' },
+  },
+  '/connections/{id}': {
+    get: { summary: 'Connection config without credentials, health, capability and coverage metadata', permission: 'agents.read' },
+    put: { summary: 'Edit config or rotate credential; destination changes require credential resubmission', permission: 'connectors.manage', body: 'ExternalConnectionInput' },
+  },
+  '/connections/{id}/test': { post: { summary: 'Acquire OAuth token if needed and perform configured harmless GET; redirects and private destinations forbidden', permission: 'connectors.manage' } },
+  '/connections/{id}/discover': { post: { summary: 'Validate explicit response mapping and import proposed agents without certification', permission: 'connectors.manage and discovery.write' } },
+  '/connections/{id}/sync': { post: { summary: 'Synchronize external metadata separately from Gateway evidence; deduplicate executions', permission: 'connectors.manage' } },
+  '/connections/{id}/disconnect': { post: { summary: 'Disable requests and discard cached token; does not revoke upstream credential', permission: 'connectors.manage' } },
+  '/connections/{id}/reconnect': { post: { summary: 'Re-enable disconnected connection; requires a new test to verify health', permission: 'connectors.manage' } },
+  '/connections/{id}/revoke': { post: { summary: 'Permanently revoke Signet connection and erase brokered credential; revoke upstream credential at its issuer', permission: 'connectors.manage' } },
+  '/connections/{id}/observations': { get: { summary: 'Read up to 200 external observations, never Gateway decisions', permission: 'ledger.read' } },
+  '/connections/{id}/agents': { get: { summary: 'External-to-Signet agent mappings', permission: 'agents.read' } },
+  '/connections/{id}/agents/{agentId}/actions/{action}': { post: { summary: 'Run, pause, stop or activate approved mapped agent; JSON body forwarded once, audited without payload', permission: 'connectors.manage' } },
   '/auth/login': { get: { summary: 'Start single sign-on (authorization code + PKCE)', public: true } },
   '/auth/callback': { get: { summary: 'OIDC redirect target', public: true } },
   '/auth/logout': { post: { summary: 'End the Signet session and the IdP session', public: true } },
@@ -34,6 +51,7 @@ const ops: Record<string, Record<string, Op>> = {
   '/agents/{id}/certificate': { get: { summary: 'The active seal (JWS and body)', permission: 'agents.read' } },
   '/certificates/verify': { post: { summary: 'Verify a seal signature and current status', permission: 'agents.read' } },
   '/agents/{id}/connection': { get: { summary: 'Connection state from identity records and gateway traffic, with diagnostics', permission: 'agents.read' } },
+  '/agents/{id}/gateway-test': { post: { summary: 'Check configured Signet Gateway health and return actual agent evidence; does not simulate agent calls', permission: 'agents.read' } },
   '/agents/{id}/clients': { post: { summary: 'Create environment-bound OAuth client credentials for an approved agent (secret shown once)', permission: 'identity.bootstrap', body: 'ClientEnrollment' } },
   '/clients/{id}/revoke': { post: { summary: 'Revoke an agent OAuth client and its tokens', permission: 'identity.bootstrap or ladder.quarantine' } },
   '/instances/{id}/revoke': { post: { summary: 'Revoke one instance identity and its tokens', permission: 'identity.bootstrap or ladder.quarantine' } },
@@ -96,6 +114,22 @@ export const openapi = {
       runner: { type: 'http', scheme: 'bearer', description: 'Scoped connector runner enrollment secret' },
     },
     schemas: {
+      ExternalConnectionInput: {
+        type: 'object', required: ['config'],
+        properties: { agent_id: { type: 'string', description: 'Required on creation; must be registered in this tenant' }, credential: { type: 'string', writeOnly: true, minLength: 8, maxLength: 16000 }, config: { $ref: '#/components/schemas/ExternalConnectionConfig' } },
+      },
+      ExternalConnectionConfig: {
+        type: 'object', required: ['name', 'method', 'base_url', 'auth', 'header', 'client_id', 'token_url', 'scopes', 'token_auth', 'timeout_ms', 'sync_interval_seconds', 'remote_management', 'endpoints', 'agents_mapping', 'executions_mapping', 'tracking_pointer', 'execution_pagination'],
+        properties: {
+          name: { type: 'string', minLength: 1, maxLength: 120 }, method: { enum: ['rest', 'oauth', 'hybrid'] }, base_url: { type: 'string', format: 'uri' }, auth: { enum: ['none', 'api_key', 'bearer', 'oauth', 'connector'] }, header: { type: 'string' }, client_id: { type: 'string' }, token_url: { type: 'string' }, scopes: { type: 'string' }, token_auth: { enum: ['client_secret_basic', 'client_secret_post'] }, timeout_ms: { type: 'integer', minimum: 1000, maximum: 30000 }, sync_interval_seconds: { type: 'integer', minimum: 60, maximum: 86400 }, remote_management: { type: 'boolean' },
+          private_connector: { type: ['object', 'null'], required: ['runner_id', 'tool_alias', 'environment'], properties: { runner_id: { type: 'string' }, tool_alias: { type: 'string' }, environment: { type: 'string' } } },
+          endpoints: { type: 'object', required: ['test'], additionalProperties: { type: 'object', required: ['path', 'method'], properties: { path: { type: 'string', description: 'Relative path appended to base URL; {id} expands to encoded external agent ID. For private connections must match the registered action with this operation name.' }, method: { enum: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] } } } },
+          agents_mapping: { $ref: '#/components/schemas/ExternalResponseMapping' }, executions_mapping: { $ref: '#/components/schemas/ExternalResponseMapping' },
+          tracking_pointer: { type: 'string', description: 'JSON pointer selecting the tracked agent object; empty selects root' },
+          execution_pagination: { type: ['object', 'null'], required: ['total', 'offset', 'limit'], description: 'Opt-in offset/limit pagination, up to 1000 execution records per agent per sync', properties: { total: { type: 'string' }, offset: { type: 'string' }, limit: { type: 'string' } } },
+        },
+      },
+      ExternalResponseMapping: { type: ['object', 'null'], required: ['items', 'id', 'name', 'status', 'timestamp'], description: 'Explicit documented or observed JSON pointers. Empty items selects root array; empty optional fields are omitted. Agent and execution IDs must be stable strings.', properties: { items: { type: 'string' }, id: { type: 'string' }, name: { type: 'string' }, status: { type: 'string' }, timestamp: { type: 'string' } } },
       ClientEnrollment: { type: 'object', properties: { label: { type: 'string' }, environment: { type: 'string' } } },
       Problem: {
         type: 'object',

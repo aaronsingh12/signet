@@ -577,6 +577,30 @@ CREATE TABLE IF NOT EXISTS edge_job (
   state TEXT NOT NULL, result_json TEXT, error TEXT, expires_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS edge_job_queue ON edge_job(runner_id, state, expires_at);
+
+-- External observations are separate from Gateway transactions and never confer certification.
+CREATE TABLE IF NOT EXISTS external_connection (
+  id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL REFERENCES tenant(id),
+  agent_id TEXT NOT NULL REFERENCES agent(id) ON DELETE CASCADE,
+  secret_id TEXT NOT NULL REFERENCES secret(id), state TEXT NOT NULL,
+  health TEXT NOT NULL, next_sync_at BIGINT NOT NULL, busy_until BIGINT NOT NULL,
+  created_by TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS external_agent_mapping (
+  connection_id TEXT NOT NULL REFERENCES external_connection(id) ON DELETE CASCADE,
+  external_id TEXT NOT NULL, agent_id TEXT NOT NULL REFERENCES agent(id) ON DELETE CASCADE,
+  last_seen_at TEXT NOT NULL, PRIMARY KEY(connection_id, external_id)
+);
+CREATE TABLE IF NOT EXISTS external_observation (
+  connection_id TEXT NOT NULL REFERENCES external_connection(id) ON DELETE CASCADE,
+  external_agent_id TEXT NOT NULL, external_id TEXT NOT NULL, kind TEXT NOT NULL,
+  metadata TEXT NOT NULL, observed_at TEXT NOT NULL,
+  PRIMARY KEY(connection_id, external_agent_id, kind, external_id)
+);
+CREATE TABLE IF NOT EXISTS external_connection_budget (
+  connection_id TEXT PRIMARY KEY REFERENCES external_connection(id) ON DELETE CASCADE,
+  window_at BIGINT NOT NULL, requests BIGINT NOT NULL
+);
 `;
 
 export const SCHEMA_TABLES: ReadonlySet<string> = new Set([...SCHEMA_SQL.matchAll(/CREATE TABLE IF NOT EXISTS ([a-z_]+)/g)].map((match) => match[1]!));

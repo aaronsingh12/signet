@@ -1,4 +1,4 @@
-import { TOKEN_AUDIENCE, sha256, tokenIssuer, verifyJws, type WorkloadClaims } from '@signet/core';
+import { TOKEN_AUDIENCE, sha256, tokenIssuer, verifyJws, request, type WorkloadClaims } from '@signet/core';
 import { db, nowIso, tx } from './db';
 import * as enforcement from './enforcement';
 import { PolicyError, invalid } from './errors';
@@ -93,6 +93,8 @@ export async function status(agentRef: string) {
     coverage: thirdParty ? { model_calls: 'not_intercepted', tool_calls: 'governed' } : { model_calls: 'governed', tool_calls: 'governed' },
     last_success_at: lastOk?.ts ?? null,
     last_accepted_at: lastAccepted?.ts ?? null,
+    gateway_enforcement_active: !!lastAccepted && recentMs(lastAccepted) < CONNECTED_WINDOW_MS,
+    last_gateway_decision: txs[0] ? { at: txs[0].ts, outcome: txs[0].outcome, error_code: txs[0].error_code } : null,
     last_auth_failure: lastAuthFail ? { at: lastAuthFail.ts, code: lastAuthFail.error_code } : null,
     identity: {
       bootstrap_credentials: { issued: bootstraps.n, exchanged: bootstraps.used ?? 0 },
@@ -103,6 +105,16 @@ export async function status(agentRef: string) {
     recent_errors: errors,
     diagnostics,
   };
+}
+
+/** Reachability checks do not impersonate an agent or manufacture an accepted Gateway call. */
+export async function testGateway(agentRef: string) {
+  await getAgent(agentRef);
+  const gateway = process.env.SIGNET_GATEWAY_URL?.replace(/\/+$/, '');
+  if (!gateway) throw invalid('Configure SIGNET_GATEWAY_URL on the control plane before testing Gateway reachability');
+  const response = await request(`${gateway}/healthz`, { method: 'GET', timeoutMs: 5000, signal: AbortSignal.timeout(5000), maxBytes: 16000 }).catch((error: Error) => { throw new PolicyError('GATEWAY_UNAVAILABLE', `Signet Gateway health request failed: ${error.message}`, 502); });
+  if (!response.ok) throw new PolicyError('GATEWAY_UNAVAILABLE', `Signet Gateway health check returned HTTP ${response.status}`, 502);
+  return { gateway_reachable: true, connection: await status(agentRef), note: 'Gateway service is reachable. Only this agent’s actual workload requests can establish accepted or refused call evidence.' };
 }
 
 // --- Runtime diagnostics from the SDK or sidecar -------------------------------------------------

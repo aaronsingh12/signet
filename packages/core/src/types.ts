@@ -205,3 +205,5 @@ export interface Rollout {
   mode: 'shadow' | 'canary' | 'enforce';
   canary_pct: number;
 }
+export type { ResponseMapping, ExternalOperation, ConnectionEndpoint, ExternalConnectionConfig, ConnectionHealth, ExternalConnectionView } from './connections';
+export { supportLabConnectionConfig } from './connections';
