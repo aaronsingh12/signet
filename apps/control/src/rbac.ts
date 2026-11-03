@@ -79,6 +79,13 @@ export const principalOf = (res: Response): Principal => res.locals.principal as
 
 export const can = (p: Principal, perm: Permission) => p.permissions.includes(perm);
 
+// Single-operator mode: one administrator runs the whole tenant, so separation of duties (RB-INV-09:
+// proposer, owner and build team never approve their own agent) cannot hold. It is on by default with
+// local sign-in, which has exactly one person, and can be forced either way with SIGNET_SINGLE_OPERATOR.
+// Every decision taken under it is marked in the ledger, so the evidence never claims a second person.
+export const singleOperatorMode = () => (process.env.SIGNET_SINGLE_OPERATOR ?? ((process.env.SIGNET_AUTH_MODE ?? 'local') === 'local' ? 'true' : 'false')).toLowerCase() === 'true';
+export const singleOperator = (p: Principal) => singleOperatorMode() && p.kind === 'human';
+
 // Route guard: the caller needs at least one of the listed permissions.
 export const requires = (...perms: Permission[]) => (_req: Request, res: Response, next: NextFunction) => {
   const p = res.locals.principal as Principal | undefined;

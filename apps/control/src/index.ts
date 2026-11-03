@@ -17,7 +17,7 @@ import * as live from './live';
 import * as oidc from './oidc';
 import * as plugins from './plugins';
 import { openapi } from './openapi';
-import { principalOf, requires } from './rbac';
+import { principalOf, requires, singleOperatorMode } from './rbac';
 import * as registry from './registry';
 import * as secrets from './secrets';
 import { commandCenter } from './stats';
@@ -106,7 +106,7 @@ api.get('/openapi.json', (_req, res) => res.json(openapi));
 // --- everything below needs a signed-in person or an approved machine client ---
 api.use(oidc.authenticate, signedIn, idempotency);
 
-api.get('/me', route((_req, res) => ({ principal: principalOf(res), tenant: { id: tenant.id, name: tenant.name } })));
+api.get('/me', route((_req, res) => ({ principal: principalOf(res), tenant: { id: tenant.id, name: tenant.name }, single_operator: singleOperatorMode() })));
 api.get('/plugins/vercel', requires('tenant.admin'), route((_req, res) => plugins.vercelConnection(principalOf(res))));
 api.get('/plugins/vercel/connect', requires('tenant.admin'), route((_req, res) => plugins.startVercelConnection(res, principalOf(res))));
 api.get('/plugins/vercel/callback', requires('tenant.admin'), route((req, res) => plugins.completeVercelConnection(req, res, principalOf(res))));

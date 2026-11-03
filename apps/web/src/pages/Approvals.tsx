@@ -106,6 +106,7 @@ export function ApprovalDetail({ id, onDecided, compact = false }: { id: string;
 }
 
 function DecisionForm({ r, onDone }: { r: any; onDone: () => void }) {
+  const solo = useMe().single_operator === true;
   const [slot, setSlot] = useState(r.my_slots[0]);
   const [comment, setComment] = useState('');
   const [error, setError] = useState<ApiError | null>(null);
@@ -126,7 +127,8 @@ function DecisionForm({ r, onDone }: { r: any; onDone: () => void }) {
   const reauth = () => location.assign(`/api/v1/auth/login?max_age=0&return_to=${encodeURIComponent(location.pathname + location.search)}`);
   return (
     <Card title="Your decision">
-      {r.my_slots.length > 1 && (
+      {solo && <p className="mb-3 rounded-md bg-warn-50 px-3 py-2 text-xs text-warn">Single-administrator workspace: approving signs every open slot ({r.my_slots.join(', ')}) at once. The ledger records that separation of duties was waived.</p>}
+      {!solo && r.my_slots.length > 1 && (
         <div className="mb-3">
           <label className="label">Sign as</label>
           <select className="input w-auto" value={slot} onChange={(e) => setSlot(e.target.value)}>

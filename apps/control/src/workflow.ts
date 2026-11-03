@@ -11,7 +11,7 @@ import * as hub from './hub';
 import * as ledger from './ledger';
 import { notify } from './notify';
 import { correlation, enqueue } from './outbox';
-import { can, type Principal, type Role } from './rbac';
+import { can, singleOperator, type Principal, type Role } from './rbac';
 import { activeCertificate, getAgent, signSeal, teamOf, validateSeal, type AgentRow, type SealInput } from './registry';
 import { markRotationDue } from './secrets';
 import { getTemplate, manifestFrom } from './templates';
@@ -242,7 +242,7 @@ export function classify(lcId: string, p: Principal, input: { overrides?: Partia
   const overrides = { ...(existing as Record<string, { value: number; reason: string; by: string }>) };
   if (input.overrides && Object.keys(input.overrides).length) {
     if (!p.roles.includes('risk_officer') && !p.roles.includes('governance_board')) throw forbidden('BP-6-S2', 'only Risk/Compliance can override classification factors');
-    if (isTeam(agent, p)) throw forbidden('RB-INV-09', `${p.id} proposed, owns or builds this agent and cannot change its classification`);
+    if (isTeam(agent, p) && !singleOperator(p)) throw forbidden('RB-INV-09', `${p.id} proposed, owns or builds this agent and cannot change its classification`);
     if (!input.reason?.trim()) throw invalid('an override needs a reason');
     for (const [k, v] of Object.entries(input.overrides)) {
       if (!FACTORS.includes(k as Factor) || !(Number(v) >= 1 && Number(v) <= 5)) throw invalid(`factor ${k} must be 1-5`);
@@ -260,7 +260,7 @@ export function classify(lcId: string, p: Principal, input: { overrides?: Partia
   }
   const riskTeam = p.roles.includes('risk_officer') || p.roles.includes('governance_board');
   if ((result.tier === 'T1' || result.tier === 'T2') && !riskTeam) throw forbidden('BP-6-S2', `${result.tier} classifications are confirmed by the risk team`);
-  if ((result.tier === 'T1' || result.tier === 'T2') && isTeam(agent, p)) throw forbidden('RB-INV-09', `${p.id} proposed, owns or builds this agent and cannot confirm its ${result.tier} classification`);
+  if ((result.tier === 'T1' || result.tier === 'T2') && isTeam(agent, p) && !singleOperator(p)) throw forbidden('RB-INV-09', `${p.id} proposed, owns or builds this agent and cannot confirm its ${result.tier} classification`);
   if (!riskTeam && agent.owner !== p.id) throw forbidden('BP-6-S2', 'the owner or the risk team confirms the classification');
   tx(() => {
     result = writeClassification(lc, overrides as never, p.id);

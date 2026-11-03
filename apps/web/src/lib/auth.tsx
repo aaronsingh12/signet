@@ -13,6 +13,7 @@ export interface Principal {
 interface Me {
   principal: Principal;
   tenant: { id: string; name: string };
+  single_operator?: boolean; // one administrator; separation of duties waived and recorded
 }
 
 const Ctx = createContext<Me | null>(null);
