@@ -1,5 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "regions": ["sin1"],
   "services": {
     "web": {
       "root": "apps/web",
@@ -25,7 +26,7 @@
       "root": ".",
       "entrypoint": "Dockerfile.vercel",
       "command": ["node", "maintenance.mjs"],
-      "instances": { "iad1": 1 },
+      "instances": { "sin1": 1 },
       "resources": { "requests": { "memory": "1Gi" } },
       "bindings": [{ "type": "service", "service": "control", "format": "url", "env": "SIGNET_CONTROL_URL" }]
     }
