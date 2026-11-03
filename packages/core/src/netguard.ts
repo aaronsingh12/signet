@@ -13,8 +13,15 @@ function v4(ip: string): number[] {
 
 export function classifyAddress(ip: string): AddressClass {
   let a = ip.toLowerCase();
+  if (isIP(a) === 6) a = new URL(`http://[${a}]/`).hostname.slice(1, -1);
   const mapped = a.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
   if (mapped) a = mapped[1]!;
+  const mappedHex = a.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (mappedHex) {
+    const high = parseInt(mappedHex[1]!, 16);
+    const low = parseInt(mappedHex[2]!, 16);
+    a = `${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`;
+  }
   if (isIP(a) === 4) {
     const [o1, o2] = v4(a) as [number, number];
     if (o1 === 0) return 'unspecified';

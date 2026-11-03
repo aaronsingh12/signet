@@ -62,6 +62,10 @@ export function ConnectionTab({ data, onChange }: { data: any; onChange: () => v
                 ['Last successful call', c.last_success_at ? ago(c.last_success_at) : 'never'],
                 ['Last refused identity', c.last_auth_failure ? `${c.last_auth_failure.code}, ${ago(c.last_auth_failure.at)}` : '—'],
                 ['Live tokens', c.identity.live_tokens],
+                ['Bootstrap generated', c.identity.bootstrap_credentials.issued > 0 ? 'Yes' : 'No'],
+                ['Bootstrap token exchanged', c.identity.bootstrap_credentials.exchanged > 0 ? 'Yes' : 'No'],
+                ['Gateway enforcement active', c.gateway_enforcement_active ? 'Recent identity accepted by Gateway' : 'No recent accepted identity'],
+                ['Latest Gateway decision', c.last_gateway_decision ? `${c.last_gateway_decision.outcome ?? 'unknown'}${c.last_gateway_decision.error_code ? ` · ${c.last_gateway_decision.error_code}` : ''}` : 'No calls recorded'],
               ]}
             />
           </div>

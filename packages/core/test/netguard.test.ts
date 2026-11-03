@@ -6,6 +6,8 @@ import { DestinationBlocked, addressAllowed, checkDestination, classifyAddress, 
 test('address classes: metadata and link-local are never reachable; private only when allowed', () => {
   assert.equal(classifyAddress('169.254.169.254'), 'link_local');
   assert.equal(classifyAddress('::ffff:169.254.169.254'), 'link_local');
+  assert.equal(classifyAddress('::ffff:a9fe:a9fe'), 'link_local');
+  assert.equal(classifyAddress('0:0:0:0:0:ffff:7f00:1'), 'loopback');
   assert.equal(classifyAddress('10.1.2.3'), 'private');
   assert.equal(classifyAddress('172.31.0.1'), 'private');
   assert.equal(classifyAddress('172.32.0.1'), 'public');

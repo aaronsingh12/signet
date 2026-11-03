@@ -11,6 +11,7 @@ const jobs: ReadonlyArray<{ name: string; interval: number }> = [
   { name: 'lifecycle', interval: 600_000 },
   { name: 'controls', interval: 600_000 },
   { name: 'connectors', interval: 3_000 },
+  { name: 'connections', interval: 30_000 },
   { name: 'edge', interval: 10_000 },
   { name: 'roots', interval: 600_000 },
   { name: 'platform-usage', interval: 6 * 3_600_000 },

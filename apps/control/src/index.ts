@@ -36,6 +36,7 @@ import * as workflow from './workflow';
 import * as tools from './tools';
 import * as connectivity from './connectivity';
 import * as edge from './edge';
+import * as externalConnections from './external-connections';
 
 const INTERNAL_TOKEN = devSecret('SIGNET_INTERNAL_TOKEN');
 const PORT = Number(process.env.PORT ?? env('SIGNET_CONTROL_PORT', '4100'));
@@ -130,6 +131,28 @@ api.use('/edge/runners', runners);
 api.use(oidc.authenticate, signedIn, idempotency);
 
 api.get('/me', route((_req, res) => ({ principal: principalOf(res), tenant: { id: tenant.id, name: tenant.name }, single_operator: singleOperatorMode() })));
+// Secrets in these requests must never enter idempotency response storage or browser caches.
+api.use('/connections', (_req, res, next) => { res.setHeader('cache-control', 'no-store'); next(); });
+api.get('/connections', requires('agents.read'), route(async () => ({ items: await externalConnections.list() })));
+api.post('/agents/:id/gateway-test', requires('agents.read'), route(async (req) => connectivity.testGateway(req.params.id!)));
+api.post('/connections', requires('connectors.manage'), route(async (req, res) => [201, await externalConnections.create(req.body?.agent_id, req.body, principalOf(res))]));
+api.get('/connections/:id', requires('agents.read'), route(async (req) => externalConnections.view(req.params.id!)));
+api.put('/connections/:id', requires('connectors.manage'), route(async (req, res) => externalConnections.update(req.params.id!, req.body, principalOf(res))));
+api.post('/connections/:id/test', requires('connectors.manage'), route(async (req, res) => externalConnections.testConnection(req.params.id!, principalOf(res))));
+api.post('/connections/:id/discover', requires('connectors.manage'), route(async (req, res) => externalConnections.discover(req.params.id!, principalOf(res))));
+api.post('/connections/:id/sync', requires('connectors.manage'), route(async (req, res) => externalConnections.sync(req.params.id!, principalOf(res))));
+api.post('/connections/:id/disconnect', requires('connectors.manage'), route(async (req, res) => externalConnections.transition(req.params.id!, 'disconnected', principalOf(res))));
+api.post('/connections/:id/reconnect', requires('connectors.manage'), route(async (req, res) => externalConnections.transition(req.params.id!, 'enabled', principalOf(res))));
+api.post('/connections/:id/revoke', requires('connectors.manage'), route(async (req, res) => externalConnections.transition(req.params.id!, 'revoked', principalOf(res))));
+api.get('/connections/:id/observations', requires('ledger.read'), route(async (req) => {
+  await externalConnections.view(req.params.id!);
+  return { items: await db.prepare('SELECT external_agent_id, external_id, kind, metadata, observed_at FROM external_observation WHERE connection_id = ? ORDER BY observed_at DESC LIMIT 200').all(req.params.id!) };
+}));
+api.get('/connections/:id/agents', requires('agents.read'), route(async (req) => {
+  await externalConnections.view(req.params.id!);
+  return { items: await db.prepare('SELECT external_id, agent_id, last_seen_at FROM external_agent_mapping WHERE connection_id = ? ORDER BY external_id').all(req.params.id!) };
+}));
+api.post('/connections/:id/agents/:agentId/actions/:action', requires('connectors.manage'), route(async (req, res) => externalConnections.remoteAction(req.params.id!, req.params.agentId!, req.params.action!, req.body, principalOf(res))));
 api.get('/edge-runners', requires('agents.read'), route(async () => ({ items: (await edge.listRunners()) })));
 api.post('/edge-runners', requires('connectors.manage'), route(async (req, res) => {
   res.setHeader('cache-control', 'no-store');
@@ -434,6 +457,7 @@ int.post('/maintenance/approvals', route(async () => { await approvals.sweep(); 
 int.post('/maintenance/lifecycle', route(async () => { await workflow.sweep(); return { ok: true }; }));
 int.post('/maintenance/controls', route(async () => { await controls.evaluate(); return { ok: true }; }));
 int.post('/maintenance/connectors', route(async () => { await servicenow.work(); return { ok: true }; }));
+int.post('/maintenance/connections', route(async () => { await externalConnections.work(); return { ok: true }; }));
 int.post('/maintenance/edge', route(async () => { await edge.sweep(); return { ok: true }; }));
 int.post('/maintenance/platform-usage', route(async () => { await platforms.sweepUsage(); return { ok: true }; }));
 int.post('/maintenance/roots', route(async () => ({ sealed: await evidence.sealFinishedDays() })));
@@ -466,6 +490,7 @@ every(5_000, 'approval sweep', async () => (await approvals.sweep()));
 every(10 * 60_000, 'lifecycle sweep', async () => (await workflow.sweep()))();
 every(10 * 60_000, 'control evaluation', async () => (await controls.evaluate()))();
 every(3_000, 'connector worker', async () => (await servicenow.work()));
+every(30_000, 'external connection sync', async () => (await externalConnections.work()));
 every(10_000, 'connector job cleanup', async () => (await edge.sweep()));
 every(6 * 3_600_000, 'platform usage sync', async () => (await platforms.sweepUsage()));
 const sealRoots = async () => {

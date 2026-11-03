@@ -7,6 +7,7 @@ import { useCan } from '../lib/auth';
 import { EdgeRunners } from './EdgeRunners';
 import { CopyCode } from './CopyCode';
 import { CONNECTION_METHODS } from '../lib/connections';
+import { ExternalConnectionEditor, ExternalConnections } from './ExternalConnections';
 
 interface ConnectInfo {
   control_url: string; gateway_url: string | null; gateway_url_source: string;
@@ -29,6 +30,9 @@ export function ConnectionSetup({ agent, certificate, state, onChange }: {
   const [error, setError] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
   const [label, setLabel] = useState('');
+  const [direction, setDirection] = useState('inbound');
+  const [externalRevision, setExternalRevision] = useState(0);
+  const [gatewayTest, setGatewayTest] = useState<string | null>(null);
   const control = info?.control_url ?? '<control-url>';
   const gateway = info?.gateway_url ?? '<gateway-url>';
   const model = info?.models[0] ?? '<approved-model>';
@@ -58,17 +62,20 @@ export function ConnectionSetup({ agent, certificate, state, onChange }: {
   return <div className="space-y-4">
     <Card title="Connect your agent">
       <div className="grid gap-3 md:grid-cols-2">{CONNECTION_METHODS.map((item) => <button key={item.id} data-testid={`setup-method-${item.id}`} aria-pressed={method === item.id} disabled={busy} onClick={() => { setMethod(item.id); setCredentials(null); setBootstrap(null); }} className={`rounded-lg border p-3 text-left ${method === item.id ? 'border-royal bg-royal-50' : 'border-line hover:bg-canvas'}`}><div className="text-sm font-semibold">{item.label}</div><p className="mt-1 text-xs text-ink-2">{item.description}</p></button>)}</div>
+      {(method === 'rest' || method === 'oauth') && <label className="label mt-4">Connection direction<select data-testid="setup-direction" className="input" value={direction} onChange={(event) => { setDirection(event.target.value); setCredentials(null); }}><option value="inbound">External agent calls Signet {method === 'rest' ? 'REST API' : 'OAuth'}</option><option value="outbound">Signet connects to external platform</option></select></label>}
+      {direction === 'outbound' && (method === 'rest' || method === 'oauth') && <ExternalConnectionEditor key={method} agentId={agent.id} method={method} existing={null} onSaved={() => { setExternalRevision(externalRevision + 1); onChange(); }} onCancel={() => setDirection('inbound')} />}
       {!certificate && <div className="mt-4 rounded-lg border border-line bg-canvas p-4 text-sm"><strong>1. Complete approval</strong><p className="mt-1 text-ink-2">Your agent is registered. Complete its lifecycle checks, then open My Approvals. An administrator can approve the certificate directly; other reviewers follow the tier approval matrix. Return here to generate credentials after approval.</p><Link data-testid="setup-open-lifecycle" className="mt-2 inline-block text-royal" to={`/agents/${agent.id}?tab=lifecycle`}>Open approval lifecycle →</Link></div>}
-      {unsupported ? <p role="alert" className="mt-4 text-sm text-warn">Vendor-hosted agents connect with OAuth or REST for company tools. Select one of those methods.</p> : <>
+      {unsupported ? <p role="alert" className="mt-4 text-sm text-warn">Vendor-hosted agents connect with OAuth or REST for company tools. Select one of those methods.</p> : direction === 'outbound' && (method === 'rest' || method === 'oauth') ? null : <>
         <div className="mt-4 flex flex-wrap items-end gap-3"><div><label className="label" htmlFor="setup-environment">Environment</label><select id="setup-environment" data-testid="setup-environment" className="input" value={environment} disabled={!certificate || busy} onChange={(event) => { setEnvironment(event.target.value); setCredentials(null); setBootstrap(null); }}>{(certificate?.environments ?? ['dev']).map((item) => <option key={item} value={item}>{item}</option>)}</select></div>{method !== 'bootstrap' && <div className="flex-1"><label className="label" htmlFor="setup-label">Connection label (optional)</label><input id="setup-label" className="input" value={label} onChange={(event) => setLabel(event.target.value)} placeholder="Production agent" /></div>}<button data-testid="setup-generate" className="btn-primary" disabled={!permitted || busy} onClick={() => void generate()}>{busy ? 'Generating…' : method === 'bootstrap' ? 'Generate bootstrap credential' : 'Generate Client ID & Secret'}</button></div>
         {certificate && !can('identity.bootstrap') && <p className="mt-2 text-sm text-ink-3">Ask your agent owner or administrator to generate credentials.</p>}
         {(credentials || bootstrap) && <div className="mt-4 rounded-lg border border-line p-3"><p className="mb-2 text-sm font-medium">Save these credentials now. The secret is shown only in this session.</p>{credentials ? <CopyCode testId="setup-credentials" text={`Client ID: ${credentials.client_id}\nClient Secret: ${credentials.client_secret}\nToken URL: ${tokenUrl}\nGrant type: client_credentials\nEnvironment: ${environment}`} /> : bootstrap && <><CopyCode testId="setup-bootstrap" text={bootstrap.bootstrap_credential} /><p className="mt-2 text-xs text-ink-3">Single use · expires {new Date(bootstrap.expires_at).toLocaleString()}</p></>}<button data-testid="setup-hide-secret" className="mt-2 text-xs text-royal" onClick={() => { setCredentials(null); setBootstrap(null); }}>Hide credentials</button></div>}
       </>}
       <ErrorNote error={error ?? infoError} />
     </Card>
-    {!unsupported && <Card title="Copy your connection settings">
+    {!unsupported && !(direction === 'outbound' && (method === 'rest' || method === 'oauth')) && <Card title="Copy your connection settings">
       <p className="mb-3 text-sm text-ink-2">{method === 'bootstrap' ? '2. Install the SDK and supply the one-time credential. The SDK manages workload tokens and refresh.' : '2. Exchange your credentials for a short-lived JWT. Use access_token as a Bearer token for gateway requests.'}</p>
       {method === 'bootstrap' ? <>
+        <div className="mb-3"><CopyCode testId="setup-bootstrap-http" text={`curl --fail-with-body --request POST "${tokenUrl}" --header "Content-Type: application/json" --data '${JSON.stringify({ bootstrap_credential: bootstrap?.bootstrap_credential ?? '<single-use-bootstrap-credential>' })}'`} /></div>
         <CopyCode testId="setup-sdk-install" text="python -m pip install -e './sdk/python[openai]'" />
         <div className="mt-3"><CopyCode testId="setup-sdk-env" text={`${identityEnv}\nSIGNET_TOKEN_CACHE=.signet-token.json`} /></div>
         <p className="my-3 text-xs text-ink-3">Install from this repository. Place these settings in your agent's environment, then use the Python SDK.</p>
@@ -86,7 +93,11 @@ export function ConnectionSetup({ agent, certificate, state, onChange }: {
       {(method === 'hybrid' || agent.kind === 'no_code') && <div className="mt-4 space-y-3"><p className="text-sm">Run the sidecar beside your private agent. Your agent uses its local endpoint; the sidecar connects outward to Signet.</p><CopyCode testId="setup-sidecar-env" text={`${identityEnv}\nSIGNET_SIDECAR_BIND=127.0.0.1\nSIGNET_SIDECAR_PORT=8300`} /><CopyCode testId="setup-sidecar-start" text="npm run sidecar" /><p className="text-sm">Set your agent's OpenAI base URL to <code>http://127.0.0.1:8300/v1</code>.</p>{method === 'hybrid' && <p className="text-sm">For private company APIs, enroll the connector runner below and register its HTTP tools.</p>}{method === 'hybrid' && <p className="text-xs text-ink-3">This connector sends approved request arguments and results through Signet. Full Hybrid Edge local DLP and summary-only evidence are not implemented by this runner.</p>}</div>}
       {info && (!info.gateway_url || info.gateway_url_source.includes('local')) && <p className="mt-4 text-xs text-warn">Remote machines need reachable HTTPS addresses. Configure SIGNET_CONTROL_PUBLIC_URL and SIGNET_GATEWAY_PUBLIC_URL on the Signet server.</p>}
       <p className="mt-4 text-sm text-ink-2">3. Send an approved request, then refresh Connection status. A token alone does not mark an agent connected.</p>
+      <button data-testid="setup-test-gateway" className="btn-primary mt-3" disabled={busy} onClick={() => { setBusy(true); setGatewayTest(null); void api<{ note: string }>(`/agents/${agent.id}/gateway-test`, { method: 'POST' }).then((result) => { setGatewayTest(result.note); onChange(); }).catch((error: ApiError) => setError(error)).finally(() => setBusy(false)); }}>Test Gateway Connection</button>
+      {gatewayTest && <p className="mt-2 text-sm">{gatewayTest}</p>}
     </Card>}
     {method === 'hybrid' && !unsupported && <EdgeRunners />}
+    {method === 'hybrid' && !unsupported && <ExternalConnectionEditor agentId={agent.id} method="hybrid" existing={null} onSaved={() => { setExternalRevision(externalRevision + 1); onChange(); }} onCancel={() => setMethod('bootstrap')} />}
+    <ExternalConnections key={externalRevision} agentId={agent.id} />
   </div>;
 }

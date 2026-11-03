@@ -17,7 +17,7 @@ export function ulid(now = Date.now()): string {
   return time + rand;
 }
 
-export type IdPrefix = 'agt' | 'crt' | 'ins' | 'rec' | 'evt' | 'tnt' | 'boot' | 'jti' | 'bnd' | 'req' | 'sec' | 'cbk' | 'fnd' | 'ses' | 'vrc' | 'edge' | 'job' | 'plc' | 'pll';
+export type IdPrefix = 'agt' | 'crt' | 'ins' | 'rec' | 'evt' | 'tnt' | 'boot' | 'jti' | 'bnd' | 'req' | 'sec' | 'cbk' | 'fnd' | 'ses' | 'vrc' | 'edge' | 'job' | 'plc' | 'pll' | 'conn';
 
 export const newId = (prefix: IdPrefix) => `${prefix}_${ulid()}`;
 
