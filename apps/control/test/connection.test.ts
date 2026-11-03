@@ -139,6 +139,21 @@ test('OAuth and bootstrap identities reach a private API through a real outbound
   await until(async () => slowClosed, 'private operation cancellation');
   const unrelated = await call(identity.access_token, 'read');
   assert.equal(unrelated.status, 200, await unrelated.text());
+  // No-code connection (A1, A2): the app only knows a base URL and an API key. The deployment
+  // credential works as that key, in the Authorization header or an api-key header, and the model
+  // list shows only the tenant's cloud LLM.
+  const { createDeploymentCredential } = await import('../src/deployment-identity');
+  const deployment = await createDeploymentCredential(agent.id, owner, 'dev');
+  const models = await fetch(`${gatewayUrl}/v1/models`, { headers: { authorization: `Bearer ${deployment.deployment_credential}` } });
+  assert.equal(models.status, 200);
+  assert.deepEqual(((await models.json()) as { data: { id: string }[] }).data.map((m) => m.id), ['gpt-oss:120b-cloud']);
+  const viaKey = await call(deployment.deployment_credential, 'read');
+  assert.equal(viaKey.status, 200, await viaKey.clone().text());
+  const viaHeader = await fetch(`${gatewayUrl}/v1/tools/http/private-records/read`, { method: 'POST', headers: { 'api-key': deployment.deployment_credential, 'content-type': 'application/json' }, body: JSON.stringify({ id: '42' }) });
+  assert.equal(viaHeader.status, 200, await viaHeader.clone().text());
+  const forged = await call(`sdc_${'x'.repeat(43)}`, 'read');
+  assert.equal(forged.status, 401);
+  assert.equal(((await forged.json()) as { error: { code: string } }).error.code, 'invalid_api_key');
   assert.equal(worker.exitCode, null, 'revoking one agent instance must not stop the runner');
   const revoke = await fetch(`${controlUrl}/api/v1/clients/${client.client_id}/revoke`, { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ reason: 'Integration revocation check' }) });
   assert.equal(revoke.status, 200, await revoke.text());

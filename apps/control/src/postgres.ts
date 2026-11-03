@@ -49,9 +49,12 @@ export class PostgresDatabase {
     if (!/^[a-z][a-z0-9_]{0,62}$/.test(schema)) throw new TypeError('SIGNET_DB_SCHEMA must be a lowercase PostgreSQL identifier of at most 63 characters');
     const url = new URL(connectionString);
     if (!['postgres:', 'postgresql:'].includes(url.protocol)) throw new TypeError('DATABASE_URL must be a PostgreSQL connection URL');
-    url.searchParams.set('sslmode', 'verify-full');
+    // Verified TLS always, except a database on this machine whose URL asks for sslmode=disable
+    // (local development and tests); a remote host can never opt out.
+    const local = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) && url.searchParams.get('sslmode') === 'disable';
+    if (!local) url.searchParams.set('sslmode', 'verify-full');
     this.pool = new Pool({
-      connectionString: url.toString(), enableChannelBinding: true, max: 10, connectionTimeoutMillis: 15_000,
+      connectionString: url.toString(), enableChannelBinding: !local, max: 10, connectionTimeoutMillis: 15_000,
       idleTimeoutMillis: 1000, allowExitOnIdle: true,
       types: { getTypeParser: (oid: number, format: 'text' | 'binary' | undefined) => {
         if (oid === 20) return integerValue;

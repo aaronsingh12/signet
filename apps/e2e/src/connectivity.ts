@@ -92,6 +92,16 @@ export async function run() {
   check(llm, 'a successful llm_call record is in the ledger');
   check(llm.data.latency_ms_upstream > 0 && llm.data.tokens_out > 0, 'the record shows a real upstream call (latency and tokens)');
   say(`ledger ${llm.record_id}: upstream ${llm.data.latency_ms_upstream} ms, ${llm.data.tokens_in}→${llm.data.tokens_out} tokens, auth ${llm.data.auth_kind}`);
+  // C4: the stack scores every answer (SIGNET_EVAL_SAMPLE_RATE=1); the judge is the same cloud LLM.
+  let evaluation: Json | undefined;
+  for (let i = 0; i < 90 && !evaluation; i++) {
+    evaluation = (await ledgerFor(agentId)).find((r) => r.data.action_type === 'evaluation' && r.data.request_id === llm.data.request_id);
+    if (!evaluation) await new Promise((r) => setTimeout(r, 1000));
+  }
+  check(evaluation, 'the answer was scored by the judge and the scores are in the ledger');
+  const sc = evaluation.data.scores as Json;
+  check([sc.helpfulness, sc.safety, sc.on_policy].every((v) => typeof v === 'number' && v >= 1 && v <= 5), `judge scores are 1-5: ${JSON.stringify(sc)}`);
+  say(`quality scored by ${evaluation.data.judge_model}: helpful ${sc.helpfulness} · safe ${sc.safety} · on-policy ${sc.on_policy} · flags ${JSON.stringify(evaluation.data.flags)}`);
   st = await connection(agentId);
   check(st.state === 'connected', `after real gateway traffic the agent is "connected", got ${st.state}`);
   check(st.diagnostics.length === 1 && st.diagnostics[0].bypass_risk === false, 'clean runtime: no bypass risk reported');

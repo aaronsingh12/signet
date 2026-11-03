@@ -67,6 +67,11 @@ async function currentCert(agentId: string): Promise<CertificateBody | null> {
 
 // Set by the lifecycle module at start-up (avoids an import cycle).
 let rolloutSource: () => Promise<PolicyBundle['rollouts']> = async () => ({});
+
+// After an agent-wide kill, workloads linked on hosting platforms are stopped there too (platforms.ts),
+// for the paths Signet's gateway does not sit on. Set at start-up to avoid an import cycle.
+let killListener: ((agentId: string, reason: string, actor: string) => Promise<void>) | null = null;
+export const setKillListener = (fn: typeof killListener) => (killListener = fn);
 export const setRolloutSource = (fn: () => Promise<PolicyBundle['rollouts']>) => (rolloutSource = fn);
 
 export async function buildBundle(): Promise<string> {
@@ -209,6 +214,9 @@ export async function applyLadder(target: LadderTarget, action: LadderAction, op
     const payload = { agent_id: agent.id, tier: agent.tier, level, rule_id: opts.rule_id ?? null, reason: opts.reason, actor: opts.actor, event_id: eventId, scope_key: key };
     (await enqueue('incident.create', correlation('incident', eventId), payload));
     (await enqueue('issue.upsert', correlation('violation', eventId), { ...payload, title: `Level ${level === 'killed' ? 5 : 4} ${level}: ${opts.reason}`, severity: level === 'killed' ? 'critical' : 'high', state: 'open' }));
+  }
+  if (level === 'killed' && scope === 'agent' && killListener) {
+    void killListener(agent.id, opts.reason, opts.actor).catch((e: unknown) => console.error('[control] stopping linked platform workloads failed', e));
   }
   return { event_id: eventId, scope_key: key, level, previous_level: current, until: until ? new Date(until).toISOString() : null, nodes_expected: nodes, tokens_revoked: tokensRevoked, credentials_flagged_for_rotation: rotation };
 }

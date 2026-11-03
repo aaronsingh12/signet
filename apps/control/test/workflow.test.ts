@@ -9,6 +9,7 @@ import { dropTestDatabase } from './database';
 process.env.SIGNET_DATA_DIR = mkdtempSync(join(tmpdir(), 'signet-wf-'));
 process.env.SIGNET_DB_SCHEMA = 'test_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2, 10);
 process.env.SIGNET_TOOL_PRIVATE_DESTINATIONS = 'allow'; // the test tool address is on localhost
+process.env.SIGNET_SINGLE_OPERATOR = 'false'; // separation of duties on; one test switches it on
 const { permissionsFor } = await import('../src/rbac');
 const registry = await import('../src/registry');
 const workflow = await import('../src/workflow');
@@ -118,4 +119,29 @@ test('a rejection needs a reason; a send-back returns the lifecycle to Assess', 
   (await approvals.decide(id, security, { decision: 'send_back', comment: 'threat model misses tool abuse' }));
   assert.equal((await approvals.get(id)).status, 'sent_back');
   assert.equal((await workflow.get(lc.id)).stage, 'assess');
+});
+
+test('single-operator mode: the one admin confirms and approves every slot, and the ledger says so', async () => {
+  process.env.SIGNET_SINGLE_OPERATOR = 'true';
+  try {
+    const solo = person('admin', ['tenant_admin', 'platform_admin', 'governance_board', 'risk_officer', 'security_officer', 'agent_owner']);
+    const agent = await registry.registerAgent({ handle: `solo-${++n}`, name: 'Solo agent', purpose: 'Answers order questions and refunds', sponsor: 'ravi@x.example', autonomy_level: 'L2' }, solo);
+    const lc = await workflow.start(agent, { users_affected: ['customers'], data_touched: ['personal'], reversibility: 'partly', planned_tools: ['issue_refund (privileged)'] } as never, solo);
+    await workflow.setManifest(lc.id, manifest, solo);
+    await workflow.submitPropose(lc.id, solo);
+    await workflow.classify(lc.id, solo, { confirm: true }); // T2: the proposer confirms it themselves
+    for (const a of (await workflow.assessments(lc.id)) as unknown as { type: string; content: { answers?: Record<string, unknown> } }[]) {
+      await workflow.saveAssessment(lc.id, a.type, a.type === 'questionnaire' ? { ...a.content, answers: Object.fromEntries(Object.keys(a.content.answers ?? {}).map((k) => [k, { answer: 'yes' }])) } : { summary: 'done' }, true, solo);
+    }
+    await workflow.submitAssess(lc.id, solo);
+    await workflow.runTests(lc.id, solo, { functional_score: 92 });
+    const id = (await workflow.get(lc.id)).data.approval_id!;
+    const decided = await approvals.decide(id, solo, { decision: 'approve' }); // one decision fills owner, security and risk
+    assert.equal(decided.status, 'approved');
+    assert.deepEqual(decided.decisions!.map((d) => d.slot).sort(), ['owner', 'risk', 'security']);
+    assert.ok(decided.decisions!.every((d) => JSON.parse((d as unknown as { auth_strength: string }).auth_strength).separation_of_duties === 'waived_single_operator'));
+    assert.ok(await registry.activeCertificate(agent.id));
+  } finally {
+    process.env.SIGNET_SINGLE_OPERATOR = 'false';
+  }
 });

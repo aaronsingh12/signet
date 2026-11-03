@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Card, ErrorNote, PageHeader, TierChip } from '../components/ui';
 import { ApiError, api, useApi } from '../lib/api';
 import { useMe } from '../lib/auth';
@@ -39,10 +39,13 @@ export function Propose() {
   const me = useMe();
   const nav = useNavigate();
   const { data: tpls } = useApi<{ items: TemplateOption[] }>('/templates');
-  const [f, setF] = useState({ name: '', handle: '', purpose: '', sponsor: '', autonomy_level: 'L2', team: '' });
+  // Prefilled when arriving from a platform connector (Connections → Vercel project → Propose).
+  const [params] = useSearchParams();
+  const prefillName = params.get('name') ?? '';
+  const [f, setF] = useState({ name: prefillName, handle: prefillName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, ''), purpose: '', sponsor: '', autonomy_level: 'L2', team: '' });
   const [template, setTemplate] = useState<string | null>(null);
   const [kind, setKind] = useState('self_hosted');
-  const [rt, setRt] = useState({ runtime: '', framework: '', model_provider: '', vendor: '', contract: '', vendor_contact: '', data_residency: '', documentation: '' });
+  const [rt, setRt] = useState({ runtime: params.get('runtime') ?? '', framework: '', model_provider: '', vendor: '', contract: '', vendor_contact: '', data_residency: '', documentation: '' });
   const [intake, setIntake] = useState({ users_affected: [] as string[], decisions_about_individuals: false, individual_domains: [] as string[], data_touched: [] as string[], reversibility: 'partly', planned_tools: '', business_value: '' });
   const [error, setError] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);

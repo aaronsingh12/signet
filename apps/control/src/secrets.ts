@@ -11,7 +11,9 @@ import { tenant } from './tenant';
 
 const KEY = Buffer.from(devSecret('SIGNET_BROKER_KEY'), 'base64url').subarray(0, 32);
 
-export type SecretKind = 'llm_provider' | 'tool';
+// platform = a connector's API credential (Vercel, AWS ...): opened only inside the control plane, never
+// sent to a gateway node, because it can change and redeploy whole applications.
+export type SecretKind = 'llm_provider' | 'tool' | 'platform';
 
 export interface SecretMeta {
   id: string;
@@ -29,7 +31,7 @@ export const fingerprintOf = (value: string) => sha256(value).slice(0, 16);
 
 export async function putSecret(input: { name: string; kind: SecretKind; value: string }, p: Principal): Promise<SecretMeta> {
   if (!/^[a-z0-9][a-z0-9._-]{1,62}$/.test(input.name ?? '')) throw invalid('secret name must be lower-case, 2-63 characters');
-  if (!['llm_provider', 'tool'].includes(input.kind)) throw invalid('kind must be llm_provider or tool');
+  if (!['llm_provider', 'tool', 'platform'].includes(input.kind)) throw invalid('kind must be llm_provider, tool or platform');
   if (typeof input.value !== 'string' || input.value.length < 8) throw invalid('value must be at least 8 characters');
   const id = newId('sec');
   return (await tx(async () => {
@@ -71,7 +73,14 @@ export const listSecrets = async () =>
 
 // Internal only: gateway nodes fetch values to inject them (BP 5.2 step 11).
 export async function revealForGateway(id: string): Promise<{ id: string; version: number; value: string }> {
-  const row = (await db.prepare('SELECT id, version, sealed FROM secret WHERE id = ?').get(id)) as { id: string; version: number; sealed: string } | undefined;
-  if (!row) throw notFound(`secret ${id}`);
+  const row = (await db.prepare('SELECT id, version, sealed, kind FROM secret WHERE id = ?').get(id)) as { id: string; version: number; sealed: string; kind: SecretKind } | undefined;
+  if (!row || row.kind === 'platform') throw notFound(`secret ${id}`);
   return { id: row.id, version: row.version, value: unseal(row.sealed, KEY) };
+}
+
+// In-process only: a platform connector opens its own API credential. No route exposes this.
+export async function revealPlatformCredential(id: string): Promise<string> {
+  const row = (await db.prepare("SELECT sealed FROM secret WHERE id = ? AND tenant_id = ? AND kind = 'platform'").get(id, tenant.id)) as { sealed: string } | undefined;
+  if (!row) throw notFound(`platform credential ${id}`);
+  return unseal(row.sealed, KEY);
 }

@@ -8,6 +8,7 @@ import { llmStatus, probe, type ChatResponse } from './provider';
 import * as state from './state';
 import { handleTool } from './toolcall';
 import { forwardEdge } from './edge';
+import { ApiKeyRefused, resolveApiKey } from './apikey';
 
 const app = express();
 app.disable('x-powered-by');
@@ -24,6 +25,25 @@ app.post('/v1/identity/token', async (req, res, next) => {
   } catch (error) {
     next(error);
   }
+});
+
+// A deployment credential used as an API key (OPENAI_API_KEY=sdc_…) becomes the agent's workload token.
+app.use('/v1', (req, res, next) => {
+  resolveApiKey(req.headers).then(() => next(), (error: unknown) => {
+    if (error instanceof ApiKeyRefused) {
+      let detail = 'deployment credential refused';
+      try { detail = (JSON.parse(error.body) as { detail?: string }).detail ?? detail; } catch { /* not JSON */ }
+      return res.status(error.status === 403 ? 403 : 401).json({ error: { type: 'signet_policy', code: 'invalid_api_key', message: detail, decision: 'deny', rule_ids: ['BP-4.2'] } });
+    }
+    console.error('[gateway] API key exchange failed', error);
+    res.status(503).json({ error: { type: 'signet_internal', code: 'identity_unavailable', message: 'the control plane could not check the API key; retry' } });
+  });
+});
+
+// The model list OpenAI-compatible clients check before chatting: only the tenant's one cloud LLM.
+app.get('/v1/models', (_req, res) => {
+  const created = Math.floor(Date.parse(state.bundle?.issued_at ?? new Date().toISOString()) / 1000);
+  res.json({ object: 'list', data: (state.bundle?.catalogue ?? []).map((c) => ({ id: c.model, object: 'model', created, owned_by: 'signet' })) });
 });
 
 const send = (res: Response, d: Done) => res.status(d.status).set(d.headers).json(d.body);

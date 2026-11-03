@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ActivityChart, AgentCard, AgentMetrics, OutcomeChart, UsageComparison } from '../components/AgentCharts';
 import { Empty, ErrorNote } from '../components/ui';
+import { CostQuality } from '../components/CostQuality';
 import { agentState, money, useAgentAnalytics } from '../lib/analytics';
 import { useCan } from '../lib/auth';
 
@@ -24,6 +25,7 @@ export function CommandCenter() {
       <div className="section-heading"><div><h2>Your AI agents <span className="ml-2 rounded-md bg-white px-2 py-1 text-xs text-ink-3">{agents.length}</span></h2><p>One card for each agent. Independent identity, approval and activity.</p></div><Link to="/agents">Manage agents <ArrowRight size={14} /></Link></div>
       {agents.length ? <div className="agent-grid">{agents.map((agent) => <AgentCard key={agent.id} agent={agent} />)}</div> : <div className="card"><Empty>No AI agents yet. Add an agent to see its status and charts.</Empty></div>}
       <div className="chart-layout"><section className="chart-card"><div className="chart-heading"><div><h2>Requests by agent</h2><p>Compare how much work each agent is handling</p></div></div><UsageComparison agents={shown} /></section><section className="chart-card"><div className="chart-heading"><div><h2>Usage & daily budget</h2><p>Recorded cost compared with each agent’s own limit</p></div></div><div className="mt-6 space-y-5">{shown.map((agent) => <div key={agent.id}><div className="mb-2 flex justify-between gap-3 text-[10px]"><Link to={`/agents/${agent.id}`} className="truncate text-ink-2">{agent.name}</Link><span className="whitespace-nowrap font-medium">{money(agent.cost_usd)} <span className="text-ink-3">/ {agent.daily_budget_usd === null ? 'No active budget' : money(agent.daily_budget_usd)}</span></span></div><div className="comparison-track" role="img" aria-label={`${agent.name}: ${money(agent.cost_usd)} used; ${agent.daily_budget_usd === null ? 'no active budget' : `${money(agent.daily_budget_usd)} daily budget`}`}><div className="comparison-fill" style={{ background: agent.color, width: `${agent.daily_budget_usd ? Math.min(100, agent.cost_usd / agent.daily_budget_usd * 100) : 0}%` }} /></div></div>)}</div><p className="chart-note">Costs use configured model prices. The chart covers a rolling 24 hours; enforced daily limits reset at UTC midnight.</p></section></div>
+      <CostQuality />
       <p className="chart-note mt-5">Updated {new Date(data.to).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })} · Refreshes every 30 seconds · Charts include recorded model and tool requests only.</p>
     </>}
   </>;

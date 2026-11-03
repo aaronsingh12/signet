@@ -15,3 +15,4 @@ export * from './merkle';
 export * from './netguard';
 export * from './policyeval';
 export * from './types';
+export * from './sigv4';

@@ -577,6 +577,31 @@ CREATE TABLE IF NOT EXISTS edge_job (
   state TEXT NOT NULL, result_json TEXT, error TEXT, expires_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS edge_job_queue ON edge_job(runner_id, state, expires_at);
+-- Platform connectors (Vercel, AWS, Azure, Google ...): the API credential lives in the Secrets Broker.
+CREATE TABLE IF NOT EXISTS platform_connection (
+  id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL REFERENCES tenant(id), platform TEXT NOT NULL,
+  label TEXT NOT NULL, secret_id TEXT NOT NULL, scope TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL, status_detail TEXT, created_by TEXT NOT NULL, created_at TEXT NOT NULL,
+  last_scan_at TEXT, last_scan_count INTEGER NOT NULL DEFAULT 0, revoked_at TEXT
+);
+-- A workload on a platform (a Vercel project, a Lambda function) linked to a Signet agent.
+CREATE TABLE IF NOT EXISTS platform_link (
+  id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL REFERENCES tenant(id),
+  connection_id TEXT NOT NULL REFERENCES platform_connection(id) ON DELETE CASCADE,
+  workload_id TEXT NOT NULL, workload_name TEXT NOT NULL,
+  agent_id TEXT NOT NULL REFERENCES agent(id) ON DELETE CASCADE,
+  credential_id TEXT, settings TEXT NOT NULL DEFAULT '{}',
+  state TEXT NOT NULL, detail TEXT, deployment_id TEXT, created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  UNIQUE (connection_id, workload_id)
+);
+-- Usage reported by a platform (OpenAI and Anthropic usage APIs): AI use outside Signet, per day.
+CREATE TABLE IF NOT EXISTS platform_usage (
+  connection_id TEXT NOT NULL REFERENCES platform_connection(id) ON DELETE CASCADE,
+  workload_id TEXT NOT NULL, day TEXT NOT NULL, requests BIGINT NOT NULL DEFAULT 0,
+  input_tokens BIGINT NOT NULL DEFAULT 0, output_tokens BIGINT NOT NULL DEFAULT 0, cost_usd DOUBLE PRECISION,
+  PRIMARY KEY (connection_id, workload_id, day)
+);
 `;
 
 export const SCHEMA_TABLES: ReadonlySet<string> = new Set([...SCHEMA_SQL.matchAll(/CREATE TABLE IF NOT EXISTS ([a-z_]+)/g)].map((match) => match[1]!));

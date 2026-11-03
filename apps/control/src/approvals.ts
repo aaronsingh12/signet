@@ -4,7 +4,7 @@ import { PolicyError, forbidden, invalid, notFound } from './errors';
 import * as hub from './hub';
 import * as ledger from './ledger';
 import { notify, notifyRoles } from './notify';
-import type { Principal, Role } from './rbac';
+import { singleOperator, type Principal, type Role } from './rbac';
 
 // Approvals engine (BP 7). One engine for every decision type: certificate approvals, risk
 // acceptances, runtime human-in-the-loop holds, quarantine releases and retirements. Every decision
@@ -135,6 +135,10 @@ function filled(req: ApprovalRequest) {
 // team can never fill an independent slot; the owner fills only the owner slot.
 export async function eligibleSlots(req: ApprovalRequest, p: Principal): Promise<Slot[]> {
   if (req.status !== 'pending' || p.kind !== 'human') return [];
+  if (singleOperator(p)) {
+    const done = filled(req);
+    return req.slots.filter((s) => (done[s.slot] ?? 0) < s.count);
+  }
   if ((req.decisions ?? []).some((d) => d.approver === p.id)) return [];
   const facts = (await agentFacts(req.agent_id));
   const counts = filled(req);
@@ -183,13 +187,21 @@ export async function decide(id: string, p: Principal, input: DecideInput): Prom
   if (stepUp && (age === null || age > STEP_UP_SECONDS)) {
     throw new PolicyError('AUTH-STEP-UP', 'this decision needs a fresh sign-in (within 5 minutes) for a T1/T2 agent', 401, { reauth: true });
   }
-  const auth = { method: p.auth, mfa: p.mfa, auth_age_s: age, step_up_required: stepUp };
+  const solo = singleOperator(p);
+  const auth = { method: p.auth, mfa: p.mfa, auth_age_s: age, step_up_required: stepUp, ...(solo ? { separation_of_duties: 'waived_single_operator' } : {}) };
+  // The single operator approves every open slot at once (quorums included); each slot gets its own row.
+  const fills = solo && (input.decision === 'approve' || input.decision === 'approve_session')
+    ? slots.flatMap((sl) => Array.from({ length: sl.count - (filled(req)[sl.slot] ?? 0) }, () => sl))
+    : [slot];
   const decisionId = newId('evt').replace('evt_', 'dec_');
   let outcome: Outcome | null = null;
   (await tx(async () => {
-    (await db.prepare('INSERT INTO approval_decision (id, request_id, approver, slot, delegate_of, decision, comment, conditions, auth_strength, pack_hash, ts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
-      decisionId, id, p.id, slot.slot, (await activeDelegator(p)), input.decision, input.comment ?? null, input.conditions ?? null, JSON.stringify(auth), req.pack_hash, nowIso(),
-    ));
+    const delegator = await activeDelegator(p);
+    for (const [i, sl] of fills.entries()) {
+      await db.prepare('INSERT INTO approval_decision (id, request_id, approver, slot, delegate_of, decision, comment, conditions, auth_strength, pack_hash, ts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+        i === 0 ? decisionId : `${decisionId}_${i}`, id, p.id, sl.slot, delegator, input.decision, input.comment ?? null, input.conditions ?? null, JSON.stringify(auth), req.pack_hash, nowIso(),
+      );
+    }
     const after = (await get(id));
     if (input.decision === 'reject' || input.decision === 'reject_quarantine') outcome = 'rejected';
     else if (input.decision === 'send_back') outcome = 'sent_back';
@@ -200,7 +212,7 @@ export async function decide(id: string, p: Principal, input: DecideInput): Prom
     (await ledger.append({
       kind: 'decision',
       agent_id: req.agent_id,
-      data: { event: 'approval.decision', approval_id: id, type: req.type, decision: input.decision, slot: slot.slot, approver: p.id, conditions: input.conditions ?? null, comment: input.comment ?? null, pack_sha256: req.pack_hash, auth, complete: outcome },
+      data: { event: 'approval.decision', approval_id: id, type: req.type, decision: input.decision, slot: fills.map((f) => f.slot).join(','), approver: p.id, conditions: input.conditions ?? null, comment: input.comment ?? null, pack_sha256: req.pack_hash, auth, complete: outcome },
     }));
     if (outcome) {
       const status = outcome === 'approved' ? 'approved' : outcome === 'sent_back' ? 'sent_back' : 'rejected';

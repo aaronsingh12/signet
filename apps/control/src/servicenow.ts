@@ -15,6 +15,8 @@ interface Config {
   auth: 'oauth_client_credentials' | 'basic';
   client_id?: string;
   username?: string;
+  // AI Control Tower installed on the instance (found by the self-test): agents go into its AI tables.
+  aict?: boolean;
 }
 
 interface ConnectorRow {
@@ -28,6 +30,8 @@ interface ConnectorRow {
   watermark: string | null;
 }
 
+// AI Control Tower's inventory tables (AI system digital asset, AI function CI, asset-CI relationship).
+const AICT_TABLES = ['alm_ai_system_digital_asset', 'cmdb_ci_function_ai', 'cmdb_rel_asset_ci'];
 const REQUIRED_TABLES = ['sn_risk_risk', 'sn_grc_issue', 'incident', 'cmdb_ci_appl', 'sn_grc_indicator_result', 'sn_compliance_control_test', 'sn_compliance_authority_document', 'sn_compliance_citation'];
 const MAX_ATTEMPTS = 10;
 
@@ -94,9 +98,13 @@ export async function selfTest(id: string, p: Principal) {
   try {
     await authHeader(c);
     checks.push({ check: 'authentication', ok: true, detail: c.config.auth });
-    const res = (await call(c, 'GET', `/api/now/table/sys_db_object?sysparm_query=nameIN${REQUIRED_TABLES.join(',')}&sysparm_fields=name&sysparm_limit=100`)) as { result: { name: string }[] };
+    const res = (await call(c, 'GET', `/api/now/table/sys_db_object?sysparm_query=nameIN${[...REQUIRED_TABLES, ...AICT_TABLES].join(',')}&sysparm_fields=name&sysparm_limit=100`)) as { result: { name: string }[] };
     const found = new Set(res.result.map((t) => t.name));
     for (const t of REQUIRED_TABLES) checks.push({ check: `table ${t}`, ok: found.has(t), detail: found.has(t) ? 'present' : 'missing on this instance' });
+    // Optional: with AI Control Tower, agents are written to its AI inventory instead of generic applications.
+    const aict = AICT_TABLES.every((t) => found.has(t));
+    checks.push({ check: 'AI Control Tower inventory', ok: true, detail: aict ? 'present: agents sync as AI systems' : 'not installed: agents sync as applications (cmdb_ci_appl)' });
+    (await db.prepare('UPDATE connector SET config = ? WHERE id = ?').run(JSON.stringify({ ...c.config, aict }), id));
   } catch (e) {
     checks.push({ check: 'authentication', ok: false, detail: (e as Error).message });
   }
@@ -150,6 +158,19 @@ async function send(c: Awaited<ReturnType<typeof getRow>>, row: OutboxRow): Prom
       return r.result.sys_id;
     }
     case 'ci.upsert': {
+      if (c.config.aict) {
+        // AI Control Tower: the agent is an AI function CI plus an AI system digital asset, related.
+        const ci = (await call(c, 'POST', '/api/now/identifyreconcile?sysparm_data_source=Signet', {
+          items: [{ className: 'cmdb_ci_function_ai', values: { name: p.handle, short_description: p.name, correlation_id: row.object_key, install_status: p.install_status, u_signet_agent_id: p.agent_id, u_signet_tier: p.tier, u_signet_certificate_status: p.certificate_status, u_signet_certificate_expiry: p.certificate_expiry } }],
+        })) as { items: { sysId: string }[] };
+        const ciId = ci.items[0]!.sysId;
+        (await remember(c.id, row.object_key, 'cmdb_ci_function_ai', ciId));
+        const assetKey = `${row.object_key}:asset`;
+        const isNew = !(await mapping(c.id, assetKey));
+        const assetId = (await upsert(c, 'alm_ai_system_digital_asset', assetKey, { display_name: p.name, short_description: `Signet agent ${p.handle} (tier ${p.tier}); governed by Signet`, u_signet_agent_id: p.agent_id, u_signet_tier: p.tier }));
+        if (isNew) (await call(c, 'POST', '/api/now/table/cmdb_rel_asset_ci', { asset: assetId, ci: ciId }));
+        return ciId;
+      }
       const r = (await call(c, 'POST', '/api/now/identifyreconcile?sysparm_data_source=Signet', {
         items: [{ className: 'cmdb_ci_appl', values: { name: p.handle, short_description: p.name, category: 'AI Agent', correlation_id: row.object_key, install_status: p.install_status, u_signet_agent_id: p.agent_id, u_signet_tier: p.tier, u_signet_certificate_status: p.certificate_status, u_signet_certificate_expiry: p.certificate_expiry } }],
       })) as { items: { sysId: string }[] };

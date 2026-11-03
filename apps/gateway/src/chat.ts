@@ -10,6 +10,7 @@ import { chatCompletion, credentialAttached, UpstreamRejected, UpstreamUnavailab
 import * as state from './state';
 import { taint, trackPending } from './taint';
 import { detokenise, tokenise } from './vault';
+import { maybeEvaluate } from './evaluate';
 
 // Model calls to the one cloud LLM (BP 5.2 steps 6-13 for llm_call).
 
@@ -19,7 +20,9 @@ type Msg = { role: string; content?: unknown };
 export async function handleChat(headers: IncomingHttpHeaders, body: Record<string, unknown> | undefined, foreignProvider?: string): Promise<Done> {
   const ctx = newCtx('llm_call', String(body?.model ?? 'unknown'), headers);
   try {
-    return await finish(ctx, null, await run(ctx, headers, body ?? {}, foreignProvider));
+    const done = await finish(ctx, null, await run(ctx, headers, body ?? {}, foreignProvider));
+    if (done.status === 200) maybeEvaluate(ctx, body ?? {}, done.body);
+    return done;
   } catch (e) {
     if (e instanceof Halt) return finish(ctx, e, null);
     throw e;

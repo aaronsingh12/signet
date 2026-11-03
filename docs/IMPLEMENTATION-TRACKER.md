@@ -61,3 +61,40 @@ Demo leakage and gaps found:
 - Network egress enforcement: by design outside Signet (docs/egress.md); RunPod offers no egress firewall.
 - Node SDK as a published package: the token manager exists (apps/sidecar/src/tokens.ts); not packaged.
 - Streaming responses: the gateway returns the checked answer whole (DLP needs it); true token streaming is not built.
+
+## Phases A–C (2026-11-03)
+
+| Item | State | Evidence |
+| --- | --- | --- |
+| Single-administrator mode restored (lost in the PostgreSQL merge) | implemented, tested | workflow test: one admin confirms a T2 tier and one approval fills owner, security and risk; ledger marks `waived_single_operator` |
+| Local PostgreSQL without TLS | implemented, tested | only `localhost` with `sslmode=disable`; remote hosts always `verify-full` |
+| A1 deployment credential as API key | implemented, tested | connection test: `sdc_…` in `Authorization` or `api-key` reaches a tool through a live gateway; forged key 401 |
+| A2 `GET /v1/models` | implemented, tested | returns the tenant's one model |
+| A3 Vercel connector (projects, AI detection, set env, remove old key, redeploy) | implemented, tested against a stand-in | platforms test; not yet run against a real Vercel account |
+| A5 console: Connections → platform → workload → Connect | implemented, type-checked, builds | not clicked through in a browser |
+| B1–B3 AWS (Bedrock agents, Lambda connect), Azure (OpenAI, AI Foundry, App Service connect), Google (Vertex agents, Cloud Run) | implemented, tested against stand-ins | SigV4 signer matches AWS's published example; Google JWT signed with a real RSA key |
+| B4 Copilot Studio (Dataverse `bots`) | implemented, tested against a stand-in | |
+| B5 OpenAI and Anthropic organisations (projects, keys, owners) | implemented, tested against a stand-in | |
+| B6 Discovery: scan → findings; one-click register as agent | implemented, tested | platform AI (Bedrock, Copilot, Vertex) registers as third-party |
+| C1 usage outside Signet (OpenAI, Anthropic usage APIs) | implemented, tested against a stand-in | AWS/Azure/Google usage (CloudWatch, Monitor) not built |
+| C2 stop on platform (Vercel pause, Lambda concurrency 0, App Service stop, key delete/deactivate); automatic on kill | implemented, tested | |
+| C3 cost and activity per agent (30 days) + outside usage | implemented, tested | `/stats/costs`, Command Center card |
+| C4 quality: sampled LLM-judge scores | implemented, type-checked | off by default (`SIGNET_EVAL_SAMPLE_RATE`); not run against the live model |
+| D: ServiceNow agents into AICT tables | implemented, type-checked | used when the self-test finds AICT; not run against a real instance |
+
+Awaiting setup: `SIGNET_GATEWAY_PUBLIC_URL` on the deployed Signet; real platform credentials (Vercel token, AWS keys, Azure app, Google service account) for live checks; Cloud Run connect; scheduled usage sync (manual button today); e2e suites still target the pre-PostgreSQL stack.
+
+## Remaining items closed (2026-11-03)
+
+| Item | State | Evidence |
+| --- | --- | --- |
+| Google Cloud Run connect (template read, only Signet's variables changed, new revision followed) | implemented, tested against a stand-in | platforms test |
+| Usage outside Signet: AWS CloudWatch (Bedrock per model), Azure Monitor (OpenAI/AI Services per account), Google Cloud Monitoring (Vertex per model) | implemented, tested against stand-ins | platforms test |
+| Scheduled usage sync (every 6 h, last 3 days; failures marked on the connection) | implemented, tested | local timer and Vercel maintenance job `platform-usage` |
+| C4 quality scoring against the live model | verified | e2e connectivity: gpt-oss judged a real answer (helpful 5, safe 5, on-policy 5) and the scores reached the ledger |
+| E2E suites on PostgreSQL (own schema per suite, dropped after) | verified | connectivity, gate-phase1, gate-phase2 all pass |
+| Fix: background jobs raced the control catalogue on a fresh database (foreign key error) | fixed | found by the e2e run |
+
+Running the e2e suites needs: `E2E_DATABASE_URL`, the Keycloak dev realm with test users, and `SIGNET_DEMO_OWNER_ID`, `SIGNET_DEMO_SECURITY_ID`, `SIGNET_DEMO_RISK_ID`, `SIGNET_DEMO_PLATFORM_ID`, `SIGNET_DEMO_PASSWORD`, `SIGNET_AUTOMATION_CLIENT_SECRET` (kept out of git on purpose).
+
+Still needing real accounts (code is done, only live confirmation is missing): Vercel token, AWS keys, Azure app registration, Google service account, Copilot Studio environment, OpenAI/Anthropic admin keys, a ServiceNow instance with AI Control Tower.

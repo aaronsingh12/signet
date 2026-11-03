@@ -17,7 +17,7 @@ import * as live from './live';
 import * as oidc from './oidc';
 import * as plugins from './plugins';
 import { openapi } from './openapi';
-import { principalOf, requires } from './rbac';
+import { principalOf, requires, singleOperatorMode } from './rbac';
 import * as registry from './registry';
 import * as secrets from './secrets';
 import { commandCenter } from './stats';
@@ -29,6 +29,8 @@ import * as controls from './controls';
 import * as hitl from './hitl';
 import * as notify from './notify';
 import * as servicenow from './servicenow';
+import * as platforms from './platforms';
+import { costs } from './costs';
 import { TEMPLATES } from './templates';
 import * as workflow from './workflow';
 import * as tools from './tools';
@@ -127,7 +129,7 @@ api.use('/edge/runners', runners);
 // --- everything below needs a signed-in person or an approved machine client ---
 api.use(oidc.authenticate, signedIn, idempotency);
 
-api.get('/me', route((_req, res) => ({ principal: principalOf(res), tenant: { id: tenant.id, name: tenant.name } })));
+api.get('/me', route((_req, res) => ({ principal: principalOf(res), tenant: { id: tenant.id, name: tenant.name }, single_operator: singleOperatorMode() })));
 api.get('/edge-runners', requires('agents.read'), route(async () => ({ items: (await edge.listRunners()) })));
 api.post('/edge-runners', requires('connectors.manage'), route(async (req, res) => {
   res.setHeader('cache-control', 'no-store');
@@ -140,6 +142,8 @@ api.get('/plugins/vercel/callback', requires('tenant.admin'), route(async (req, 
 api.post('/plugins/vercel/disconnect', requires('tenant.admin'), route(async (_req, res) => (await plugins.disconnectVercel(principalOf(res)))));
 api.get('/catalogue', requires('agents.read'), route(() => ({ catalogue: tenant.settings.catalogue })));
 api.get('/stats/command-center', requires('agents.read'), route(async () => (await commandCenter())));
+api.get('/stats/costs', requires('agents.read'), route(async (req) => costs(Number(req.query.days ?? 30))));
+api.post('/platforms/:id/usage/sync', requires('connectors.manage'), route(async (req) => platforms.syncUsage(req.params.id!, Number(req.body?.days ?? 30))));
 api.get('/stats/agents', requires('agents.read'), route(async () => (await agentAnalytics())));
 api.get('/gateways', requires('gateways.read'), route(async () => ({ items: (await db.prepare('SELECT * FROM gateway_node ORDER BY id').all()) })));
 api.get('/live', requires('ledger.read'), (_req, res) => live.attach(res));
@@ -232,6 +236,16 @@ api.get('/compliance/scores', requires('compliance.read'), route(async () => ({ 
 
 // Connectors (BP 10)
 api.get('/connectors', requires('connectors.manage', 'compliance.read'), route(async () => ({ items: (await servicenow.list()) })));
+// Platform connectors: list workloads, flag AI ones, connect a workload to Signet without a code change.
+api.get('/platforms', requires('connectors.manage', 'compliance.read'), route(async () => ({ items: await platforms.list(), links: await platforms.links() })));
+api.post('/platforms', requires('connectors.manage'), route(async (req, res) => [201, await platforms.create(req.body ?? {}, principalOf(res))]));
+api.delete('/platforms/:id', requires('connectors.manage'), route(async (req, res) => platforms.remove(req.params.id!, principalOf(res))));
+api.get('/platforms/:id/workloads', requires('connectors.manage'), route(async (req) => ({ items: await platforms.workloads(req.params.id!) })));
+api.post('/platforms/:id/scan', requires('connectors.manage'), route(async (req, res) => platforms.scan(req.params.id!, principalOf(res))));
+api.post('/platforms/:id/workloads/:workload/stop', requires('ladder.kill'), route(async (req, res) => platforms.stop(req.params.id!, decodeURIComponent(req.params.workload!), String(req.body?.reason ?? ''), principalOf(res).id)));
+api.post('/platforms/:id/workloads/:workload/register', requires('connectors.manage'), route(async (req, res) => [201, await platforms.register(req.params.id!, decodeURIComponent(req.params.workload!), principalOf(res))]));
+api.post('/platforms/:id/workloads/:workload/link', requires('connectors.manage'), route(async (req, res) => platforms.link(req.params.id!, decodeURIComponent(req.params.workload!), req.body ?? {}, principalOf(res))));
+api.get('/platforms/:id/workloads/:workload/link', requires('connectors.manage', 'agents.read'), route(async (req) => platforms.linkStatus(req.params.id!, decodeURIComponent(req.params.workload!))));
 api.post('/connectors', requires('connectors.manage'), route(async (req, res) => [201, (await servicenow.create(req.body ?? {}, principalOf(res)))]));
 api.post('/connectors/:id/test', requires('connectors.manage'), route(async (req, res) => (await servicenow.selfTest(req.params.id!, principalOf(res)))));
 api.post('/connectors/:id/pull', requires('connectors.manage'), route(async (req, res) => (await servicenow.pullLibrary(req.params.id!, principalOf(res)))));
@@ -421,6 +435,7 @@ int.post('/maintenance/lifecycle', route(async () => { await workflow.sweep(); r
 int.post('/maintenance/controls', route(async () => { await controls.evaluate(); return { ok: true }; }));
 int.post('/maintenance/connectors', route(async () => { await servicenow.work(); return { ok: true }; }));
 int.post('/maintenance/edge', route(async () => { await edge.sweep(); return { ok: true }; }));
+int.post('/maintenance/platform-usage', route(async () => { await platforms.sweepUsage(); return { ok: true }; }));
 int.post('/maintenance/roots', route(async () => ({ sealed: await evidence.sealFinishedDays() })));
 app.use('/internal', int);
 
@@ -430,12 +445,14 @@ app.use(problemHandler);
 // continuous control tests, connector outbox, daily roots.
 // Requests await initialization above; the listening socket can open during cloud cold starts.
 enforcement.setRolloutSource(workflow.rollouts);
+enforcement.setKillListener(platforms.stopLinkedWorkloads);
 // Cloud maintenance runs in the dedicated daemon rather than request-scoped function timers.
 if (!process.env.VERCEL) {
 const every = (ms: number, name: string, fn: () => unknown) => {
   const run = () => {
     try {
-      const r = fn();
+      // Background jobs start only after the control catalogue is in the database (a fresh schema raced it).
+      const r = initialized.then(() => fn());
       if (r instanceof Promise) r.catch((e) => console.error(`[control] ${name} failed`, e));
     } catch (e) {
       console.error(`[control] ${name} failed`, e);
@@ -450,6 +467,7 @@ every(10 * 60_000, 'lifecycle sweep', async () => (await workflow.sweep()))();
 every(10 * 60_000, 'control evaluation', async () => (await controls.evaluate()))();
 every(3_000, 'connector worker', async () => (await servicenow.work()));
 every(10_000, 'connector job cleanup', async () => (await edge.sweep()));
+every(6 * 3_600_000, 'platform usage sync', async () => (await platforms.sweepUsage()));
 const sealRoots = async () => {
   try {
     const sealed = (await evidence.sealFinishedDays());

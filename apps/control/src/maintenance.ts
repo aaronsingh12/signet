@@ -13,6 +13,7 @@ const jobs: ReadonlyArray<{ name: string; interval: number }> = [
   { name: 'connectors', interval: 3_000 },
   { name: 'edge', interval: 10_000 },
   { name: 'roots', interval: 600_000 },
+  { name: 'platform-usage', interval: 6 * 3_600_000 },
 ];
 
 async function invokeJob(name: string): Promise<void> {
