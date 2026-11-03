@@ -45,7 +45,13 @@ let jwksFetchedAt = 0;
 
 async function getDiscovery(): Promise<Discovery> {
   if (discovery) return discovery;
-  const r = await fetch(`${OIDC.issuer}/.well-known/openid-configuration`, { signal: AbortSignal.timeout(5_000) });
+  let r: globalThis.Response;
+  try {
+    r = await fetch(`${OIDC.issuer}/.well-known/openid-configuration`, { signal: AbortSignal.timeout(5_000) });
+  } catch {
+    // Network failure (IdP not running), not a Signet bug: say so instead of a bare 500.
+    throw new PolicyError('AUTH', `cannot reach the identity provider at ${OIDC.issuer}; start it (dev: Docker Desktop, then npm run up) and sign in again`, 503);
+  }
   if (!r.ok) throw new PolicyError('AUTH', `identity provider unavailable (${r.status})`, 503);
   discovery = (await r.json()) as Discovery;
   return discovery;
