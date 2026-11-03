@@ -113,3 +113,35 @@ test('administrator deletion erases agent data, credentials and managed copies w
   const replacement = (await registerAgent({ handle: erased.handle, name: 'New lifecycle', purpose: 'New identity', sponsor: owner.id, tier: 'T1', autonomy_level: 'L0' }, owner));
   assert.notEqual(replacement.id, erased.id);
 });
+
+test('unprovisioned proposals can be erased with historical or disconnected gateways; runtime identities still require cleanup', async () => {
+  const { db } = await import('../src/db');
+  const { permissionsFor } = await import('../src/rbac');
+  const { registerAgent, issueSeal, getAgent } = await import('../src/registry');
+  const { removeAgent, agentRemovalPreview } = await import('../src/agent-removal');
+  const ledger = await import('../src/ledger');
+  const owner: Principal = { id: 'proposal-owner@example.test', name: 'Owner', kind: 'human', roles: ['agent_owner'], permissions: permissionsFor(['agent_owner']), groups: [], mfa: true, auth: 'bearer', auth_time: null };
+  const admin: Principal = { ...owner, id: 'proposal-admin@example.test', roles: ['tenant_admin'], permissions: permissionsFor(['tenant_admin']) };
+  const security: Principal = { ...owner, id: 'proposal-security@example.test', roles: ['security_officer'], permissions: permissionsFor(['security_officer']) };
+  for (const [node, seen] of [['old-vercel-container', '2020-01-01T00:00:00.000Z'], ['disconnected-current-container', new Date().toISOString()]]) {
+    await db.prepare('INSERT INTO gateway_node (id, last_seen) VALUES (?, ?)').run(node!, seen!);
+  }
+  const proposal = await registerAgent({ handle: 'unprovisioned-support-assistant', name: 'Customer Support Assistant', purpose: 'Proposed external assistant without runtime credentials', sponsor: owner.id, autonomy_level: 'L0' }, owner);
+  await ledger.append({ kind: 'admin', agent_id: proposal.id, data: { event: 'proposal.reviewed' } });
+  await ledger.append({ kind: 'admin', agent_id: proposal.id, data: { event: 'proposal.configured' } });
+  const preview = await agentRemovalPreview(proposal.id, admin);
+  assert.equal(preview.certificates, 0);
+  assert.equal(preview.deployments, 0);
+  assert.equal(preview.credentials, 0);
+  assert.equal(preview.records, 3);
+  await assert.rejects(removeAgent(proposal.id, 'incorrect-handle', admin), /exact agent handle/);
+  assert.equal((await removeAgent(proposal.id, proposal.handle, admin)).deleted, true);
+  await assert.rejects(getAgent(proposal.id), /not found/);
+  assert.equal((await ledger.verify()).ok, true);
+  assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM gateway_node').get())!.n, 2, 'Unrelated Gateway registrations must be preserved');
+
+  const runtime = await registerAgent({ handle: 'provisioned-support-assistant', name: 'Provisioned assistant', purpose: 'Approved runtime identity still needs Gateway cleanup', sponsor: owner.id, autonomy_level: 'L0' }, owner);
+  await issueSeal(runtime.id, { models: [{ model: 'gpt-oss:120b-cloud', region: 'unverified' }], tools: [], limits: { rpm: 30, tokens_per_day: 1000, usd_per_day: 1 }, environments: ['dev'] }, security);
+  await assert.rejects(removeAgent(runtime.id, runtime.handle, admin), /Reconnect registered gateways/);
+  assert.equal((await getAgent(runtime.id)).status, 'sealed', 'Refused runtime deletion must not erase or stop the agent');
+});
