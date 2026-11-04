@@ -5,16 +5,29 @@ export interface ResponseMapping {
   name: string;
   status: string;
   timestamp: string;
+  fields?: Record<string, string>;
 }
 
-export type ExternalOperation = 'test' | 'discover' | 'track' | 'executions' | 'run' | 'pause' | 'stop' | 'activate';
-export interface ConnectionEndpoint { path: string; method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' }
+export type ExternalOperation = 'test' | 'discover' | 'agent' | 'track' | 'executions' | 'execution' | 'logs' | 'metrics' | 'run' | 'pause' | 'stop' | 'activate';
+export type ConnectorJson = null | boolean | number | string | ConnectorJson[] | { [key: string]: ConnectorJson };
+export interface ConnectionEndpoint {
+  path: string;
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+  variables?: Record<string, 'id' | 'execution_id'>;
+  query?: Record<string, string>;
+  request_body?: ConnectorJson;
+  expected_status?: number[];
+  response_schema?: { [key: string]: ConnectorJson };
+  response_path?: string;
+  idempotency_header?: string;
+}
+
 export interface ExternalConnectionConfig {
   name: string;
   method: 'rest' | 'oauth' | 'hybrid';
   private_connector: { runner_id: string; tool_alias: string; environment: string } | null;
   base_url: string;
-  auth: 'none' | 'api_key' | 'bearer' | 'oauth' | 'connector';
+  auth: 'none' | 'api_key' | 'api_key_query' | 'basic' | 'custom_headers' | 'bearer' | 'oauth' | 'connector';
   header: string;
   client_id: string;
   token_url: string;
@@ -28,26 +41,14 @@ export interface ExternalConnectionConfig {
   executions_mapping: ResponseMapping | null;
   tracking_pointer: string;
   execution_pagination: { total: string; offset: string; limit: string } | null;
-}
+  discovery_pagination?: { total: string; offset: string; limit: string } | null;
+  provider_type?: 'generic_rest';
+  username?: string;
+  secret_headers?: string[];
+  query_key_acknowledged?: boolean;
+  monitoring_enabled?: boolean;
+  tls_min_version?: 'TLSv1.2' | 'TLSv1.3';
 
-/** Support Lab read schemas observed on 2026-11-03; prompts, responses and customer data are excluded. */
-export function supportLabConnectionConfig(): ExternalConnectionConfig {
-  return {
-    name: 'Customer Support AI Agent', method: 'rest', private_connector: null,
-    base_url: 'https://customer-support-ai-agent-roan.vercel.app/api/v1', auth: 'api_key', header: 'x-api-key',
-    client_id: '', token_url: '', scopes: '', token_auth: 'client_secret_basic', timeout_ms: 15000,
-    sync_interval_seconds: 300, remote_management: false,
-    endpoints: {
-      test: { method: 'GET', path: '/agents' }, discover: { method: 'GET', path: '/agents' },
-      track: { method: 'GET', path: '/agents/{id}/track' }, executions: { method: 'GET', path: '/agents/executions?agentId={id}' },
-      run: { method: 'POST', path: '/agents/{id}/run' }, pause: { method: 'POST', path: '/agents/{id}/pause' },
-      stop: { method: 'POST', path: '/agents/{id}/stop' }, activate: { method: 'POST', path: '/agents/{id}/activate' },
-    },
-    agents_mapping: { items: '', id: '/id', name: '/name', status: '/status', timestamp: '/createdAt' },
-    executions_mapping: { items: '/data', id: '/id', name: '', status: '/status', timestamp: '/createdAt' },
-    tracking_pointer: '/agent',
-    execution_pagination: { total: '/total', offset: '/offset', limit: '/limit' },
-  };
 }
 
 export interface ConnectionHealth {
@@ -60,6 +61,10 @@ export interface ConnectionHealth {
   last_success_at: string | null;
   last_sync_at: string | null;
   last_error: string | null;
+  last_tested_at?: string | null;
+  endpoint_verified?: boolean;
+  error_category?: string | null;
+  verified_operations?: string[];
 }
 export interface ExternalConnectionView {
   id: string;
@@ -71,4 +76,9 @@ export interface ExternalConnectionView {
   capabilities: string[];
   coverage: 'external_monitoring' | 'gateway_tools';
   agent_count: number;
+  mapped_agent_ids: string[];
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  configuration_status: 'configured' | 'verified' | 'disconnected' | 'revoked';
 }

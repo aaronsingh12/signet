@@ -32,6 +32,7 @@ test('outbound REST and OAuth use a mock HTTP service: secure storage, validatio
   let tokens = 0;
   let actions = 0;
   const service = http.createServer((req, res) => {
+    res.setHeader('content-type', 'application/json');
     if (req.url === '/token') {
       tokens++;
       assert.equal(req.headers.authorization, `Basic ${Buffer.from('mock-client:mock-secret-value').toString('base64')}`);
@@ -42,7 +43,7 @@ test('outbound REST and OAuth use a mock HTTP service: secure storage, validatio
     if (mode === 'unavailable') { res.writeHead(503).end(); return; }
     if (mode === 'redirect') { res.writeHead(302, { location: 'https://169.254.169.254/latest/meta-data' }).end(); return; }
     if (mode === 'large') { res.end('x'.repeat(1024 * 1024 + 1)); return; }
-    assert.ok(req.headers['x-api-key'] === 'mock-secret-value' || req.headers.authorization === 'Bearer mock-access-token');
+    if (!(req.headers['x-api-key'] === 'mock-secret-value' || req.headers.authorization === 'Bearer mock-access-token')) { res.writeHead(401).end('{}'); return; }
     if (req.url === '/api/v1/openapi.json') {
       res.end(JSON.stringify({ openapi: '3.1.0', paths: { '/api/v1/agents': { get: {} } }, components: { securitySchemes: { key: { type: 'apiKey', in: 'header', name: 'x-api-key' } } } })); return;
     }
@@ -76,7 +77,7 @@ test('outbound REST and OAuth use a mock HTTP service: secure storage, validatio
   for (const host of ['169.254.169.254', '127.0.0.1', '10.0.0.1', '[::1]', '[::ffff:7f00:1]', '[::ffff:a9fe:a9fe]']) await assert.rejects(requestJson({ url: new URL(`https://${host}/`), method: 'GET', headers: {}, body: null, timeout: 1000 }), /address/);
   await assert.rejects(connections.create(parent.id, { config: config(), credential: 'mock-secret-value' }, viewer), /connectors.manage/);
   const beforeConnect = (await db.prepare('SELECT COUNT(*) AS n FROM agent').get())!.n;
-  const automatic = await connections.connectRest(null, { base_url: config().base_url, credential: 'mock-secret-value', connection_id: null }, actor);
+  const automatic = await connections.connectRest(null, { base_url: config().base_url, credential: 'mock-secret-value', connection_id: null, config: config() }, actor);
   assert.equal(automatic.agents.length, 2);
   assert.equal(automatic.connection.agent_id, null, 'REST platforms connect before any agent registration');
   assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM agent').get())!.n, beforeConnect, 'Connecting must not create placeholder agents');
@@ -120,7 +121,7 @@ test('outbound REST and OAuth use a mock HTTP service: secure storage, validatio
   assert.equal(JSON.stringify(await db.prepare('SELECT metadata FROM external_observation WHERE connection_id = ?').all(connection.id)).includes('must not be retained'), false);
   await assert.rejects(connections.remoteAction(connection.id, mappings[0]!.agent_id, 'pause', { reason: 'test' }, viewer), /connectors.manage/);
   await connections.update(connection.id, { config: { ...config(), remote_management: true } }, actor);
-  await assert.rejects(connections.remoteAction(connection.id, mappings[0]!.agent_id, 'pause', { reason: 'test' }, actor), /approved agent/);
+  await assert.rejects(connections.remoteAction(connection.id, mappings[0]!.agent_id, 'pause', { payload: { reason: 'test' }, confirmation: `pause:${mappings[0]!.agent_id}` }, actor), /approved agent/);
   assert.equal(actions, 0, 'Unapproved agents must never send external control requests');
   const { registerTool } = await import('../src/tools');
   const { signSeal } = await import('../src/registry');
@@ -128,7 +129,8 @@ test('outbound REST and OAuth use a mock HTTP service: secure storage, validatio
   // Fixture represents a completed approval; lifecycle matrix behavior is covered by workflow integration tests.
   await db.prepare('UPDATE agent SET autonomy_level = ? WHERE id = ?').run('L3', mappings[0]!.agent_id);
   await signSeal(mappings[0]!.agent_id, { models: [], tools: [{ server: 'http://mock-platform', data_scopes: [], actions: [{ name: 'pause', impact: 'write' }] }], limits: { rpm: 10, tokens_per_day: 1000, usd_per_day: 1 }, environments: ['dev'] }, { approvers: [{ user: 'security@example.test', at: new Date().toISOString() }], evidence_refs: {}, regulatory_category: 'test-fixture', minor: false, actor: 'security@example.test' });
-  await connections.remoteAction(connection.id, mappings[0]!.agent_id, 'pause', { reason: 'mock service only' }, actor);
+  await connections.testConnection(connection.id, actor);
+  await connections.remoteAction(connection.id, mappings[0]!.agent_id, 'pause', { payload: { reason: 'mock service only' }, confirmation: `pause:${mappings[0]!.agent_id}` }, actor);
   assert.equal(actions, 1);
   for (const next of ['bad-auth', 'malformed', 'redirect', 'large', 'unavailable'] as const) {
     mode = next;

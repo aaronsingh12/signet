@@ -1,6 +1,26 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { supportLabConnectionConfig } from '@signet/core/types';
+import type { ExternalConnectionConfig } from '@signet/core/types';
+function supportLabConnectionConfig(): ExternalConnectionConfig {
+  return {
+    name: 'Customer Support AI Agent', method: 'rest', private_connector: null,
+    base_url: 'https://customer-support-ai-agent-roan.vercel.app/api/v1', auth: 'api_key', header: 'x-api-key',
+    client_id: '', token_url: '', scopes: '', token_auth: 'client_secret_basic', timeout_ms: 15000,
+    sync_interval_seconds: 300, remote_management: false,
+    endpoints: {
+      test: { method: 'GET', path: '/agents' }, discover: { method: 'GET', path: '/agents' },
+      track: { method: 'GET', path: '/agents/{id}/track' }, executions: { method: 'GET', path: '/agents/executions?agentId={id}' },
+      run: { method: 'POST', path: '/agents/{id}/run' }, pause: { method: 'POST', path: '/agents/{id}/pause' },
+      stop: { method: 'POST', path: '/agents/{id}/stop' }, activate: { method: 'POST', path: '/agents/{id}/activate' },
+    },
+    agents_mapping: { items: '', id: '/id', name: '/name', status: '/status', timestamp: '/createdAt' },
+    executions_mapping: { items: '/data', id: '/id', name: '', status: '/status', timestamp: '/createdAt' },
+    tracking_pointer: '/agent',
+    execution_pagination: { total: '/total', offset: '/offset', limit: '/limit' },
+  };
+}
+
+
 import { adaptRecords, nextExecutionOffset, parseConfig, pointer } from '../src/external-contract';
 
 test('observed Support Lab schemas validate nested tracking and paginated execution metadata without retaining prompts', () => {

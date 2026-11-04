@@ -21,14 +21,14 @@ USER node
 VOLUME ["/data"]
 
 FROM runtime-base AS control
-RUN npm init -y >/dev/null && npm install --omit=dev --ignore-scripts express@4.21.2 pg@8.23.1 && npm cache clean --force
+RUN npm init -y >/dev/null && npm install --omit=dev --ignore-scripts express@4.22.3 pg@8.23.1 && npm cache clean --force
 COPY --from=build /src/dist/control.mjs /src/dist/signet-verify.mjs ./
 EXPOSE 4100
 HEALTHCHECK CMD node -e "fetch('http://localhost:4100/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 CMD ["node", "control.mjs"]
 
 FROM runtime-base AS gateway
-RUN npm init -y >/dev/null && npm install --omit=dev express@4.21.2 @open-policy-agent/opa-wasm@1.10.0 @huggingface/transformers@3.7.6 && npm cache clean --force
+RUN npm init -y >/dev/null && npm install --omit=dev express@4.22.3 @open-policy-agent/opa-wasm@1.10.0 @huggingface/transformers@3.7.6 && npm cache clean --force
 COPY --from=build /src/dist/gateway.mjs /src/dist/detector-worker.mjs ./
 # Detector model files are mounted at /app/models (licence-reviewed, pinned by hash; DA 3).
 EXPOSE 8100

@@ -37,6 +37,7 @@ import * as tools from './tools';
 import * as connectivity from './connectivity';
 import * as edge from './edge';
 import * as externalConnections from './external-connections';
+import { suggestOpenApi } from './external-openapi';
 import * as counters from './counters';
 import * as quickConnect from './quick-connect';
 
@@ -49,6 +50,12 @@ app.disable('x-powered-by');
 // Behind Vercel's edge the client address arrives in X-Forwarded-For; trust only that one hop.
 if (process.env.VERCEL) app.set('trust proxy', 1);
 app.use((_req, _res, next) => { void initialized.then(() => next(), next); });
+// Provider webhooks use exact raw bytes before JSON parsing and session middleware.
+app.post('/api/v1/connection-webhooks/:id', express.raw({ type: 'application/json', limit: '64kb' }), route(async (req) => {
+  tokenRateLimit(req);
+  if (!Buffer.isBuffer(req.body)) throw invalid('Webhook requires application/json');
+  return externalConnections.receiveWebhook(req.params.id!, req.body, String(req.headers['x-signet-timestamp'] ?? ''), String(req.headers['x-signet-event-id'] ?? ''), String(req.headers['x-signet-signature'] ?? ''));
+}));
 // Log uploads for discovery have their own, larger limit on their route.
 const jsonBody = express.json({ limit: '1mb' });
 const edgeResultBody = express.json({ limit: '6mb' });
@@ -151,9 +158,15 @@ api.get('/me', route((_req, res) => ({ principal: principalOf(res), tenant: { id
 api.use('/connections', (_req, res, next) => { res.setHeader('cache-control', 'no-store'); next(); });
 api.get('/connections', requires('agents.read'), route(async () => ({ items: await externalConnections.list() })));
 api.post('/agents/:id/gateway-test', requires('agents.read'), route(async (req) => connectivity.testGateway(req.params.id!)));
+api.post('/connections/openapi', requires('connectors.manage'), route((req) => suggestOpenApi(req.body)));
 api.post('/connections', requires('connectors.manage'), route(async (req, res) => [201, await externalConnections.create(req.body?.agent_id, req.body, principalOf(res))]));
 api.get('/connections/:id', requires('agents.read'), route(async (req) => externalConnections.view(req.params.id!)));
 api.put('/connections/:id', requires('connectors.manage'), route(async (req, res) => externalConnections.update(req.params.id!, req.body, principalOf(res))));
+api.post('/connections/:id/webhook', requires('connectors.manage'), route(async (req, res) => externalConnections.configureWebhook(req.params.id!, req.body, principalOf(res))));
+api.delete('/connections/:id', requires('connectors.manage'), route(async (req, res) => externalConnections.deleteConnection(req.params.id!, principalOf(res))));
+api.get('/connections/:id/history', requires('ledger.read'), route(async (req, res) => externalConnections.history(req.params.id!, principalOf(res))));
+api.post('/connections/:id/monitoring', requires('connectors.manage'), route(async (req, res) => externalConnections.setMonitoring(req.params.id!, req.body?.enabled, principalOf(res))));
+api.post('/connections/:id/agents/:agentId/read/:operation', requires('connectors.manage'), route(async (req, res) => externalConnections.readAgentOperation(req.params.id!, req.params.agentId!, req.params.operation!, typeof req.body?.execution_id === 'string' ? req.body.execution_id : null, principalOf(res))));
 api.post('/connections/:id/test', requires('connectors.manage'), route(async (req, res) => externalConnections.testConnection(req.params.id!, principalOf(res))));
 api.post('/connections/rest/connect', requires('connectors.manage'), route(async (req, res) => externalConnections.connectRest(req.body?.agent_id, req.body, principalOf(res))));
 api.post('/connections/:id/preview-agents', requires('connectors.manage'), route(async (req, res) => externalConnections.previewRestAgents(req.params.id!, principalOf(res))));
@@ -173,7 +186,7 @@ api.get('/connections/:id/observations', requires('ledger.read'), route(async (r
 }));
 api.get('/connections/:id/agents', requires('agents.read'), route(async (req) => {
   await externalConnections.view(req.params.id!);
-  return { items: await db.prepare('SELECT m.external_id, m.agent_id, m.last_seen_at, a.name FROM external_agent_mapping m JOIN agent a ON a.id = m.agent_id WHERE m.connection_id = ? ORDER BY a.name, m.external_id').all(req.params.id!) };
+  return externalConnections.inventory(req.params.id!);
 }));
 api.post('/connections/:id/agents/:agentId/actions/:action', requires('connectors.manage'), route(async (req, res) => externalConnections.remoteAction(req.params.id!, req.params.agentId!, req.params.action!, req.body, principalOf(res))));
 api.get('/edge-runners', requires('agents.read'), route(async () => ({ items: (await edge.listRunners()) })));

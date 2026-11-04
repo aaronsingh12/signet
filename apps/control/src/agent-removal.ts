@@ -82,9 +82,12 @@ export async function removeAgent(agentRef: string, confirmation: string, actor:
     (await db.prepare('DELETE FROM discovered_asset WHERE agent_id = ?').run(agent.id));
     (await db.prepare('DELETE FROM control_result WHERE scope = ?').run(`agent:${agent.id}`));
     (await db.prepare('DELETE FROM external_observation WHERE (connection_id, external_agent_id) IN (SELECT connection_id, external_id FROM external_agent_mapping WHERE agent_id = ?)').run(agent.id));
-    const connectionSecrets = (await db.prepare('SELECT secret_id FROM external_connection WHERE agent_id = ?').all(agent.id)) as { secret_id: string }[];
+    const connectionSecrets = (await db.prepare('SELECT secret_id, webhook_secret_id FROM external_connection WHERE agent_id = ?').all(agent.id)) as { secret_id: string; webhook_secret_id: string | null }[];
     (await db.prepare('DELETE FROM external_connection WHERE agent_id = ?').run(agent.id));
-    for (const secret of connectionSecrets) (await db.prepare('DELETE FROM secret WHERE id = ?').run(secret.secret_id));
+    for (const secret of connectionSecrets) {
+      await db.prepare('DELETE FROM secret WHERE id = ?').run(secret.secret_id);
+      if (secret.webhook_secret_id) await db.prepare('DELETE FROM secret WHERE id = ?').run(secret.webhook_secret_id);
+    }
     (await db.prepare('DELETE FROM agent WHERE id = ?').run(agent.id));
     (await eraseEvidenceFiles(result.days));
     eraseDeploymentArtifacts(agent.id);

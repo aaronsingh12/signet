@@ -9,8 +9,14 @@ const ops: Record<string, Record<string, Op>> = {
   },
   '/connections/{id}': {
     get: { summary: 'Connection config without credentials, health, capability and coverage metadata', permission: 'agents.read' },
+    delete: { summary: 'Delete connection, monitoring data and brokered credentials; preserve agents and governance ledger', permission: 'connectors.manage' },
     put: { summary: 'Edit config or rotate credential; destination changes require credential resubmission', permission: 'connectors.manage', body: 'ExternalConnectionInput' },
   },
+  '/connections/openapi': { post: { summary: 'Review-only suggestions from pasted OpenAPI 3.x JSON; no implicit save or remote authorization', permission: 'connectors.manage' } },
+  '/connections/{id}/monitoring': { post: { summary: 'Enable or disable durable metadata polling using explicit enabled boolean', permission: 'connectors.manage' } },
+  '/connections/{id}/history': { get: { summary: 'Read sanitized tests, discovery runs, mapping errors and uncertain action outcomes', permission: 'ledger.read' } },
+  '/connections/{id}/webhook': { post: { summary: 'Enable, rotate or disable a signed inbound webhook secret', permission: 'connectors.manage' } },
+  '/connections/{id}/agents/{agentId}/read/{operation}': { post: { summary: 'Read a configured agent, execution, logs or metrics operation for an onboarded identity', permission: 'connectors.manage' } },
   '/connections/{id}/test': { post: { summary: 'Acquire OAuth token if needed and perform configured harmless GET; redirects and private destinations forbidden', permission: 'connectors.manage' } },
   '/connections/{id}/discover': { post: { summary: 'Validate explicit response mapping and import proposed agents without certification', permission: 'connectors.manage and discovery.write' } },
   '/connections/{id}/sync': { post: { summary: 'Synchronize external metadata separately from Gateway evidence; deduplicate executions', permission: 'connectors.manage' } },
@@ -117,12 +123,12 @@ export const openapi = {
     schemas: {
       ExternalConnectionInput: {
         type: 'object', required: ['config'],
-        properties: { agent_id: { type: 'string', description: 'Required on creation; must be registered in this tenant' }, credential: { type: 'string', writeOnly: true, minLength: 8, maxLength: 16000 }, config: { $ref: '#/components/schemas/ExternalConnectionConfig' } },
+        properties: { agent_id: { type: ['string', 'null'], description: 'Existing tenant agent ID, or null for a REST platform connected before agent onboarding' }, credential: { type: 'string', writeOnly: true, minLength: 1, maxLength: 16000 }, config: { $ref: '#/components/schemas/ExternalConnectionConfig' } },
       },
       ExternalConnectionConfig: {
         type: 'object', required: ['name', 'method', 'base_url', 'auth', 'header', 'client_id', 'token_url', 'scopes', 'token_auth', 'timeout_ms', 'sync_interval_seconds', 'remote_management', 'endpoints', 'agents_mapping', 'executions_mapping', 'tracking_pointer', 'execution_pagination'],
         properties: {
-          name: { type: 'string', minLength: 1, maxLength: 120 }, method: { enum: ['rest', 'oauth', 'hybrid'] }, base_url: { type: 'string', format: 'uri' }, auth: { enum: ['none', 'api_key', 'bearer', 'oauth', 'connector'] }, header: { type: 'string' }, client_id: { type: 'string' }, token_url: { type: 'string' }, scopes: { type: 'string' }, token_auth: { enum: ['client_secret_basic', 'client_secret_post'] }, timeout_ms: { type: 'integer', minimum: 1000, maximum: 30000 }, sync_interval_seconds: { type: 'integer', minimum: 60, maximum: 86400 }, remote_management: { type: 'boolean' },
+          name: { type: 'string', minLength: 1, maxLength: 120 }, method: { enum: ['rest', 'oauth', 'hybrid'] }, base_url: { type: 'string', format: 'uri' }, auth: { enum: ['none', 'api_key', 'api_key_query', 'bearer', 'basic', 'custom_headers', 'oauth', 'connector'] }, username: { type: 'string' }, secret_headers: { type: 'array', items: { type: 'string' } }, query_key_acknowledged: { type: 'boolean' }, monitoring_enabled: { type: 'boolean' }, tls_min_version: { enum: ['TLSv1.2', 'TLSv1.3'] }, discovery_pagination: { type: ['object', 'null'] }, header: { type: 'string' }, client_id: { type: 'string' }, token_url: { type: 'string' }, scopes: { type: 'string' }, token_auth: { enum: ['client_secret_basic', 'client_secret_post'] }, timeout_ms: { type: 'integer', minimum: 1000, maximum: 30000 }, sync_interval_seconds: { type: 'integer', minimum: 60, maximum: 86400 }, remote_management: { type: 'boolean' },
           private_connector: { type: ['object', 'null'], required: ['runner_id', 'tool_alias', 'environment'], properties: { runner_id: { type: 'string' }, tool_alias: { type: 'string' }, environment: { type: 'string' } } },
           endpoints: { type: 'object', required: ['test'], additionalProperties: { type: 'object', required: ['path', 'method'], properties: { path: { type: 'string', description: 'Relative path appended to base URL; {id} expands to encoded external agent ID. For private connections must match the registered action with this operation name.' }, method: { enum: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] } } } },
           agents_mapping: { $ref: '#/components/schemas/ExternalResponseMapping' }, executions_mapping: { $ref: '#/components/schemas/ExternalResponseMapping' },
