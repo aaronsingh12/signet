@@ -4,6 +4,7 @@ import { Card, Empty, ErrorNote, KV, Mono, Pill, TierChip } from '../components/
 import { ApiError, api, useApi } from '../lib/api';
 import { useMe } from '../lib/auth';
 import { ago, date, hash } from '../lib/format';
+import { LifecycleIntake } from '../components/LifecycleIntake';
 
 // The 8-stage lifecycle on Agent 360 (BP 6): where the agent is, what its exit gate still needs, and
 // the actions the signed-in person can take at this stage. Every action is an API call and a ledger entry.
@@ -29,7 +30,7 @@ function useAction(onDone: () => void) {
       setBusy(false);
     }
   };
-  return { error, busy, run };
+  return { error, busy, run, clearError: () => setError(null) };
 }
 
 function Gate({ gate }: { gate: Record<string, boolean> | null }) {
@@ -187,19 +188,7 @@ function ProposeStage({ v, onChange }: { v: any; onChange: () => void }) {
   return (
     <div className="grid gap-4 xl:grid-cols-[1fr_320px]">
       <div className="space-y-4">
-        <Card title="Intake">
-          <KV
-            rows={[
-              ['Template', i.template ?? '—'],
-              ['Who it affects', i.users_affected.join(', ') || '—'],
-              ['Decisions about individuals', i.decisions_about_individuals ? `yes (${(i.individual_domains ?? []).join(', ') || 'domain not given'})` : 'no'],
-              ['Data it touches', i.data_touched.join(', ') || 'none'],
-              ['Planned tools', i.planned_tools.join(', ') || '—'],
-              ['Reversibility', i.reversibility],
-              ['Business value', i.business_value || '—'],
-            ]}
-          />
-        </Card>
+        <LifecycleIntake key={v.lifecycle.id} lifecycleId={v.lifecycle.id} intake={i} onChange={() => { a.clearError(); onChange(); }} />
         <ManifestEditor v={v} onChange={onChange} />
       </div>
       <Card title="Exit gate">
