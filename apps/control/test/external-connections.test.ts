@@ -75,8 +75,12 @@ test('outbound REST and OAuth use a mock HTTP service: secure storage, validatio
   assert.throws(() => adaptRecords({ agents: [{ key: -1 }] }, config().agents_mapping!), /Mapped id/);
   for (const host of ['169.254.169.254', '127.0.0.1', '10.0.0.1', '[::1]', '[::ffff:7f00:1]', '[::ffff:a9fe:a9fe]']) await assert.rejects(requestJson({ url: new URL(`https://${host}/`), method: 'GET', headers: {}, body: null, timeout: 1000 }), /address/);
   await assert.rejects(connections.create(parent.id, { config: config(), credential: 'mock-secret-value' }, viewer), /connectors.manage/);
-  const automatic = await connections.connectRest(parent.id, { base_url: config().base_url, credential: 'mock-secret-value', connection_id: null }, actor);
+  const beforeConnect = (await db.prepare('SELECT COUNT(*) AS n FROM agent').get())!.n;
+  const automatic = await connections.connectRest(null, { base_url: config().base_url, credential: 'mock-secret-value', connection_id: null }, actor);
   assert.equal(automatic.agents.length, 2);
+  assert.equal(automatic.connection.agent_id, null, 'REST platforms connect before any agent registration');
+  assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM agent').get())!.n, beforeConnect, 'Connecting must not create placeholder agents');
+  await assert.rejects(connections.update(automatic.connection.id, { config: { ...config(), method: 'oauth', auth: 'oauth', client_id: 'mock-client', token_url: 'https://platform.example/token' } }, actor), /Onboard an agent/);
   assert.equal(automatic.connection.agent_count, 0, 'Connecting previews agents without onboarding them');
   assert.equal(automatic.agents.every((agent) => agent.agent_id === null), true);
   assert.equal(JSON.stringify(automatic).includes('mock-secret-value'), false);
@@ -89,7 +93,7 @@ test('outbound REST and OAuth use a mock HTTP service: secure storage, validatio
   assert.equal(preview.agents.find((agent) => agent.id === 'agent-b')!.agent_id, null);
   await assert.rejects(connections.onboardRestAgent(automatic.connection.id, 'missing-agent', actor), /not found/);
   await assert.rejects(connections.onboardRestAgent(automatic.connection.id, 'agent-b', viewer), /connectors.manage/);
-  const refreshed = await connections.connectRest(parent.id, { base_url: config().base_url, credential: '', connection_id: automatic.connection.id }, actor);
+  const refreshed = await connections.connectRest(null, { base_url: config().base_url, credential: '', connection_id: automatic.connection.id }, actor);
   assert.equal(refreshed.connection.id, automatic.connection.id, 'Refresh retains the connection and saved API key');
   await connections.transition(automatic.connection.id, 'disconnected', actor);
   const connection = await connections.create(parent.id, { config: config(), credential: 'mock-secret-value' }, actor);

@@ -616,11 +616,12 @@ CREATE TABLE IF NOT EXISTS platform_usage (
 -- External observations are separate from Gateway transactions and never confer certification.
 CREATE TABLE IF NOT EXISTS external_connection (
   id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL REFERENCES tenant(id),
-  agent_id TEXT NOT NULL REFERENCES agent(id) ON DELETE CASCADE,
+  agent_id TEXT REFERENCES agent(id) ON DELETE CASCADE,
   secret_id TEXT NOT NULL REFERENCES secret(id), state TEXT NOT NULL,
   health TEXT NOT NULL, next_sync_at BIGINT NOT NULL, busy_until BIGINT NOT NULL,
   created_by TEXT NOT NULL, created_at TEXT NOT NULL
 );
+ALTER TABLE external_connection ALTER COLUMN agent_id DROP NOT NULL;
 CREATE TABLE IF NOT EXISTS external_agent_mapping (
   connection_id TEXT NOT NULL REFERENCES external_connection(id) ON DELETE CASCADE,
   external_id TEXT NOT NULL, agent_id TEXT NOT NULL REFERENCES agent(id) ON DELETE CASCADE,

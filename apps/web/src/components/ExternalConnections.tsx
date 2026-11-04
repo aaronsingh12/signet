@@ -57,12 +57,12 @@ export function RestPlatformConnection({ agentId, onChange }: { agentId: string;
   </div>;
 }
 
-export function ExternalConnectionEditor(props: { agentId: string; method: 'rest' | 'oauth' | 'hybrid'; existing: ExternalConnectionView | null; onSaved: () => void; onCancel: () => void }) {
+export function ExternalConnectionEditor(props: { agentId: string | null; method: 'rest' | 'oauth' | 'hybrid'; existing: ExternalConnectionView | null; onSaved: () => void; onCancel: () => void }) {
   if (props.method === 'rest') return <RestConnectionWizard agentId={props.agentId} initialDraft={props.existing ? { config: props.existing.config, credential: '' } : newConnectionDraft('rest')} connectionId={props.existing?.id ?? null} onSaved={props.onSaved} onCancel={props.onCancel} />;
   return <AdvancedConnectionEditor {...props} />;
 }
 
-function AdvancedConnectionEditor({ agentId, method, existing, onSaved, onCancel }: { agentId: string; method: 'rest' | 'oauth' | 'hybrid'; existing: ExternalConnectionView | null; onSaved: () => void; onCancel: () => void }) {
+function AdvancedConnectionEditor({ agentId, method, existing, onSaved, onCancel }: { agentId: string | null; method: 'rest' | 'oauth' | 'hybrid'; existing: ExternalConnectionView | null; onSaved: () => void; onCancel: () => void }) {
   const [draft, setDraft] = useState<ConnectionDraft>(existing ? { config: existing.config, credential: '' } : newConnectionDraft(method));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);

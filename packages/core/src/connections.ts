@@ -63,7 +63,7 @@ export interface ConnectionHealth {
 }
 export interface ExternalConnectionView {
   id: string;
-  agent_id: string;
+  agent_id: string | null;
   config: ExternalConnectionConfig;
   health: ConnectionHealth;
   state: 'enabled' | 'disconnected' | 'revoked';

@@ -43,7 +43,7 @@ import { compilePolicy } from './compile';
  * External metadata never enters the Gateway transaction stream or confers certification.
  */
 interface Stored { config: ExternalConnectionConfig; credential: string; token: string | null; expires_at: number }
-interface Row { id: string; agent_id: string; secret_id: string; state: ExternalConnectionView['state']; health: string }
+interface Row { id: string; agent_id: string | null; secret_id: string; state: ExternalConnectionView['state']; health: string }
 const initialHealth = (): ConnectionHealth => ({ reachable: null, authentication: 'unverified', discovered: null, monitoring: false, remote_control: false, gateway_enforcement: false, last_success_at: null, last_sync_at: null, last_error: null });
 
 async function rowOf(id: string): Promise<Row> {
@@ -74,9 +74,10 @@ export async function view(id: string): Promise<ExternalConnectionView> {
   }
   return { id, agent_id: row.agent_id, state: row.state, config, health, direction: 'outbound', capabilities: Object.keys(config.endpoints), coverage: config.private_connector ? 'gateway_tools' : 'external_monitoring', agent_count: count.n };
 }
-async function validatePrivate(agentId: string, config: ExternalConnectionConfig): Promise<void> {
+async function validatePrivate(agentId: string | null, config: ExternalConnectionConfig): Promise<void> {
   const connector = config.private_connector;
   if (!connector) return;
+  if (!agentId) throw invalid('Private connectors require an approved Signet agent');
   await requireRunner(connector.runner_id);
   const tool = await getTool(connector.tool_alias);
   if (!tool || tool.kind !== 'http' || tool.runner_id !== connector.runner_id || tool.url !== config.base_url) throw invalid('Private connection must match a registered HTTP tool URL and its enrolled runner');
@@ -93,17 +94,18 @@ function credentialOf(input: Record<string, unknown>, config: ExternalConnection
   if (typeof input.credential !== 'string' || input.credential.length < 8 || input.credential.length > 16000 || /[\r\n]/.test(input.credential)) throw invalid('Credential must contain 8–16000 characters without newlines');
   return input.credential;
 }
-export async function create(agentRef: string, value: unknown, actor: Principal): Promise<ExternalConnectionView> {
+export async function create(agentRef: string | null, value: unknown, actor: Principal): Promise<ExternalConnectionView> {
   requireManager(actor);
-  const agent = await getAgent(agentRef);
+  const agent = agentRef === null ? null : await getAgent(agentRef);
   const input = object(value, 'request');
   const config = parseConfig(input.config);
-  await validatePrivate(agent.id, config);
+  if (!agent && config.method !== 'rest') throw invalid('Only REST platform connections can be created before agent onboarding');
+  await validatePrivate(agent?.id ?? null, config);
   const credential = credentialOf(input, config);
   return tx(async () => {
     const id = newId('conn');
     const secret = await secrets.putSecret({ name: id.toLowerCase(), kind: 'tool', value: JSON.stringify({ config, credential, token: null, expires_at: 0 } satisfies Stored) }, actor);
-    await db.prepare('INSERT INTO external_connection (id, tenant_id, agent_id, secret_id, state, health, next_sync_at, busy_until, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(id, tenant.id, agent.id, secret.id, 'enabled', JSON.stringify(initialHealth()), Date.now() + config.sync_interval_seconds * 1000, 0, actor.id, nowIso());
+    await db.prepare('INSERT INTO external_connection (id, tenant_id, agent_id, secret_id, state, health, next_sync_at, busy_until, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(id, tenant.id, agent?.id ?? null, secret.id, 'enabled', JSON.stringify(initialHealth()), Date.now() + config.sync_interval_seconds * 1000, 0, actor.id, nowIso());
     await audit(id, 'created', actor.id);
     return view(id);
   });
@@ -124,6 +126,7 @@ export async function update(id: string, value: unknown, actor: Principal): Prom
     const old = await storedOf(row);
     const input = object(value, 'request');
     const config = parseConfig(input.config);
+    if (row.agent_id === null && config.method !== 'rest') throw invalid('Onboard an agent before changing to a non-REST connection method');
     await validatePrivate(row.agent_id, config);
     const changedAuth = config.auth !== old.config.auth || config.base_url !== old.config.base_url || config.token_url !== old.config.token_url || config.client_id !== old.config.client_id || config.header !== old.config.header || JSON.stringify(config.private_connector) !== JSON.stringify(old.config.private_connector);
     if (changedAuth && config.auth !== 'none' && !input.credential) throw invalid('Changing credential destination or authentication requires resubmitting the credential');
@@ -249,10 +252,10 @@ async function previewRecords(id: string, records: ImportedRecord[]): Promise<Re
 }
 
 /** Connect and preview agents without registering or approving any remote identity. */
-export async function connectRest(agentRef: string, value: unknown, actor: Principal): Promise<RestConnectResult> {
+export async function connectRest(agentRef: string | null, value: unknown, actor: Principal): Promise<RestConnectResult> {
   requireManager(actor);
-  if (typeof agentRef !== 'string' || !agentRef) throw invalid('An existing Signet agent is required for this REST connection');
-  await getAgent(agentRef);
+  if (agentRef !== null && (typeof agentRef !== 'string' || !agentRef)) throw invalid('agent_id must be a Signet agent ID or null');
+  const parentId = agentRef === null ? null : (await getAgent(agentRef)).id;
   const input = object(value, 'REST connection');
   if (typeof input.base_url !== 'string') throw invalid('Enter the external API base URL');
   if (input.connection_id !== null && typeof input.connection_id !== 'string') throw invalid('connection_id must be a connection ID or null');
@@ -263,7 +266,7 @@ export async function connectRest(agentRef: string, value: unknown, actor: Princ
     const existing = await rowOf(input.connection_id);
     const stored = await storedOf(existing);
     previous = stored.config;
-    if (existing.agent_id !== (await getAgent(agentRef)).id || stored.config.method !== 'rest') throw invalid('This REST connection belongs to another agent or connection method');
+    if (existing.agent_id !== parentId || stored.config.method !== 'rest') throw invalid('This REST connection belongs to another agent or connection method');
     if (!credential && input.base_url.replace(/\/+$/, '') !== stored.config.base_url.replace(/\/+$/, '')) throw invalid('Enter the API key again when changing the API address');
     if (!credential) credential = stored.credential;
   }
@@ -324,8 +327,8 @@ async function importExternalAgents(row: Row, records: ImportedRecord[], actor: 
     for (const record of records) {
       const prior = await db.prepare('SELECT agent_id FROM external_agent_mapping WHERE connection_id = ? AND external_id = ?').get(row.id, record.id);
       if (prior) { await db.prepare('UPDATE external_agent_mapping SET last_seen_at = ? WHERE connection_id = ? AND external_id = ?').run(nowIso(), row.id, record.id); continue; }
-      const parent = await getAgent(row.agent_id);
-      const agent = await registerAgent({ handle: `ext-${sha256(`${row.id}:${record.id}`).slice(0, 24)}`, name: record.name ?? record.id, purpose: `External agent discovered through ${config.name}; classification and approval required`, sponsor: parent.sponsor, owner: actor.id, autonomy_level: 'L0', kind: 'third_party', vendor: config.name, connection_method: config.method === 'oauth' ? 'oauth' : 'rest' }, actor);
+      const parent = row.agent_id === null ? null : await getAgent(row.agent_id);
+      const agent = await registerAgent({ handle: `ext-${sha256(`${row.id}:${record.id}`).slice(0, 24)}`, name: record.name ?? record.id, purpose: `External agent discovered through ${config.name}; classification and approval required`, sponsor: parent?.sponsor ?? actor.id, owner: actor.id, autonomy_level: 'L0', kind: 'third_party', vendor: config.name, connection_method: config.method === 'oauth' ? 'oauth' : 'rest' }, actor);
       await workflow.start(agent, {}, actor, 'initial', null);
       await db.prepare('INSERT INTO external_agent_mapping (connection_id, external_id, agent_id, last_seen_at) VALUES (?, ?, ?, ?)').run(row.id, record.id, agent.id, nowIso());
     }

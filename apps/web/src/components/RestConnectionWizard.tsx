@@ -9,7 +9,7 @@ import { Card, ErrorNote } from './ui';
 interface RestAgent { id: string; name: string; status: string | null; agent_id: string | null }
 interface RestResult { connection: ExternalConnectionView; agents: RestAgent[] }
 interface Props {
-  agentId: string;
+  agentId: string | null;
   initialDraft: ConnectionDraft;
   connectionId: string | null;
   onSaved: () => void;
