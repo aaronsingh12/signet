@@ -2,8 +2,9 @@ import { newId, sha256, request as httpRequest, evaluateTs } from '@signet/core'
 import type { AgentListFields, ConnectionHealth, ExternalConnectionConfig, ExternalConnectionView, ExternalOperation } from '@signet/core/types';
 import { db, nowIso, tx } from './db';
 import { PolicyError, forbidden, invalid, notFound } from './errors';
-import { adaptRecords, agentListFields, endpointUrl, object, parseConfig, pointer, nextExecutionOffset, type Json } from './external-contract';
+import { adaptRecords, agentListFields, endpointUrl, object, parseConfig, pointer, nextExecutionOffset, type ImportedRecord, type Json } from './external-contract';
 import { readJson, requestJson } from './external-http';
+import { detectAgentMapping, detectRestApi } from './rest-discovery';
 import * as ledger from './ledger';
 import { assertCan, getAgent, registerAgent, activeCertificate } from './registry';
 import { agentLevel } from './enforcement';
@@ -238,10 +239,87 @@ export async function inspectAgentList(id: string, actor: Principal): Promise<{ 
   });
 }
 
+interface RestAgentPreview { id: string; name: string; status: string | null; agent_id: string | null }
+interface RestConnectResult { connection: ExternalConnectionView; agents: RestAgentPreview[] }
+
+async function previewRecords(id: string, records: ImportedRecord[]): Promise<RestAgentPreview[]> {
+  const rows = await db.prepare('SELECT external_id, agent_id FROM external_agent_mapping WHERE connection_id = ?').all(id) as { external_id: string; agent_id: string }[];
+  const imported = new Map(rows.map((row) => [row.external_id, row.agent_id]));
+  return records.map((record) => ({ id: record.id, name: record.name ?? record.id, status: record.status, agent_id: imported.get(record.id) ?? null }));
+}
+
+/** Connect and preview agents without registering or approving any remote identity. */
+export async function connectRest(agentRef: string, value: unknown, actor: Principal): Promise<RestConnectResult> {
+  requireManager(actor);
+  if (typeof agentRef !== 'string' || !agentRef) throw invalid('An existing Signet agent is required for this REST connection');
+  await getAgent(agentRef);
+  const input = object(value, 'REST connection');
+  if (typeof input.base_url !== 'string') throw invalid('Enter the external API base URL');
+  if (input.connection_id !== null && typeof input.connection_id !== 'string') throw invalid('connection_id must be a connection ID or null');
+  if (typeof input.credential !== 'string') throw invalid('Enter your external API key');
+  let credential = input.credential;
+  let previous: ExternalConnectionConfig | null = null;
+  if (input.connection_id !== null) {
+    const existing = await rowOf(input.connection_id);
+    const stored = await storedOf(existing);
+    previous = stored.config;
+    if (existing.agent_id !== (await getAgent(agentRef)).id || stored.config.method !== 'rest') throw invalid('This REST connection belongs to another agent or connection method');
+    if (!credential && input.base_url.replace(/\/+$/, '') !== stored.config.base_url.replace(/\/+$/, '')) throw invalid('Enter the API key again when changing the API address');
+    if (!credential) credential = stored.credential;
+  }
+  if (credential.length < 8 || credential.length > 16000 || /[\r\n]/.test(credential)) throw invalid('API key must contain 8-16000 characters without newlines');
+  const detected = await detectRestApi(input.base_url, credential);
+  const config = previous ? { ...previous, base_url: detected.config.base_url, auth: detected.config.auth, header: detected.config.header, endpoints: { ...previous.endpoints, ...detected.config.endpoints }, agents_mapping: detected.config.agents_mapping } : detected.config;
+  const connection = input.connection_id === null ? await create(agentRef, { config, credential }, actor) : await update(input.connection_id, { config, credential }, actor);
+  const health: ConnectionHealth = { ...connection.health, reachable: true, authentication: 'valid', last_success_at: nowIso(), last_error: null };
+  await db.prepare('UPDATE external_connection SET health = ? WHERE id = ? AND tenant_id = ?').run(JSON.stringify(health), connection.id, tenant.id);
+  await audit(connection.id, 'rest_connected', actor.id);
+  return { connection: await view(connection.id), agents: await previewRecords(connection.id, detected.agents) };
+}
+
+/** Refresh the real external list without importing agents. */
+export async function previewRestAgents(id: string, actor: Principal): Promise<RestConnectResult> {
+  requireManager(actor);
+  return exclusive(id, async () => {
+    const row = await rowOf(id);
+    const { config } = await storedOf(row);
+    if (config.method !== 'rest') throw invalid('Agent preview requires a REST connection');
+    const data = await call(row, 'discover', null, null, actor, {});
+    const mapping = config.agents_mapping ?? detectAgentMapping(data);
+    return { connection: await view(id), agents: await previewRecords(id, mapping ? adaptRecords(data, mapping) : []) };
+  });
+}
+
+/** Onboard only the chosen external agent; existing mappings remain idempotent. */
+export async function onboardRestAgent(id: string, externalId: string, actor: Principal): Promise<{ agent_id: string }> {
+  requireManager(actor);
+  if (!actor.permissions.includes('discovery.write')) throw forbidden('RBAC', 'Onboarding requires agent discovery permission');
+  return exclusive(id, async () => {
+    const row = await rowOf(id);
+    const { config } = await storedOf(row);
+    if (config.method !== 'rest') throw invalid('REST onboarding requires a REST connection');
+    const data = await call(row, 'discover', null, null, actor, {});
+    const mapping = config.agents_mapping ?? detectAgentMapping(data);
+    const record = (mapping ? adaptRecords(data, mapping) : []).find((item) => item.id === externalId);
+    if (!record) throw notFound('external agent; refresh the agent list');
+    await importExternalAgents(row, [record], actor);
+    const mapped = await db.prepare('SELECT agent_id FROM external_agent_mapping WHERE connection_id = ? AND external_id = ?').get(id, externalId) as { agent_id: string } | undefined;
+    if (!mapped) throw new Error('REST agent onboarding did not create an agent mapping');
+    await audit(id, 'agent_onboarded', actor.id);
+    return { agent_id: mapped.agent_id };
+  });
+}
+
 async function discoverRows(row: Row, actor: Principal): Promise<number> {
   const { config } = await storedOf(row);
   if (!config.agents_mapping) throw invalid('Configure the documented agent response mapping before discovery');
   const records = adaptRecords(await call(row, 'discover', null, null, actor, {}), config.agents_mapping);
+  await importExternalAgents(row, records, actor);
+  return records.length;
+}
+
+async function importExternalAgents(row: Row, records: ImportedRecord[], actor: Principal): Promise<void> {
+  const { config } = await storedOf(row);
   await tx(async () => {
     for (const record of records) {
       const prior = await db.prepare('SELECT agent_id FROM external_agent_mapping WHERE connection_id = ? AND external_id = ?').get(row.id, record.id);
@@ -252,8 +330,8 @@ async function discoverRows(row: Row, actor: Principal): Promise<number> {
       await db.prepare('INSERT INTO external_agent_mapping (connection_id, external_id, agent_id, last_seen_at) VALUES (?, ?, ?, ?)').run(row.id, record.id, agent.id, nowIso());
     }
   });
-  return records.length;
 }
+
 export async function discover(id: string, actor: Principal): Promise<ExternalConnectionView> {
   requireManager(actor);
   if (!actor.permissions.includes('discovery.write')) throw forbidden('RBAC', 'Agent discovery import also requires discovery.write');

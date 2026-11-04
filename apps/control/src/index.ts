@@ -155,6 +155,12 @@ api.post('/connections', requires('connectors.manage'), route(async (req, res) =
 api.get('/connections/:id', requires('agents.read'), route(async (req) => externalConnections.view(req.params.id!)));
 api.put('/connections/:id', requires('connectors.manage'), route(async (req, res) => externalConnections.update(req.params.id!, req.body, principalOf(res))));
 api.post('/connections/:id/test', requires('connectors.manage'), route(async (req, res) => externalConnections.testConnection(req.params.id!, principalOf(res))));
+api.post('/connections/rest/connect', requires('connectors.manage'), route(async (req, res) => externalConnections.connectRest(req.body?.agent_id, req.body, principalOf(res))));
+api.post('/connections/:id/preview-agents', requires('connectors.manage'), route(async (req, res) => externalConnections.previewRestAgents(req.params.id!, principalOf(res))));
+api.post('/connections/:id/onboard', requires('connectors.manage'), route(async (req, res) => {
+  if (typeof req.body?.external_id !== 'string' || !req.body.external_id) throw invalid('Select an external agent to onboard');
+  return externalConnections.onboardRestAgent(req.params.id!, req.body.external_id, principalOf(res));
+}));
 api.post('/connections/:id/agent-fields', requires('connectors.manage'), route(async (req, res) => externalConnections.inspectAgentList(req.params.id!, principalOf(res))));
 api.post('/connections/:id/discover', requires('connectors.manage'), route(async (req, res) => externalConnections.discover(req.params.id!, principalOf(res))));
 api.post('/connections/:id/sync', requires('connectors.manage'), route(async (req, res) => externalConnections.sync(req.params.id!, principalOf(res))));

@@ -109,7 +109,8 @@ export function adaptRecords(value: Json, contract: ResponseMapping): ImportedRe
   if (!Array.isArray(rows) || rows.length > 1000) throw invalid('Mapped response items must be an array of at most 1000 records; configure pagination at the platform');
   const read = (row: Json, path: string, field: string): string | null => {
     if (!path) return null;
-    const result = pointer(row, path);
+    const raw = pointer(row, path);
+    const result = field === 'id' && typeof raw === 'number' && Number.isSafeInteger(raw) && raw >= 0 ? String(raw) : raw;
     if (typeof result !== 'string' || !result || result.length > 500) throw invalid(`Mapped ${field} must be a non-empty string of at most 500 characters`);
     return result;
   };

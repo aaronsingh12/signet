@@ -17,7 +17,7 @@ after(dropTestDatabase);
 
 const config = (): ExternalConnectionConfig => ({ name: 'Mock documented platform', tracking_pointer: '', execution_pagination: null, method: 'rest', private_connector: null, base_url: 'https://platform.example/api/v1', auth: 'api_key', header: 'x-api-key', client_id: '', token_url: '', scopes: '', token_auth: 'client_secret_basic', timeout_ms: 1000, sync_interval_seconds: 60, remote_management: false, endpoints: { test: { method: 'GET', path: '/agents' }, discover: { method: 'GET', path: '/agents' }, executions: { method: 'GET', path: '/agents/executions?agentId={id}' }, pause: { method: 'POST', path: '/agents/{id}/pause' } }, agents_mapping: { items: '/agents', id: '/key', name: '/label', status: '', timestamp: '' }, executions_mapping: { items: '/history', id: '/executionId', name: '', status: '/state', timestamp: '/at' } });
 
-test('outbound REST and OAuth use a mock HTTP service: secure storage, validation, lifecycle, sync, rotation and isolation', { timeout: 120000 }, async (context) => {
+test('outbound REST and OAuth use a mock HTTP service: secure storage, validation, lifecycle, sync, rotation and isolation', { timeout: 180000 }, async (context) => {
   const connections = await import('../src/external-connections');
   const { db } = await import('../src/db');
   const { tenant } = await import('../src/tenant');
@@ -43,6 +43,9 @@ test('outbound REST and OAuth use a mock HTTP service: secure storage, validatio
     if (mode === 'redirect') { res.writeHead(302, { location: 'https://169.254.169.254/latest/meta-data' }).end(); return; }
     if (mode === 'large') { res.end('x'.repeat(1024 * 1024 + 1)); return; }
     assert.ok(req.headers['x-api-key'] === 'mock-secret-value' || req.headers.authorization === 'Bearer mock-access-token');
+    if (req.url === '/api/v1/openapi.json') {
+      res.end(JSON.stringify({ openapi: '3.1.0', paths: { '/api/v1/agents': { get: {} } }, components: { securitySchemes: { key: { type: 'apiKey', in: 'header', name: 'x-api-key' } } } })); return;
+    }
     if (mode === 'malformed') { res.end('{malformed'); return; }
     if (req.method === 'POST') { actions++; res.end('{}'); return; }
     if (req.url?.startsWith('/api/v1/agents/executions')) {
@@ -68,9 +71,27 @@ test('outbound REST and OAuth use a mock HTTP service: secure storage, validatio
   assert.throws(() => parseConfig({ ...config(), base_url: 'http://public.example' }), /HTTPS/);
   assert.throws(() => endpointUrl(config().base_url, '//metadata', null), /Endpoint path/);
   assert.throws(() => endpointUrl(config().base_url, '/%2e%2e/secrets', null), /traversal/);
-  assert.throws(() => adaptRecords({ agents: [{ key: 1 }] }, config().agents_mapping!), /Mapped id/);
+  assert.equal(adaptRecords({ agents: [{ key: 1, label: 'Agent' }] }, config().agents_mapping!)[0]!.id, '1');
+  assert.throws(() => adaptRecords({ agents: [{ key: -1 }] }, config().agents_mapping!), /Mapped id/);
   for (const host of ['169.254.169.254', '127.0.0.1', '10.0.0.1', '[::1]', '[::ffff:7f00:1]', '[::ffff:a9fe:a9fe]']) await assert.rejects(requestJson({ url: new URL(`https://${host}/`), method: 'GET', headers: {}, body: null, timeout: 1000 }), /address/);
   await assert.rejects(connections.create(parent.id, { config: config(), credential: 'mock-secret-value' }, viewer), /connectors.manage/);
+  const automatic = await connections.connectRest(parent.id, { base_url: config().base_url, credential: 'mock-secret-value', connection_id: null }, actor);
+  assert.equal(automatic.agents.length, 2);
+  assert.equal(automatic.connection.agent_count, 0, 'Connecting previews agents without onboarding them');
+  assert.equal(automatic.agents.every((agent) => agent.agent_id === null), true);
+  assert.equal(JSON.stringify(automatic).includes('mock-secret-value'), false);
+  const onboarded = await connections.onboardRestAgent(automatic.connection.id, 'agent-a', actor);
+  assert.equal(await activeCertificate(onboarded.agent_id), null, 'Onboard must not approve agents');
+  assert.equal((await connections.view(automatic.connection.id)).agent_count, 1, 'Only the selected agent is onboarded');
+  assert.deepEqual(await connections.onboardRestAgent(automatic.connection.id, 'agent-a', actor), onboarded, 'Repeated onboarding reuses the existing identity');
+  const preview = await connections.previewRestAgents(automatic.connection.id, actor);
+  assert.equal(preview.agents.find((agent) => agent.id === 'agent-a')!.agent_id, onboarded.agent_id);
+  assert.equal(preview.agents.find((agent) => agent.id === 'agent-b')!.agent_id, null);
+  await assert.rejects(connections.onboardRestAgent(automatic.connection.id, 'missing-agent', actor), /not found/);
+  await assert.rejects(connections.onboardRestAgent(automatic.connection.id, 'agent-b', viewer), /connectors.manage/);
+  const refreshed = await connections.connectRest(parent.id, { base_url: config().base_url, credential: '', connection_id: automatic.connection.id }, actor);
+  assert.equal(refreshed.connection.id, automatic.connection.id, 'Refresh retains the connection and saved API key');
+  await connections.transition(automatic.connection.id, 'disconnected', actor);
   const connection = await connections.create(parent.id, { config: config(), credential: 'mock-secret-value' }, actor);
   assert.equal(JSON.stringify(connection).includes('mock-secret-value'), false);
   const stored = await db.prepare('SELECT sealed FROM secret WHERE id = (SELECT secret_id FROM external_connection WHERE id = ?)').get(connection.id);
