@@ -1,4 +1,4 @@
-import type { ExternalConnectionConfig, ExternalOperation, ResponseMapping } from '@signet/core/types';
+import type { AgentListFields, ExternalConnectionConfig, ExternalOperation, ResponseMapping } from '@signet/core/types';
 import { invalid } from './errors';
 
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
@@ -122,4 +122,26 @@ export function adaptRecords(value: Json, contract: ResponseMapping): ImportedRe
   });
   if (new Set(records.map((row) => row.id)).size !== records.length) throw invalid('Response contains duplicate external IDs');
   return records;
+}
+
+/** Describe selectable string fields without returning remote record values or guessing a schema. */
+export function agentListFields(value: Json): AgentListFields[] {
+  const escape = (key: string): string => key.replaceAll('~', '~0').replaceAll('/', '~1');
+  const strings = (item: Json, path: string, depth: number): string[] => {
+    if (depth > 12) throw invalid('Agent response nesting exceeds 12 levels; use a simpler agent list endpoint');
+    if (typeof item === 'string') return item ? [path] : [];
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
+    return Object.entries(item).flatMap(([key, child]) => strings(child, `${path}/${escape(key)}`, depth + 1));
+  };
+  const lists = (item: Json, path: string, depth: number): AgentListFields[] => {
+    if (depth > 12) throw invalid('Agent response nesting exceeds 12 levels; use a simpler agent list endpoint');
+    if (Array.isArray(item)) {
+      if (item.length > 1000) throw invalid('Agent list exceeds 1000 records; narrow the API scope');
+      const fields = item.length ? strings(item[0]!, '', 0).filter((field) => item.every((record) => typeof pointer(record, field) === 'string' && Boolean(pointer(record, field)))) : [];
+      return [{ path, count: item.length, fields }];
+    }
+    if (!item || typeof item !== 'object') return [];
+    return Object.entries(item).flatMap(([key, child]) => lists(child, `${path}/${escape(key)}`, depth + 1));
+  };
+  return lists(value, '', 0);
 }

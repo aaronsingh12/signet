@@ -155,6 +155,7 @@ api.post('/connections', requires('connectors.manage'), route(async (req, res) =
 api.get('/connections/:id', requires('agents.read'), route(async (req) => externalConnections.view(req.params.id!)));
 api.put('/connections/:id', requires('connectors.manage'), route(async (req, res) => externalConnections.update(req.params.id!, req.body, principalOf(res))));
 api.post('/connections/:id/test', requires('connectors.manage'), route(async (req, res) => externalConnections.testConnection(req.params.id!, principalOf(res))));
+api.post('/connections/:id/agent-fields', requires('connectors.manage'), route(async (req, res) => externalConnections.inspectAgentList(req.params.id!, principalOf(res))));
 api.post('/connections/:id/discover', requires('connectors.manage'), route(async (req, res) => externalConnections.discover(req.params.id!, principalOf(res))));
 api.post('/connections/:id/sync', requires('connectors.manage'), route(async (req, res) => externalConnections.sync(req.params.id!, principalOf(res))));
 api.post('/connections/:id/disconnect', requires('connectors.manage'), route(async (req, res) => externalConnections.transition(req.params.id!, 'disconnected', principalOf(res))));
@@ -166,7 +167,7 @@ api.get('/connections/:id/observations', requires('ledger.read'), route(async (r
 }));
 api.get('/connections/:id/agents', requires('agents.read'), route(async (req) => {
   await externalConnections.view(req.params.id!);
-  return { items: await db.prepare('SELECT external_id, agent_id, last_seen_at FROM external_agent_mapping WHERE connection_id = ? ORDER BY external_id').all(req.params.id!) };
+  return { items: await db.prepare('SELECT m.external_id, m.agent_id, m.last_seen_at, a.name FROM external_agent_mapping m JOIN agent a ON a.id = m.agent_id WHERE m.connection_id = ? ORDER BY a.name, m.external_id').all(req.params.id!) };
 }));
 api.post('/connections/:id/agents/:agentId/actions/:action', requires('connectors.manage'), route(async (req, res) => externalConnections.remoteAction(req.params.id!, req.params.agentId!, req.params.action!, req.body, principalOf(res))));
 api.get('/edge-runners', requires('agents.read'), route(async () => ({ items: (await edge.listRunners()) })));

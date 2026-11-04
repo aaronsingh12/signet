@@ -207,3 +207,10 @@ export interface Rollout {
 }
 export type { ResponseMapping, ExternalOperation, ConnectionEndpoint, ExternalConnectionConfig, ConnectionHealth, ExternalConnectionView } from './connections';
 export { supportLabConnectionConfig } from './connections';
+
+/** Field paths observed in an external agent list; response values stay on the server. */
+export interface AgentListFields {
+  path: string;
+  count: number;
+  fields: string[];
+}

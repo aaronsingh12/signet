@@ -76,7 +76,13 @@ test('outbound REST and OAuth use a mock HTTP service: secure storage, validatio
   const stored = await db.prepare('SELECT sealed FROM secret WHERE id = (SELECT secret_id FROM external_connection WHERE id = ?)').get(connection.id);
   assert.equal(JSON.stringify(stored).includes('mock-secret-value'), false);
   assert.equal((await connections.testConnection(connection.id, actor)).health.authentication, 'valid');
+  await assert.rejects(connections.inspectAgentList(connection.id, viewer), /connectors.manage/);
+  const fields = await connections.inspectAgentList(connection.id, actor);
+  assert.deepEqual(fields, { lists: [{ path: '/agents', count: 2, fields: ['/key', '/label'] }] });
+  assert.equal(JSON.stringify(fields).includes('Support agent'), false, 'Inspection must not expose external record values');
+  assert.equal((await connections.view(connection.id)).agent_count, 0, 'Inspection must not import or approve agents');
   mode = 'empty';
+  assert.deepEqual(await connections.inspectAgentList(connection.id, actor), { lists: [{ path: '/agents', count: 0, fields: [] }] });
   assert.equal((await connections.discover(connection.id, actor)).health.discovered, 0);
   mode = 'normal';
   assert.equal((await connections.discover(connection.id, actor)).agent_count, 2);

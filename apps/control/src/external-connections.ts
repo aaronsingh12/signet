@@ -1,8 +1,8 @@
 import { newId, sha256, request as httpRequest, evaluateTs } from '@signet/core';
-import type { ConnectionHealth, ExternalConnectionConfig, ExternalConnectionView, ExternalOperation } from '@signet/core/types';
+import type { AgentListFields, ConnectionHealth, ExternalConnectionConfig, ExternalConnectionView, ExternalOperation } from '@signet/core/types';
 import { db, nowIso, tx } from './db';
 import { PolicyError, forbidden, invalid, notFound } from './errors';
-import { adaptRecords, endpointUrl, object, parseConfig, pointer, nextExecutionOffset, type Json } from './external-contract';
+import { adaptRecords, agentListFields, endpointUrl, object, parseConfig, pointer, nextExecutionOffset, type Json } from './external-contract';
 import { readJson, requestJson } from './external-http';
 import * as ledger from './ledger';
 import { assertCan, getAgent, registerAgent, activeCertificate } from './registry';
@@ -222,6 +222,22 @@ export async function testConnection(id: string, actor: Principal): Promise<Exte
     } catch (error) { await healthFailure(row, error); await audit(id, 'test_failed', actor.id); throw error; }
   });
 }
+/** Inspect a REST agent list for guided setup; expose field paths only, never raw API data. */
+export async function inspectAgentList(id: string, actor: Principal): Promise<{ lists: AgentListFields[] }> {
+  requireManager(actor);
+  return exclusive(id, async () => {
+    const row = await rowOf(id);
+    const { config } = await storedOf(row);
+    if (config.method !== 'rest') throw invalid('Guided agent list inspection requires a REST connection');
+    try {
+      const lists = agentListFields(await call(row, 'discover', null, null, actor, {}));
+      if (!lists.length) throw invalid('The agent endpoint returned no lists. Enter a GET endpoint that returns an array of agents');
+      await audit(id, 'agent_fields_inspected', actor.id);
+      return { lists };
+    } catch (error) { await healthFailure(row, error); throw error; }
+  });
+}
+
 async function discoverRows(row: Row, actor: Principal): Promise<number> {
   const { config } = await storedOf(row);
   if (!config.agents_mapping) throw invalid('Configure the documented agent response mapping before discovery');
