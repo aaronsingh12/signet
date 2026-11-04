@@ -45,6 +45,16 @@ const inflight = new Set<Inflight>();
 const erasedAgents = new Set<string>();
 const erasedScopes = new Set<string>();
 const erasedTokens = new Set<string>();
+const agentRuntime = new Map<string, { sessions: Set<string>; instances: Set<string>; tokens: Set<string> }>();
+
+/** Retain local cleanup identifiers until the signed bundle confirms agent erasure. */
+export function rememberAgentRuntime(agentId: string, sessionId: string, instanceId: string, tokenId: string): void {
+  const runtime = agentRuntime.get(agentId) ?? { sessions: new Set<string>(), instances: new Set<string>(), tokens: new Set<string>() };
+  runtime.sessions.add(sessionId);
+  runtime.instances.add(instanceId);
+  runtime.tokens.add(tokenId);
+  agentRuntime.set(agentId, runtime);
+}
 
 export function track(agentId: string, version: string, instanceId: string, ctrl: AbortController) {
   const entry = { agentId, version, instanceId, ctrl };
@@ -103,7 +113,13 @@ export async function refresh() {
   const { bundle: jws } = await internal<{ bundle: string }>('/internal/bundle');
   const next = verifyJws<PolicyBundle>(jws, caKeys, 'signet-bundle').payload;
   if (bundle && next.version < bundle.version) return;
-  for (const digest of next.erased_agent_hashes ?? []) erasedAgents.add(digest);
+  const erasedHashes = new Set(next.erased_agent_hashes ?? []);
+  const knownAgents = new Set([...agentRuntime.keys(), ...[...certs.values()].map((cert) => cert.agent_id)]);
+  for (const agentId of knownAgents) {
+    if (!erasedHashes.has(sha256(agentId))) continue;
+    await eraseAgentMemory(agentId, [], [], []);
+  }
+  for (const digest of erasedHashes) erasedAgents.add(digest);
   const verifiedCerts = new Map<string, CertificateBody>();
   const verifiedPolicies = new Map<string, CompiledPolicy>();
   const verifiedCertificates: string[] = [];
@@ -141,25 +157,35 @@ export async function refresh() {
 }
 
 async function eraseAgentMemory(agentId: string, sessionIds: string[], instanceIds: string[], tokenIds: string[]): Promise<void> {
+  const runtime = agentRuntime.get(agentId);
+  const sessions = [...new Set([...sessionIds, ...(runtime?.sessions ?? [])])];
+  const instances = [...new Set([...instanceIds, ...(runtime?.instances ?? [])])];
+  const tokens = [...new Set([...tokenIds, ...(runtime?.tokens ?? [])])];
   applyScope(scopeKey.agent(agentId), { level: 'killed' });
   const deadline = Date.now() + 5_000;
   while ([...inflight].some((entry) => entry.agentId === agentId)) {
     if (Date.now() >= deadline) throw new Error(`Agent ${agentId} still has in-flight calls; cleanup cannot complete`);
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
-  await eraseSessions(sessionIds);
+  await eraseSessions(sessions.map((session) => `${agentId}:${session}`));
   await eraseAgentLedgerQueue(agentId);
   erasedAgents.add(sha256(agentId));
-  const matches = (key: string): boolean => key === scopeKey.agent(agentId) || key.startsWith(`version:${agentId}@`) || instanceIds.some((instance) => key === scopeKey.instance(instance));
-  for (const key of [scopeKey.agent(agentId), ...instanceIds.map((instance) => scopeKey.instance(instance)), ...[...scopes.keys()].filter(matches)]) erasedScopes.add(sha256(key));
-  for (const token of tokenIds) erasedTokens.add(sha256(token));
-  await refresh();
+  const matches = (key: string): boolean => key === scopeKey.agent(agentId) || key.startsWith(`version:${agentId}@`) || instances.some((instance) => key === scopeKey.instance(instance));
+  for (const key of [scopeKey.agent(agentId), ...instances.map((instance) => scopeKey.instance(instance)), ...[...scopes.keys()].filter(matches)]) erasedScopes.add(sha256(key));
+  for (const token of tokens) erasedTokens.add(sha256(token));
   eraseAgentVault(agentId);
-  eraseAgentLimits(agentId, sessionIds);
+  eraseAgentLimits(agentId, sessions);
   eraseAgentOutage(agentId);
+  agentRuntime.delete(agentId);
+  for (const [id, cert] of certs) {
+    if (cert.agent_id !== agentId) continue;
+    certs.delete(id);
+    policies.delete(id);
+    rollouts.delete(id);
+  }
   for (const key of scopes.keys()) if (matches(key)) scopes.delete(key);
-  for (const token of tokenIds) revoked.delete(token);
-  if (bundle) bundle = { ...bundle, enforcement: Object.fromEntries(Object.entries(bundle.enforcement).filter(([key]) => !matches(key))), revoked_jti: bundle.revoked_jti.filter((token) => !tokenIds.includes(token)) };
+  for (const token of tokens) revoked.delete(token);
+  if (bundle) bundle = { ...bundle, enforcement: Object.fromEntries(Object.entries(bundle.enforcement).filter(([key]) => !matches(key))), revoked_jti: bundle.revoked_jti.filter((token) => !tokens.includes(token)) };
 }
 
 // Brokered credentials (BP 5.2 step 11), cached briefly in memory, never logged.
@@ -195,6 +221,7 @@ async function subscribe() {
               return value;
             };
             await eraseAgentMemory(String(ev.agent_id), strings(ev.sessions), strings(ev.instances), strings(ev.tokens));
+            await refresh();
             await internal('/internal/agent-erasure-acks', { method: 'POST', body: JSON.stringify({ request_id: ev.request_id, node_id: NODE_ID }) });
           } else if (type === 'enforcement') {
             applyScope(String(ev.scope_key), ev.state as ScopeState); // apply first, then confirm

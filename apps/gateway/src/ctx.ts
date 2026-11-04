@@ -152,6 +152,7 @@ export async function preflight(ctx: Ctx, headers: IncomingHttpHeaders) {
   if (claims.exp * 1000 < Date.now()) halt(ctx, 1, 401, 'token_expired', 'workload token has expired; refresh it', 'deny', ['BP-5.2-1']);
   if (state.isRevoked(claims.jti)) halt(ctx, 1, 401, 'token_revoked', 'workload token has been revoked', 'deny', ['BP-5.2-1']);
   ctx.sessionId = typeof headers['x-signet-session'] === 'string' ? headers['x-signet-session'].slice(0, 80) : claims.jti;
+  state.rememberAgentRuntime(claims.agent_id, ctx.sessionId, claims.ins, claims.jti);
   step(ctx, 1, 'pass', claims.sub);
 
   // 2. Resolve the seal and its compiled policy from the signed bundle.

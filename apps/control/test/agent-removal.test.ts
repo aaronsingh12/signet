@@ -114,7 +114,7 @@ test('administrator deletion erases agent data, credentials and managed copies w
   assert.notEqual(replacement.id, erased.id);
 });
 
-test('unprovisioned proposals can be erased with historical or disconnected gateways; runtime identities still require cleanup', async () => {
+test('unprovisioned proposals can be erased with historical or disconnected gateways; runtime identities are erased without reconnecting offline gateways', async () => {
   const { db } = await import('../src/db');
   const { permissionsFor } = await import('../src/rbac');
   const { registerAgent, issueSeal, getAgent } = await import('../src/registry');
@@ -142,6 +142,8 @@ test('unprovisioned proposals can be erased with historical or disconnected gate
 
   const runtime = await registerAgent({ handle: 'provisioned-support-assistant', name: 'Provisioned assistant', purpose: 'Approved runtime identity still needs Gateway cleanup', sponsor: owner.id, autonomy_level: 'L0' }, owner);
   await issueSeal(runtime.id, { models: [{ model: 'gpt-oss:120b-cloud', region: 'unverified' }], tools: [], limits: { rpm: 30, tokens_per_day: 1000, usd_per_day: 1 }, environments: ['dev'] }, security);
-  await assert.rejects(removeAgent(runtime.id, runtime.handle, admin), /Reconnect registered gateways/);
-  assert.equal((await getAgent(runtime.id)).status, 'sealed', 'Refused runtime deletion must not erase or stop the agent');
+  assert.equal((await removeAgent(runtime.id, runtime.handle, admin)).deleted, true);
+  await assert.rejects(getAgent(runtime.id), /not found/);
+  assert.equal((await ledger.verify()).ok, true);
+  assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM gateway_node').get())!.n, 2);
 });

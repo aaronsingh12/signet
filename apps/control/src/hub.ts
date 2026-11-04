@@ -28,7 +28,7 @@ export const connectedNodes = () => [...nodes.keys()];
 interface ErasureRequest { expected: Set<string>; complete: () => void }
 const erasures = new Map<string, ErasureRequest>();
 
-/** Require every registered gateway to discard the agent before its persisted records are erased. */
+/** Require every connected gateway to discard the agent before its persisted records are erased. */
 export async function eraseAgentOnGateways(agentId: string, sessions: string[], instances: string[], tokens: string[], expected: string[]): Promise<void> {
   if (!expected.length) return;
   const requestId = newId('evt');
