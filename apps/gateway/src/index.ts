@@ -1,5 +1,5 @@
 import express, { type Request, type Response } from 'express';
-import { destinationPolicyFromEnv, httpToolRequest, request, type ToolAlias } from '@signet/core';
+import { destinationPolicyFromEnv, httpToolRequest, request, verifyJws, type ToolAlias } from '@signet/core';
 import { handleChat } from './chat';
 import { type Done, Halt, hitlDecided, newCtx, preflight } from './ctx';
 import { modelInfo, startRuntime } from './detectors';
@@ -9,6 +9,7 @@ import * as state from './state';
 import { handleTool } from './toolcall';
 import { forwardEdge } from './edge';
 import { ApiKeyRefused, resolveApiKey } from './apikey';
+import { streamEvents, toChatRequest, toResponse, UnsupportedResponsesRequest } from './responses';
 
 const app = express();
 app.disable('x-powered-by');
@@ -40,8 +41,15 @@ app.use('/v1', (req, res, next) => {
   });
 });
 
-// The model list OpenAI-compatible clients check before chatting: only the tenant's one cloud LLM.
-app.get('/v1/models', (_req, res) => {
+// The model list OpenAI-compatible clients check before chatting: only the tenant's one cloud LLM,
+// and only for a caller holding a valid key.
+app.get('/v1/models', (req, res) => {
+  try {
+    const claims = verifyJws<{ exp: number; jti: string }>(String(req.headers.authorization ?? '').replace(/^Bearer\s+/i, ''), state.tokenKeys, 'JWT').payload;
+    if (claims.exp * 1000 < Date.now() || state.isRevoked(claims.jti)) throw new Error('expired or revoked');
+  } catch {
+    return res.status(401).json({ error: { type: 'signet_policy', code: 'unauthenticated', message: 'a valid API key is required', decision: 'deny', rule_ids: ['BP-5.2-1'] } });
+  }
   const created = Math.floor(Date.parse(state.bundle?.issued_at ?? new Date().toISOString()) / 1000);
   res.json({ object: 'list', data: (state.bundle?.catalogue ?? []).map((c) => ({ id: c.model, object: 'model', created, owned_by: 'signet' })) });
 });
@@ -72,6 +80,24 @@ app.post(['/v1/chat/completions', '/v1/llm/chat/completions'], guard(async (req,
   const d = await handleChat(req.headers, req.body);
   if (d.status === 200 && req.body?.stream === true) return sendStream(res, d);
   send(res, d);
+}));
+
+// OpenAI Responses API, translated onto the same governed chat path.
+app.post('/v1/responses', guard(async (req, res) => {
+  let chat: Record<string, unknown>;
+  try {
+    chat = toChatRequest((req.body ?? {}) as Record<string, unknown>);
+  } catch (e) {
+    if (e instanceof UnsupportedResponsesRequest) return res.status(400).json({ error: { type: 'invalid_request_error', code: 'unsupported_responses_feature', message: e.message } });
+    throw e;
+  }
+  const d = await handleChat(req.headers, chat);
+  if (d.status !== 200) return send(res, d);
+  const response = toResponse(d.body as ChatResponse);
+  if (req.body?.stream !== true) return send(res, { ...d, body: response });
+  res.writeHead(200, { ...d.headers, 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
+  for (const { event, data } of streamEvents(response)) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  res.end();
 }));
 
 // Any other provider's API shape is refused and counted (RB-INV-19, RB-KILL-04).
@@ -129,7 +155,7 @@ app.post('/v1/mcp/:alias', guard(async (req, res) => {
   const ctx = newCtx('tool_call', `mcp://${alias}`, req.headers);
   let policyActions: string[];
   try {
-    const { policy } = preflight(ctx, req.headers);
+    const { policy } = await preflight(ctx, req.headers);
     policyActions = Object.keys(policy.actions).filter((k) => k.startsWith(`mcp://${alias}.`)).map((k) => k.slice(`mcp://${alias}.`.length));
   } catch (e) {
     if (e instanceof Halt) return res.status(e.status).json(rpcError(msg.id, -32003, e.message, { code: e.code }));

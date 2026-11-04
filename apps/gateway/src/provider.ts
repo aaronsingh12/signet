@@ -78,7 +78,7 @@ let status: LlmStatus = { state: 'not_checked', checked_at: null, detail: 'not c
 export const llmStatus = () => status;
 
 export async function probe(): Promise<LlmStatus> {
-  const models = (state.bundle?.catalogue ?? []).map((c) => c.model); // the name the gateway sends upstream
+  const models = (state.bundle?.catalogue ?? []).map((c) => c.upstream_model ?? c.model); // the name the gateway sends upstream
   let cred: Awaited<ReturnType<typeof credential>> = { value: null, source: 'none' };
   const at = new Date().toISOString();
   try {

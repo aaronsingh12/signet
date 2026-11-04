@@ -175,6 +175,16 @@ CREATE TABLE IF NOT EXISTS gateway_node (
   bundle_version BIGINT
 );
 
+-- Counters shared across instances: rate windows, daily usage, repeat violations, sign-in failures.
+CREATE TABLE IF NOT EXISTS shared_counter (
+  key TEXT PRIMARY KEY,
+  n BIGINT NOT NULL DEFAULT 0,
+  tokens BIGINT NOT NULL DEFAULT 0,
+  usd DOUBLE PRECISION NOT NULL DEFAULT 0,
+  expires_ms BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS shared_counter_expires ON shared_counter (expires_ms);
+
 -- Secrets Broker (BP 3 C9): values sealed with AES-256-GCM; never returned by any API.
 CREATE TABLE IF NOT EXISTS secret (
   id TEXT PRIMARY KEY,

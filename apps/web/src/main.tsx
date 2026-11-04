@@ -18,6 +18,7 @@ import { Login } from './pages/Login';
 import { Policies } from './pages/Policies';
 import { Plugins } from './pages/Plugins';
 import { Propose } from './pages/Propose';
+import { QuickConnect } from './pages/QuickConnect';
 import { Registry } from './pages/Registry';
 import { Tenant } from './pages/Tenant';
 import { Tools } from './pages/Tools';
@@ -45,6 +46,7 @@ createRoot(document.getElementById('root')!).render(
           <Route index element={<CommandCenter />} />
           <Route path="agents" element={<Registry />} />
           <Route path="agents/new" element={<Propose />} />
+          <Route path="agents/quick" element={<QuickConnect />} />
           <Route path="agents/:id" element={<Agent360 />} />
           <Route path="settings/agents" element={<AgentSettings />} />
           <Route path="discovery" element={<Discovery />} />

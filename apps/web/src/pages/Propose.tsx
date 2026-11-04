@@ -1,6 +1,6 @@
 import { ExternalConnectionFields, newConnectionDraft, type ConnectionDraft } from '../components/ExternalConnections';
 import { useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Card, ErrorNote, PageHeader, TierChip } from '../components/ui';
 import { ApiError, api, useApi } from '../lib/api';
 import { useMe } from '../lib/auth';
@@ -102,7 +102,7 @@ export function Propose() {
   ];
   return (
     <>
-      <PageHeader title="Connect an AI agent" subtitle="Choose a connection, add your agent's details, then review its permissions. Credentials become available after approval." />
+      <PageHeader title="Connect an AI agent" subtitle="Choose a connection, add your agent's details, then review its permissions. Credentials become available after approval." actions={<Link data-testid="quick-connect-link" className="btn-primary" to="/agents/quick">Quick connect</Link>} />
       <ol className="mb-4 grid grid-cols-3 gap-3" aria-label="Add agent progress">{['Connection', 'Agent details', 'Permissions & review'].map((label, index) => <li key={label} aria-current={step === index ? 'step' : undefined} className={`rounded-lg border p-3 text-sm ${step === index ? 'border-royal bg-royal-50 text-royal' : 'border-line bg-white text-ink-3'}`}><span className="mr-2 font-semibold">{index + 1}</span>{label}</li>)}</ol>
       <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
         <div className="space-y-4">
@@ -245,7 +245,7 @@ export function Propose() {
               </li>
             ))}
           </ul>
-          <p className="mt-4 text-xs text-ink-3">Approval routing: T4 needs no manual signature; T3 needs Owner + Security; T2 also needs Risk; T1 also needs two Governance Board members. An administrator can approve the certificate directly after lifecycle checks. Open My Approvals when the request is ready.</p>
+          <p className="mt-4 text-xs text-ink-3">{me.single_operator ? 'You are the only administrator: T4 needs no signature, and for T3 to T1 your one approval fills every slot and is recorded as one person approving. Higher tiers still need their assessments and test evidence.' : 'Approval routing: T4 needs no manual signature; T3 needs Owner + Security; T2 also needs Risk; T1 also needs two Governance Board members. An administrator can approve the certificate directly after lifecycle checks. Open My Approvals when the request is ready.'}</p>
         </Card>
       </div>
     </>

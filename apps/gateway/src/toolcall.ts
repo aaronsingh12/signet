@@ -34,7 +34,7 @@ export async function handleTool(headers: IncomingHttpHeaders, req: ToolRequest)
 }
 
 async function run(ctx: Ctx, headers: IncomingHttpHeaders, req: ToolRequest): Promise<unknown> {
-  const { claims, cert, policy, eff } = preflight(ctx, headers);
+  const { claims, cert, policy, eff } = await preflight(ctx, headers);
 
   // 6. Normalise.
   const key = ctx.target;

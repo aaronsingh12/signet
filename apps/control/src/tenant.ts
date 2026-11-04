@@ -54,3 +54,20 @@ async function ensureTenant() {
 }
 
 export const tenant = (await ensureTenant());
+
+/** Re-read settings saved by another control instance (Vercel runs several), keeping this object's identity. */
+export async function reloadSettings(): Promise<TenantSettings> {
+  const row = (await db.prepare('SELECT settings FROM tenant WHERE id = ?').get(tenant.id)) as { settings: string } | undefined;
+  if (row) Object.assign(tenant.settings, { ...defaultSettings(), ...(JSON.parse(row.settings) as Partial<TenantSettings>) });
+  return tenant.settings;
+}
+
+/** Price per 1,000 tokens for one catalogue model; costs, daily budgets and the per-request cost ceiling use it. */
+export async function setModelPrice(model: string, price: { in: number; out: number }): Promise<CatalogueModel> {
+  await reloadSettings();
+  const entry = tenant.settings.catalogue.find((c) => c.model === model);
+  if (!entry) return Promise.reject(new Error(`unknown model ${model}`));
+  entry.price_per_1k_usd = { in: price.in, out: price.out };
+  (await db.prepare('UPDATE tenant SET settings = ? WHERE id = ?').run(JSON.stringify(tenant.settings), tenant.id));
+  return entry;
+}

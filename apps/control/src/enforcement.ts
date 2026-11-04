@@ -9,7 +9,7 @@ import * as hub from './hub';
 import { keys } from './keys';
 import * as ledger from './ledger';
 import type { Principal } from './rbac';
-import { tenant } from './tenant';
+import { reloadSettings, tenant } from './tenant';
 import { listTools } from './tools';
 import { correlation, enqueue } from './outbox';
 
@@ -75,6 +75,7 @@ export const setKillListener = (fn: typeof killListener) => (killListener = fn);
 export const setRolloutSource = (fn: () => Promise<PolicyBundle['rollouts']>) => (rolloutSource = fn);
 
 export async function buildBundle(): Promise<string> {
+  await reloadSettings(); // prices or other settings may have been saved by another instance
   const now = Date.now();
   const enforcement: Record<string, ScopeState> = {};
   for (const r of ((await db.prepare("SELECT * FROM enforcement_state WHERE level != 'active'").all()) as unknown as StateRow[]).filter(live)) {

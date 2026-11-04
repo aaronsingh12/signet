@@ -30,7 +30,7 @@ export async function handleChat(headers: IncomingHttpHeaders, body: Record<stri
 }
 
 async function run(ctx: Ctx, headers: IncomingHttpHeaders, body: Record<string, unknown>, foreignProvider?: string): Promise<ChatResponse> {
-  const { claims, cert, policy } = preflight(ctx, headers);
+  const { claims, cert, policy } = await preflight(ctx, headers);
 
   // Only the cloud LLM may be called (RB-INV-19); other providers' API shapes count as out-of-manifest.
   if (foreignProvider) {

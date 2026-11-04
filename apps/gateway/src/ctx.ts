@@ -26,6 +26,7 @@ export interface Step {
 
 export interface Ctx {
   requestId: string;
+  clientAddress: string;
   started: number;
   lastMark: number;
   actionType: 'llm_call' | 'tool_call';
@@ -69,10 +70,13 @@ export class Halt extends Error {
   }
 }
 
+// The first X-Forwarded-For entry is the caller as Vercel's edge saw it; locally it is absent.
+const clientAddressOf = (headers: IncomingHttpHeaders) => String(headers['x-forwarded-for'] ?? '').split(',')[0]!.trim() || 'direct';
+
 export function newCtx(actionType: Ctx['actionType'], target: string, headers: IncomingHttpHeaders): Ctx {
   const now = performance.now();
   return {
-    requestId: newId('req'), started: now, lastMark: now, actionType, steps: [], rules: [], reasons: [], sessionId: '',
+    requestId: newId('req'), clientAddress: clientAddressOf(headers), started: now, lastMark: now, actionType, steps: [], rules: [], reasons: [], sessionId: '',
     callerUserId: typeof headers['x-signet-user'] === 'string' ? headers['x-signet-user'] : null,
     dlp: [], detectors: [], decision: 'allow', tokensIn: 0, tokensOut: 0, costUsd: 0, upstreamMs: 0, target, approverGroups: [], extra: {},
     shadow: false, rollout: null, wouldBlock: [],
@@ -117,7 +121,7 @@ export async function ladder(ctx: Ctx, action: 'kill' | 'quarantine', ruleId: st
 }
 
 export async function recordOutOfManifest(ctx: Ctx, what: string, rules: string[], shadowOk = false): Promise<void> {
-  const n = limits.recordOutOfManifest(ctx.claims!.agent_id);
+  const n = await limits.recordOutOfManifest(ctx.claims!.agent_id);
   if (n >= 3) {
     await ladder(ctx, 'kill', 'RB-KILL-04', `${n} out-of-manifest attempts in 10 minutes`, { last: what });
     halt(ctx, 7, 403, 'out_of_manifest', `${what}; ${n} out-of-manifest attempts in 10 minutes, the agent has been killed`, 'kill', [...rules, 'RB-KILL-04'], 'blocked', { attempts_in_window: n });
@@ -128,7 +132,7 @@ export async function recordOutOfManifest(ctx: Ctx, what: string, rules: string[
 }
 
 // Steps 1-5: identity, seal, ladder state, validity, limits.
-export function preflight(ctx: Ctx, headers: IncomingHttpHeaders) {
+export async function preflight(ctx: Ctx, headers: IncomingHttpHeaders) {
   // 1. Authenticate the workload token.
   const token = String(headers.authorization ?? '').replace(/^Bearer\s+/i, '');
   if (!token) halt(ctx, 1, 401, 'unauthenticated', 'a workload token is required', 'deny', ['BP-5.2-1']);
@@ -181,8 +185,8 @@ export function preflight(ctx: Ctx, headers: IncomingHttpHeaders) {
 
   // 5. Rate, volume and cost limits; a throttle scales them down (ladder level 3).
   const rpm = cert!.limits.rpm * eff.throttleFactor;
-  if (!limits.takeRequest(claims.agent_id, rpm)) halt(ctx, 5, 429, 'rate_limited', `over ${Math.floor(rpm)} requests per minute${eff.throttleFactor < 1 ? ' (throttled)' : ''}`, 'throttle', ['BP-5.2-5']);
-  const used = limits.usage(claims.agent_id);
+  const used = await limits.takeRequest(claims.agent_id, rpm);
+  if (!used.allowed) halt(ctx, 5, 429, 'rate_limited', `over ${Math.floor(rpm)} requests per minute${eff.throttleFactor < 1 ? ' (throttled)' : ''}`, 'throttle', ['BP-5.2-5']);
   if (used.tokens >= cert!.limits.tokens_per_day * eff.throttleFactor) halt(ctx, 5, 429, 'token_budget_exhausted', 'daily token limit reached', 'throttle', ['BP-5.2-5']);
   if (cert!.limits.usd_per_day > 0 && used.usd >= cert!.limits.usd_per_day * eff.throttleFactor) halt(ctx, 5, 429, 'cost_budget_exhausted', 'daily cost limit reached', 'throttle', ['BP-5.2-5']);
   step(ctx, 5, 'pass', `${used.tokens} tokens today`);
@@ -239,6 +243,11 @@ export async function finish(ctx: Ctx, err: Halt | null, okBody: unknown): Promi
     steps: ctx.steps,
     ...ctx.extra,
   };
+  // Refusals without a valid token come from anyone on the internet: record the first few per
+  // address each minute, then answer 429 without writing, so floods cannot fill the ledger.
+  if (err && !ctx.claims && !limits.takeAnonymousFailure(ctx.clientAddress)) {
+    return errorDone(ctx, new Halt(429, 'too_many_unauthenticated', 'too many requests without a valid token from this address; retry in a minute', 'deny', 'blocked', { retry_after: 60 }), null);
+  }
   let recordId: string;
   try {
     const record = await appendRecord({ kind: 'transaction', agent_id: ctx.claims?.agent_id ?? null, cert_id: ctx.cert?.cert_id ?? null, data });

@@ -70,12 +70,12 @@ export function Tools() {
           {!can('secrets.manage') ? (
             <Empty>Platform admins manage brokered credentials.</Empty>
           ) : secrets?.items?.length ? (
-            <table className="w-full">
+            <div className="overflow-x-auto"><table className="w-full">
               <thead><tr>{['Name', 'Kind', 'Fingerprint', 'Version', 'Rotation'].map((h) => <th key={h} className="th">{h}</th>)}</tr></thead>
               <tbody>
                 {secrets.items.map((s: any) => (
                   <tr key={s.id}>
-                    <td className="td mono">{s.name}</td>
+                    <td className="td mono break-all">{s.name}</td>
                     <td className="td text-xs">{s.kind}</td>
                     <td className="td"><Mono>{s.fingerprint}</Mono></td>
                     <td className="td">v{s.version} · {ago(s.rotated_at ?? s.created_at)}</td>
@@ -89,7 +89,7 @@ export function Tools() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </table></div>
           ) : (
             <Empty>No secrets stored.</Empty>
           )}

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Card, Empty, ErrorNote, KV, Mono, Pill, TierChip } from '../components/ui';
-import { ApiError, api } from '../lib/api';
+import { ApiError, api, useApi } from '../lib/api';
 import { useMe } from '../lib/auth';
 import { ago, date, hash } from '../lib/format';
 
@@ -101,6 +101,61 @@ export function LifecycleTab({ data, onChange }: { data: any; onChange: () => vo
   );
 }
 
+const MANIFEST_DATA = ['personal', 'financial_account', 'confidential_doc', 'source_code', 'special_category', 'payment_card'];
+const IMPACTS = ['read', 'write', 'privileged', 'critical'];
+
+// The everyday manifest fields as a form. It edits the same JSON, so fields it does not show (argument
+// constraints, approval rules) are kept.
+function ManifestForm({ text, onChange }: { text: string; onChange: (text: string) => void }) {
+  const { data: catalogue } = useApi<{ catalogue: { model: string; region: string }[] }>('/catalogue');
+  const { data: registered } = useApi<{ items: { alias: string; kind: string }[] }>('/tools');
+  let m: any;
+  try {
+    m = JSON.parse(text);
+  } catch {
+    return <p className="text-sm text-bad">The JSON below is not valid, so the form is hidden until it is fixed.</p>;
+  }
+  const update = (fn: (draft: any) => void) => {
+    const draft = JSON.parse(text);
+    fn(draft);
+    if (!draft.models?.length && catalogue?.catalogue[0]) draft.models = [{ model: catalogue.catalogue[0].model, region: catalogue.catalogue[0].region }];
+    onChange(JSON.stringify(draft, null, 2));
+  };
+  const number = (key: string, label: string) => (
+    <label key={key} className="text-xs text-ink-3">{label}<input className="input mt-1" type="number" min="0" value={m.limits?.[key] ?? ''} onChange={(e) => update((d) => { d.limits = { ...d.limits, [key]: Number(e.target.value) }; })} /></label>
+  );
+  const dataBoxes = (key: 'prompt' | 'forbidden') => (
+    <div className="flex flex-wrap gap-3 text-sm">{MANIFEST_DATA.map((tag) => <label key={tag} className="flex items-center gap-1.5"><input type="checkbox" checked={!!m.data_classes?.[key]?.includes(tag)} onChange={() => update((d) => { const list: string[] = d.data_classes?.[key] ?? []; d.data_classes = { ...d.data_classes, [key]: list.includes(tag) ? list.filter((x) => x !== tag) : [...list, tag] }; })} /> {tag.replace('_', ' ')}</label>)}</div>
+  );
+  return (
+    <div className="space-y-4">
+      <div><div className="label">Daily and per-minute limits</div><div className="grid gap-3 sm:grid-cols-3">{number('rpm', 'Requests per minute')}{number('tokens_per_day', 'Tokens per day')}{number('usd_per_day', 'USD per day')}</div></div>
+      <div><div className="label">Data it may send to the model</div>{dataBoxes('prompt')}</div>
+      <div><div className="label">Data that must never be sent</div>{dataBoxes('forbidden')}</div>
+      <div><label className="label">Environments (comma-separated)</label><input className="input" value={(m.environments ?? []).join(', ')} onChange={(e) => update((d) => { d.environments = e.target.value.split(',').map((x: string) => x.trim()).filter(Boolean); })} /></div>
+      <div>
+        <div className="label">Tools it may call</div>
+        {(m.tools ?? []).map((tool: any, ti: number) => (
+          <div key={ti} className="mb-2 rounded-md border border-line p-3">
+            <div className="flex items-center justify-between"><span className="mono text-sm">{tool.server}</span><button className="text-xs text-bad hover:underline" onClick={() => update((d) => { d.tools.splice(ti, 1); })}>Remove tool</button></div>
+            {(tool.actions ?? []).map((action: any, ai: number) => (
+              <div key={ai} className="mt-2 grid items-center gap-2 sm:grid-cols-[1fr_9rem_auto]">
+                <input className="input" aria-label="Action name" placeholder="action name" value={action.name} onChange={(e) => update((d) => { d.tools[ti].actions[ai].name = e.target.value; })} />
+                <select className="input" aria-label="Action impact" value={action.impact} onChange={(e) => update((d) => { d.tools[ti].actions[ai].impact = e.target.value; })}>{IMPACTS.map((x) => <option key={x} value={x}>{x}</option>)}</select>
+                <button className="text-xs text-bad hover:underline" onClick={() => update((d) => { d.tools[ti].actions.splice(ai, 1); })}>Remove</button>
+              </div>
+            ))}
+            <button className="btn-ghost mt-2 text-xs" onClick={() => update((d) => { d.tools[ti].actions = [...(d.tools[ti].actions ?? []), { name: '', impact: 'read' }]; })}>Add action</button>
+          </div>
+        ))}
+        {registered?.items?.length ? (
+          <select className="input" aria-label="Add a tool" value="" onChange={(e) => { const server = e.target.value; if (server) update((d) => { d.tools = [...(d.tools ?? []), { server, data_scopes: [], actions: [{ name: '', impact: 'read' }] }]; }); }}><option value="">Add a registered tool…</option>{registered.items.map((t) => <option key={t.alias} value={`${t.kind}://${t.alias}`}>{t.alias}</option>)}</select>
+        ) : <p className="text-xs text-ink-3">No tools registered yet. Add them under Tools & credentials.</p>}
+      </div>
+    </div>
+  );
+}
+
 function ManifestEditor({ v, onChange }: { v: any; onChange: () => void }) {
   const [text, setText] = useState(() => JSON.stringify(v.lifecycle.data.manifest ?? {}, null, 2));
   const [parseError, setParseError] = useState<string | null>(null);
@@ -116,7 +171,10 @@ function ManifestEditor({ v, onChange }: { v: any; onChange: () => void }) {
   };
   return (
     <Card title="Manifest draft" action={<button className="btn-ghost" disabled={a.busy} onClick={save}>Save manifest</button>}>
-      <textarea className="input mono min-h-[300px] text-xs" spellCheck={false} value={text} onChange={(e) => setText(e.target.value)} />
+      <ManifestForm text={text} onChange={setText} />
+      <details className="mt-4"><summary className="cursor-pointer text-sm text-ink-2">Edit as JSON (advanced: constraints, approval rules)</summary>
+      <textarea className="input mono mt-2 min-h-[300px] text-xs" spellCheck={false} value={text} onChange={(e) => setText(e.target.value)} />
+      </details>
       <p className="mt-2 text-xs text-ink-3">Checked on save: the model is the tenant's cloud LLM (RB-INV-19), every action has an impact label (RB-PRIV-01), tool aliases are registered, nothing secret reaches the model (RB-INV-16).</p>
       <div className="mt-2"><ErrorNote error={parseError ? { rule: 'JSON', message: parseError } : a.error} /></div>
     </Card>

@@ -6,6 +6,7 @@ import * as hub from './hub';
 import { forgetAgent } from './live';
 import type { Principal } from './rbac';
 import { eraseAgentLedger } from './erasure-ledger';
+import { GATEWAY_STALE_MS, eraseAgent as eraseAgentCounters } from './counters';
 import { eraseDeploymentArtifacts, eraseEvidenceFiles } from './erasure-files';
 
 function assertAdministrator(actor: Principal): void {
@@ -36,7 +37,8 @@ async function gatewaysForErasure(agentId: string): Promise<string[]> {
     LIMIT 1
   `).get(agentId, agentId, agentId, agentId);
   if (!runtime) return [];
-  return ((await db.prepare('SELECT id FROM gateway_node').all()) as { id: string }[]).map((node) => node.id);
+  // Only gateways seen recently can hold agent state; containers from earlier deploys are gone.
+  return ((await db.prepare('SELECT id FROM gateway_node WHERE last_seen >= ?').all(new Date(Date.now() - GATEWAY_STALE_MS).toISOString())) as { id: string }[]).map((node) => node.id);
 }
 
 /** Explicit administrator erasure: stop execution, clear applicable gateways, erase owned data and retain anonymous signed chain commitments. */
@@ -66,6 +68,7 @@ export async function removeAgent(agentRef: string, confirmation: string, actor:
     (await db.prepare('DELETE FROM kill_ack WHERE event_id IN (SELECT id FROM enforcement_event WHERE agent_id = ?)').run(agent.id));
     (await db.prepare('DELETE FROM enforcement_event WHERE agent_id = ?').run(agent.id));
     (await db.prepare('DELETE FROM enforcement_state WHERE agent_id = ?').run(agent.id));
+    await eraseAgentCounters(agent.id);
     (await db.prepare('DELETE FROM revoked_jti WHERE jti IN (SELECT jti FROM issued_token WHERE agent_id = ?)').run(agent.id));
     (await db.prepare('DELETE FROM issued_token WHERE agent_id = ?').run(agent.id));
     (await db.prepare('DELETE FROM deployment_credential WHERE agent_id = ?').run(agent.id));

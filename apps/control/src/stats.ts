@@ -1,5 +1,6 @@
 import { db } from './db';
 import { keylessKpi } from './discovery';
+import { GATEWAY_LIVE_MS, GATEWAY_STALE_MS } from './counters';
 import { tenant } from './tenant';
 
 // Command Center figures (BP 14.1), computed from the registry and the ledger.
@@ -13,7 +14,7 @@ export async function commandCenter() {
   const expiring = (await db.prepare("SELECT a.handle, a.tier, c.valid_to FROM certificate c JOIN agent a ON a.id = c.agent_id WHERE c.status = 'active' AND c.valid_to <= ? ORDER BY c.valid_to LIMIT 10").all(new Date(Date.now() + 30 * 86_400_000).toISOString()));
   const latency = (await db.prepare("SELECT (jsonb_extract_path_text(data::jsonb, 'latency_ms_gateway'))::double precision AS ms FROM ledger_record WHERE kind = 'transaction' AND ts >= ? AND (jsonb_extract_path_text(data::jsonb, 'latency_ms_gateway'))::double precision IS NOT NULL ORDER BY ms").all(since24)) as { ms: number }[];
   const p95 = latency.length ? latency[Math.min(latency.length - 1, Math.floor(latency.length * 0.95))]!.ms : null;
-  const nodes = (await db.prepare('SELECT id, last_seen, bundle_version, llm_status FROM gateway_node ORDER BY id').all()) as { id: string; last_seen: string; llm_status: string | null }[];
+  const nodes = (await db.prepare('SELECT id, last_seen, bundle_version, llm_status FROM gateway_node WHERE last_seen >= ? ORDER BY id').all(new Date(Date.now() - GATEWAY_STALE_MS).toISOString())) as { id: string; last_seen: string; llm_status: string | null }[];
   return {
     tenant: { id: tenant.id, name: tenant.name },
     agents_by_tier_status: tiers,
@@ -25,7 +26,7 @@ export async function commandCenter() {
     gateway_p95_ms_24h: p95,
     expiring_30d: expiring,
     keyless: (await keylessKpi()),
-    gateways: nodes.map((n) => ({ ...n, llm_status: n.llm_status ? JSON.parse(n.llm_status) : null, healthy: Date.now() - Date.parse(n.last_seen) < 30_000 })),
+    gateways: nodes.map((n) => ({ ...n, llm_status: n.llm_status ? JSON.parse(n.llm_status) : null, healthy: Date.now() - Date.parse(n.last_seen) < GATEWAY_LIVE_MS })),
     // The cloud LLM as the gateways last saw it; "unknown" until a live node has checked.
     cloud_llm: llmStatus(nodes),
   };

@@ -23,7 +23,7 @@ import * as secrets from './secrets';
 import { commandCenter } from './stats';
 import { agentAnalytics } from './agent-analytics';
 import { agentRemovalPreview, removeAgent } from './agent-removal';
-import { tenant } from './tenant';
+import { reloadSettings, setModelPrice, tenant } from './tenant';
 import * as approvals from './approvals';
 import * as controls from './controls';
 import * as hitl from './hitl';
@@ -37,6 +37,8 @@ import * as tools from './tools';
 import * as connectivity from './connectivity';
 import * as edge from './edge';
 import * as externalConnections from './external-connections';
+import * as counters from './counters';
+import * as quickConnect from './quick-connect';
 
 const INTERNAL_TOKEN = devSecret('SIGNET_INTERNAL_TOKEN');
 const PORT = Number(process.env.PORT ?? env('SIGNET_CONTROL_PORT', '4100'));
@@ -44,6 +46,8 @@ const PORT = Number(process.env.PORT ?? env('SIGNET_CONTROL_PORT', '4100'));
 const app = express();
 const initialized = controls.seed();
 app.disable('x-powered-by');
+// Behind Vercel's edge the client address arrives in X-Forwarded-For; trust only that one hop.
+if (process.env.VERCEL) app.set('trust proxy', 1);
 app.use((_req, _res, next) => { void initialized.then(() => next(), next); });
 // Log uploads for discovery have their own, larger limit on their route.
 const jsonBody = express.json({ limit: '1mb' });
@@ -74,10 +78,22 @@ app.get('/healthz', route(async () => {
 // --- public: sign-in, identity exchange, API description ---
 api.get('/auth/login', route(async (req, res) => (await oidc.login(req, res))));
 api.get('/auth/config', route(() => ({ auth_mode: oidc.OIDC.authMode, tenant_name: tenant.name })));
-api.post('/auth/local-login', route(async (req, res) => (await oidc.localLogin(req, res))));
+const clientIp = (req: Request) => req.ip ?? req.socket.remoteAddress ?? 'unknown';
+// Failed sign-ins are throttled per address and per administrator ID (shared across instances).
+async function throttledLogin<T>(req: Request, username: unknown, attempt: () => Promise<T> | T): Promise<T> {
+  const id = typeof username === 'string' ? username : '';
+  await counters.assertLoginAllowed(clientIp(req), id);
+  try {
+    return await attempt();
+  } catch (e) {
+    if (e instanceof PolicyError && e.status === 401) await counters.recordLoginFailure(clientIp(req), id);
+    throw e;
+  }
+}
+api.post('/auth/local-login', route(async (req, res) => (await throttledLogin(req, req.body?.username, () => oidc.localLogin(req, res)))));
 api.get('/auth/callback', route(async (req, res) => (await oidc.callback(req, res))));
 api.post('/auth/logout', route(async (req, res) => (await oidc.logout(req, res))));
-api.post('/auth/dev-token', route((req) => oidc.localToken(req.body ?? {})));
+api.post('/auth/dev-token', route(async (req) => (await throttledLogin(req, req.body?.username ?? req.body?.client_id, () => oidc.localToken(req.body ?? {})))));
 api.get('/identity/jwks', route(() => jwks()));
 // Unauthenticated by nature, so limited per client address: 30 exchanges a minute.
 const tokenAttempts = new Map<string, { n: number; reset: number }>();
@@ -163,7 +179,18 @@ api.get('/plugins/vercel', requires('tenant.admin'), route(async (_req, res) => 
 api.get('/plugins/vercel/connect', requires('tenant.admin'), route((_req, res) => plugins.startVercelConnection(res, principalOf(res))));
 api.get('/plugins/vercel/callback', requires('tenant.admin'), route(async (req, res) => (await plugins.completeVercelConnection(req, res, principalOf(res)))));
 api.post('/plugins/vercel/disconnect', requires('tenant.admin'), route(async (_req, res) => (await plugins.disconnectVercel(principalOf(res)))));
-api.get('/catalogue', requires('agents.read'), route(() => ({ catalogue: tenant.settings.catalogue })));
+api.get('/catalogue', requires('agents.read'), route(async () => ({ catalogue: (await reloadSettings()).catalogue })));
+// Model prices drive recorded cost, daily cost budgets and the per-request cost ceiling.
+api.put('/catalogue/:model/price', requires('tenant.admin'), route(async (req, res) => {
+  const model = String(req.params.model);
+  const price = { in: Number(req.body?.in), out: Number(req.body?.out) };
+  if (![price.in, price.out].every((v) => Number.isFinite(v) && v >= 0 && v <= 1000)) throw invalid('in and out are USD per 1,000 tokens, between 0 and 1000');
+  if (!(await reloadSettings()).catalogue.some((c) => c.model === model)) throw invalid(`${model} is not in the tenant catalogue`);
+  const entry = await setModelPrice(model, price);
+  await ledger.append({ kind: 'admin', data: { event: 'catalogue.price_set', model, price_per_1k_usd: entry.price_per_1k_usd, actor: principalOf(res).id } });
+  hub.publish('bundle', { reason: 'catalogue.price_set', model });
+  return { model: entry };
+}));
 api.get('/stats/command-center', requires('agents.read'), route(async () => (await commandCenter())));
 api.get('/stats/costs', requires('agents.read'), route(async (req) => costs(Number(req.query.days ?? 30))));
 api.post('/platforms/:id/usage/sync', requires('connectors.manage'), route(async (req) => platforms.syncUsage(req.params.id!, Number(req.body?.days ?? 30))));
@@ -183,6 +210,16 @@ api.post('/agents', requires('agents.write'), route(async (req, res) => {
   const lc = (await workflow.start(agent, req.body?.intake ?? { template: req.body?.template }, p));
   return [201, { ...agent, lifecycle_id: lc.id }];
 }));
+// One form to a working key, for agents that only call the model; see quick-connect.ts for what it refuses to shortcut.
+api.post('/agents/quick-connect', requires('agents.write'), route(async (req, res) => {
+  res.setHeader('cache-control', 'no-store');
+  return [201, await quickConnect.start((req.body ?? {}) as Record<string, unknown>, principalOf(res))];
+}));
+api.post('/agents/:id/quick-connect', requires('agents.write'), route(async (req, res) => {
+  res.setHeader('cache-control', 'no-store');
+  return quickConnect.advance(req.params.id!, String(req.body?.lifecycle_id), principalOf(res), req.body?.answers as Record<string, string> | undefined);
+}));
+api.post('/connect/test', requires('identity.bootstrap'), route(async (req) => quickConnect.testCall(req.body?.credential)));
 api.get('/agents/:id/removal-preview', requires('agents.delete'), route(async (req, res) => (await agentRemovalPreview(req.params.id!, principalOf(res)))));
 api.delete('/agents/:id', requires('agents.delete'), route(async (req, res) => {
   if (typeof req.body?.confirm_handle !== 'string') throw invalid('confirm_handle must be the exact agent handle');
@@ -429,6 +466,10 @@ int.post('/agent-erasure-acks', route((req) => {
   return { ok: true };
 }));
 int.post('/ledger', route(async (req) => (Array.isArray(req.body?.records) ? { records: (await ledger.appendMany(req.body.records)).map((r) => ({ record_id: r.record_id, seq: r.seq })) } : { record: (await ledger.append(req.body)) })));
+// Shared limit counters for gateways (rate per minute, daily usage, out-of-manifest attempts).
+int.post('/limits/take', route(async (req) => (await counters.takeRequest(String(req.body?.agent_id)))));
+int.post('/limits/usage', route(async (req) => ((await counters.addUsage(String(req.body?.agent_id), Number(req.body?.tokens) || 0, Number(req.body?.usd) || 0)), { ok: true })));
+int.post('/limits/out-of-manifest', route(async (req) => ({ attempts: await counters.recordOutOfManifest(String(req.body?.agent_id)) })));
 int.get('/secrets/:id', route(async (req) => (await secrets.revealForGateway(req.params.id!))));
 int.post('/heartbeat', route(async (req) => {
   (await db.prepare('INSERT INTO gateway_node (id, url, last_seen, bundle_version, llm_status) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET url = excluded.url, last_seen = excluded.last_seen, bundle_version = excluded.bundle_version, llm_status = excluded.llm_status').run(
@@ -460,6 +501,7 @@ int.post('/maintenance/connectors', route(async () => { await servicenow.work();
 int.post('/maintenance/connections', route(async () => { await externalConnections.work(); return { ok: true }; }));
 int.post('/maintenance/edge', route(async () => { await edge.sweep(); return { ok: true }; }));
 int.post('/maintenance/platform-usage', route(async () => { await platforms.sweepUsage(); return { ok: true }; }));
+int.post('/maintenance/counters', route(async () => { await counters.sweep(); return { ok: true }; }));
 int.post('/maintenance/roots', route(async () => ({ sealed: await evidence.sealFinishedDays() })));
 app.use('/internal', int);
 
@@ -492,6 +534,7 @@ every(10 * 60_000, 'control evaluation', async () => (await controls.evaluate())
 every(3_000, 'connector worker', async () => (await servicenow.work()));
 every(30_000, 'external connection sync', async () => (await externalConnections.work()));
 every(10_000, 'connector job cleanup', async () => (await edge.sweep()));
+every(60_000, 'counter and gateway cleanup', async () => (await counters.sweep()));
 every(6 * 3_600_000, 'platform usage sync', async () => (await platforms.sweepUsage()));
 const sealRoots = async () => {
   try {
