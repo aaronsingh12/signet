@@ -1,7 +1,6 @@
 import {
   RESTRICTED_TAGS, canonicalize, evaluateTs, newId, promptDecision, scan, sha256,
-  type CompiledPolicy, type DataTag, type Rollout, type Tier,
-} from '@signet/core';
+  type CompiledPolicy, type DataTag, type Rollout, type Tier, DATA_TAGS } from '@signet/core';
 import * as approvals from './approvals';
 import { compilePolicy } from './compile';
 import { db, nowIso, tx } from './db';
@@ -115,7 +114,15 @@ async function assertOwnerSide(agent: AgentRow, p: Principal) {
 
 // --- Stage 1: Propose ---------------------------------------------------------------------------
 
+// What classification scores must be real values: an unknown audience or data class would score as low risk.
+function checkIntake(i: Partial<Intake>) {
+  if (i.users_affected !== undefined && (!Array.isArray(i.users_affected) || i.users_affected.some((u) => !['internal', 'customers', 'public'].includes(u)))) throw invalid('users_affected must be a list of internal, customers or public');
+  if (i.data_touched !== undefined && (!Array.isArray(i.data_touched) || i.data_touched.some((t) => !DATA_TAGS.includes(t)))) throw invalid('data_touched contains an unknown data class');
+  if (i.reversibility !== undefined && !['yes', 'partly', 'no'].includes(i.reversibility)) throw invalid('reversibility must be yes, partly or no');
+}
+
 export async function start(agent: AgentRow, intakeIn: Partial<Intake>, p: Principal, kind: Lifecycle['kind'] = 'initial', manifest?: SealInput | null): Promise<Lifecycle> {
+  checkIntake(intakeIn);
   const tpl = getTemplate(intakeIn.template ?? undefined);
   const intake: Intake = {
     users_affected: intakeIn.users_affected ?? tpl?.users_affected ?? [],
@@ -144,6 +151,7 @@ export async function updateIntake(lcId: string, patch: Partial<Intake>, p: Prin
   const lc = (await get(lcId));
   assertStage(lc, 'propose');
   (await assertOwnerSide((await getAgent(lc.agent_id)), p));
+  checkIntake(patch);
   (await saveData(lc.id, { ...lc.data, intake: { ...lc.data.intake, ...patch } }));
   return (await view(lc.id));
 }
@@ -316,10 +324,10 @@ export async function saveAssessment(lcId: string, type: string, content: Record
   if (complete) {
     if (type === 'questionnaire') {
       const answers = (content.answers ?? {}) as Record<string, { answer: string; note?: string }>;
-      const missing = QUESTIONS.filter((q) => !['yes', 'no', 'na'].includes(answers[q.id]?.answer ?? ''));
+      const missing = QUESTIONS.filter((q) => !['yes', 'partial', 'no', 'na'].includes(answers[q.id]?.answer ?? ''));
       if (missing.length) throw invalid(`answer every question (${missing.map((q) => q.id).join(', ')})`);
-      // Each "no" becomes a gap against its control (BP 6 Stage 3 gap handling).
-      for (const q of QUESTIONS.filter((x) => answers[x.id]!.answer === 'no')) {
+      // Each "no" or "partly" becomes a gap against its control (BP 6 Stage 3 gap handling).
+      for (const q of QUESTIONS.filter((x) => answers[x.id]!.answer === 'no' || answers[x.id]!.answer === 'partial')) {
         if (!(await db.prepare("SELECT 1 FROM gap WHERE lifecycle_id = ? AND control_id = ? AND status != 'closed'").get(lc.id, q.control))) (await addGap(lc.id, { control_id: q.control, severity: q.severity, title: q.text.replace(/\?$/, ': not yet') }, p));
       }
     } else {

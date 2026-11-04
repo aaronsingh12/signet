@@ -17,7 +17,7 @@ const REVERSIBILITY = ['yes', 'partly', 'no'];
 const envName = () => process.env.SIGNET_ENV ?? 'dev';
 
 export type QuickConnectResult =
-  | { state: 'connected'; agent_id: string; lifecycle_id: string; tier: string; deployment_credential: string; expires_at: string; rollout: string }
+  | { state: 'connected'; agent_id: string; lifecycle_id: string; tier: string; deployment_credential: string; expires_at: string; rollout: string; open_gaps: string[] }
   | { state: 'needs_answers'; agent_id: string; lifecycle_id: string; tier: string; questions: { id: string; text: string }[] }
   | { state: 'needs_review' | 'awaiting_approval'; agent_id: string; lifecycle_id: string; tier: string; reason: string };
 
@@ -25,6 +25,7 @@ export async function start(body: Record<string, unknown>, p: Principal): Promis
   const name = String(body.name ?? '').trim();
   const handle = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 63).replace(/-$/, '');
   if (!handle) throw invalid('name the agent');
+  if (String(body.purpose ?? '').trim().length < 10) throw invalid('describe the purpose in at least 10 characters');
   const users = Array.isArray(body.users_affected) ? body.users_affected.map(String) : [];
   const data = Array.isArray(body.data_touched) ? body.data_touched.map(String) : [];
   if (!users.length || users.some((u) => !AUDIENCES.includes(u))) throw invalid('choose who the agent affects');
@@ -32,6 +33,8 @@ export async function start(body: Record<string, unknown>, p: Principal): Promis
   const reversibility = String(body.reversibility ?? 'partly');
   if (!REVERSIBILITY.includes(reversibility)) throw invalid('reversibility must be yes, partly or no');
   const agent = await registerAgent({ handle, name, purpose: String(body.purpose ?? ''), sponsor: String(body.sponsor ?? '').trim() || p.id, autonomy_level: 'L2', kind: 'self_hosted', connection_method: 'rest' } as never, p);
+  // From here the agent exists: a later failure sends the admin to its page, where it can be finished.
+  try {
   const lc = await workflow.start(agent, { users_affected: users, data_touched: data, reversibility, decisions_about_individuals: body.decisions_about_individuals === true, individual_domains: [], planned_tools: [] } as never, p);
   await workflow.setManifest(lc.id, {
     models: tenant.settings.catalogue.slice(0, 1).map((m) => ({ model: m.model, region: m.region })),
@@ -41,11 +44,16 @@ export async function start(body: Record<string, unknown>, p: Principal): Promis
   } as never, p);
   await workflow.submitPropose(lc.id, p);
   await workflow.classify(lc.id, p, { confirm: true });
-  return advance(agent.id, lc.id, p);
+  return await advance(agent.id, lc.id, p);
+  } catch (e) {
+    const current = (await workflow.forAgent(agent.id))[0];
+    return { state: 'needs_review', agent_id: agent.id, lifecycle_id: current?.id ?? '', tier: (await getAgent(agent.id)).tier ?? '', reason: `quick connect stopped: ${(e as Error).message}` };
+  }
 }
 
 export async function advance(agentId: string, lifecycleId: string, p: Principal, answers?: Record<string, string>): Promise<QuickConnectResult> {
   const ids = { agent_id: agentId, lifecycle_id: lifecycleId };
+  for (const a of Object.values(answers ?? {})) if (!['yes', 'partial', 'no', 'na'].includes(a)) throw invalid('answers must be yes, partial, no or na');
   const lc = await workflow.get(lifecycleId);
   if (lc.agent_id !== agentId) throw invalid('lifecycle does not belong to this agent');
   const tier = (await getAgent(agentId)).tier ?? '';
@@ -56,7 +64,7 @@ export async function advance(agentId: string, lifecycleId: string, p: Principal
   if (tier === 'T3') {
     const asm = ((await workflow.assessments(lc.id)) as unknown as { type: string; content: { questions: { id: string; text: string }[]; answers: Record<string, { answer: string; note?: string }> } }[]).find((a) => a.type === 'questionnaire')!;
     const merged = Object.fromEntries(Object.entries(asm.content.answers).map(([id, a]) => [id, { ...a, answer: answers?.[id] ?? a.answer }]));
-    const unanswered = asm.content.questions.filter((q) => !['yes', 'no', 'na'].includes(merged[q.id]?.answer ?? ''));
+    const unanswered = asm.content.questions.filter((q) => !['yes', 'partial', 'no', 'na'].includes(merged[q.id]?.answer ?? ''));
     if (unanswered.length) return { state: 'needs_answers', ...ids, tier, questions: unanswered.map((q) => ({ id: q.id, text: q.text })) };
     await workflow.saveAssessment(lc.id, 'questionnaire', { ...asm.content, answers: merged }, true, p);
   }
@@ -73,7 +81,7 @@ export async function advance(agentId: string, lifecycleId: string, p: Principal
     await approvals.decide(after.data.approval_id!, p, { decision: 'approve' });
   }
   const credential = await createDeploymentCredential(agentId, p, envName());
-  return { state: 'connected', ...ids, tier, deployment_credential: credential.deployment_credential, expires_at: credential.expires_at, rollout: (await workflow.get(lc.id)).data.deploy?.mode ?? 'shadow' };
+  return { state: 'connected', ...ids, tier, deployment_credential: credential.deployment_credential, expires_at: credential.expires_at, rollout: (await workflow.get(lc.id)).data.deploy?.mode ?? 'shadow', open_gaps: ((await workflow.gapsOf(lc.id)) as { title: string; status: string }[]).filter((g) => g.status === 'open').map((g) => g.title) };
 }
 
 const HINTS: Record<string, string> = {

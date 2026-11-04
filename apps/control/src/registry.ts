@@ -83,6 +83,9 @@ export interface RegisterInput {
 export async function registerAgent(input: RegisterInput, p: Principal): Promise<AgentRow> {
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(input.handle ?? '') || input.handle.length > 63) throw invalid('handle must be kebab-case, at most 63 characters');
   for (const f of ['name', 'purpose', 'sponsor'] as const) if (typeof input[f] !== 'string' || !input[f].trim()) throw invalid(`${f} must be a non-empty string`);
+  if (input.name.length > 200 || input.sponsor.length > 200) throw invalid('name and sponsor must be at most 200 characters');
+  if (input.purpose.trim().length < 10 || input.purpose.length > 4000) throw invalid('purpose must be 10 to 4000 characters');
+  if (input.team !== undefined && (!Array.isArray(input.team) || input.team.some((m) => typeof m?.user !== 'string' || !m.user.trim() || !['builder', 'operator'].includes(m.role)))) throw invalid('team must be a list of members, each with a user and the role builder or operator');
   if (input.connection_method !== undefined && !['oauth', 'rest', 'bootstrap', 'hybrid'].includes(input.connection_method)) throw invalid('connection_method must be oauth, rest, bootstrap or hybrid');
   const tier: Tier = input.tier ?? 'T3';
   if (!TIERS.includes(tier)) throw invalid('tier must be T1-T4');
@@ -129,6 +132,8 @@ export interface SealInput {
 
 // Seal validation: every check cites the rule it enforces.
 export async function validateSeal(agent: Pick<AgentRow, 'tier'> & { kind?: AgentKind }, input: SealInput) {
+  if (input.models !== undefined && !Array.isArray(input.models)) throw invalid('models must be a list');
+  if (input.tools !== undefined && !Array.isArray(input.tools)) throw invalid('tools must be a list');
   if (agent.kind === 'third_party') {
     // The vendor's model runs outside Signet; a model grant would claim coverage Signet does not have.
     if (input.models?.length) throw new PolicyError('VALIDATION', 'a third-party agent uses its vendor\'s model, which Signet cannot route; list no models, only the company tools it may call');
@@ -182,7 +187,11 @@ export async function validateSeal(agent: Pick<AgentRow, 'tier'> & { kind?: Agen
   }
   const l = input.limits;
   if (!(l?.rpm > 0 && l.tokens_per_day > 0 && l.usd_per_day >= 0)) throw invalid('limits need rpm, tokens_per_day and usd_per_day');
-  if (!input.environments?.length) throw invalid('environments[] is required');
+  if (!Array.isArray(input.environments) || !input.environments.length) throw invalid('environments[] is required');
+  const knownEnvironments = new Set(['dev', 'test', 'staging', 'prod', 'production', process.env.SIGNET_ENV ?? 'dev']);
+  for (const e of input.environments) if (!knownEnvironments.has(e)) throw invalid(`unknown environment ${e}; use one of ${[...knownEnvironments].join(', ')}`);
+  const contradictory = prompt.filter((t) => input.data_classes?.forbidden?.includes(t));
+  if (contradictory.length) throw invalid(`${contradictory.join(', ')} cannot be both allowed and forbidden`);
 }
 
 // Seal signing (BP 4.3, 6 Stage 5). Called only by the lifecycle once the approval matrix is

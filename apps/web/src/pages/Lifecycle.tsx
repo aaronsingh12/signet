@@ -133,7 +133,7 @@ function ManifestForm({ text, onChange }: { text: string; onChange: (text: strin
       <div><div className="label">Daily and per-minute limits</div><div className="grid gap-3 sm:grid-cols-3">{number('rpm', 'Requests per minute')}{number('tokens_per_day', 'Tokens per day')}{number('usd_per_day', 'USD per day')}</div></div>
       <div><div className="label">Data it may send to the model</div>{dataBoxes('prompt')}</div>
       <div><div className="label">Data that must never be sent</div>{dataBoxes('forbidden')}</div>
-      <div><label className="label">Environments (comma-separated)</label><input className="input" value={(m.environments ?? []).join(', ')} onChange={(e) => update((d) => { d.environments = e.target.value.split(',').map((x: string) => x.trim()).filter(Boolean); })} /></div>
+      <div><label className="label" htmlFor="lifecycle-1">Environments (comma-separated)</label><input id="lifecycle-1" className="input" value={(m.environments ?? []).join(', ')} onChange={(e) => update((d) => { d.environments = e.target.value.split(',').map((x: string) => x.trim()).filter(Boolean); })} /></div>
       <div>
         <div className="label">Tools it may call</div>
         {(m.tools ?? []).map((tool: any, ti: number) => (
@@ -252,8 +252,8 @@ function ClassifyStage({ v, onChange }: { v: any; onChange: () => void }) {
         <div className="mt-3 text-sm">Weighted score <b>{score}</b> → <TierChip tier={score >= 4 ? 'T1' : score >= 3 ? 'T2' : score >= 2 ? 'T3' : 'T4'} /> <span className="text-ink-3">(≥4 T1 · ≥3 T2 · ≥2 T3 · else T4; decisions about individuals floor at T2)</span></div>
         {Object.keys(over).some((k) => over[k]) && (
           <div className="mt-3">
-            <label className="label">Reason for the override (ledgered)</label>
-            <input className="input" value={reason} onChange={(e) => setReason(e.target.value)} />
+            <label className="label" htmlFor="lifecycle-2">Reason for the override (ledgered)</label>
+            <input id="lifecycle-2" className="input" value={reason} onChange={(e) => setReason(e.target.value)} />
             <button className="btn-ghost mt-2" disabled={a.busy || !reason.trim()} onClick={() => void a.run(`/lifecycles/${v.lifecycle.id}/classification`, 'POST', { overrides: Object.fromEntries(Object.entries(over).filter(([, x]) => x)), reason })}>Apply override</button>
           </div>
         )}
@@ -303,8 +303,8 @@ function FreeAssessment({ lcId, asm, onChange }: { lcId: string; asm: any; onCha
   const save = (complete: boolean) => void a.run(`/lifecycles/${lcId}/assessments/${asm.type}`, 'PUT', { content: { ...asm.content, summary, findings }, complete });
   return (
     <Card title={<span className="capitalize">{asm.type.replace('_', ' ')} <Pill value={asm.status === 'complete' ? 'allow' : 'require_approval'} label={asm.status} /></span>}>
-      <label className="label">Summary</label>
-      <textarea className="input min-h-20" value={summary} onChange={(e) => setSummary(e.target.value)} />
+      <label className="label" htmlFor="lifecycle-3">Summary</label>
+      <textarea id="lifecycle-3" className="input min-h-20" value={summary} onChange={(e) => setSummary(e.target.value)} />
       <label className="label mt-2">Findings</label>
       <textarea className="input min-h-16" value={findings} onChange={(e) => setFindings(e.target.value)} />
       <div className="mt-3 flex gap-2">
