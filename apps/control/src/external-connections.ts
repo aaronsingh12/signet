@@ -598,7 +598,7 @@ export async function history(id: string, actor: Principal): Promise<{ items: { 
 }
 export async function readAgentOperation(id: string, agentId: string, operation: string, executionId: string | null, actor: Principal): Promise<Json> {
   requireManager(actor);
-  if (!['agent', 'execution', 'logs', 'metrics'].includes(operation)) throw invalid('Unsupported read operation');
+  if (!['agent', 'track', 'executions', 'execution', 'logs', 'metrics'].includes(operation)) throw invalid('Unsupported read operation');
   return exclusive(id, async () => {
     const row = await rowOf(id);
     const mapping = await db.prepare('SELECT external_id FROM external_agent_mapping WHERE connection_id = ? AND agent_id = ?').get(id, agentId) as { external_id: string } | undefined;

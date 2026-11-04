@@ -104,6 +104,13 @@ test('generic REST connects Python, Node and nested provider contracts, gates mu
   const workflow = await import('../src/workflow');
   const discovered = (await engine.inventory(python.id)).items[0]!;
   const discoveredAgent = await getAgent(discovered.agent_id);
+  await engine.update(python.id, { config: { ...python.config, endpoints: { ...python.config.endpoints, track: { method: 'GET', path: '/api/agents' }, executions: { method: 'GET', path: '/api/agents' } } }, credential: '' }, actor);
+  for (const operation of ['track', 'executions']) {
+    const result = await engine.readAgentOperation(python.id, discoveredAgent.id, operation, null, actor) as { agents: { agent_id: string }[] };
+    assert.equal(result.agents[0]!.agent_id, 'python-1');
+    await assert.rejects(engine.readAgentOperation(python.id, discoveredAgent.id, operation, null, viewer), /connectors.manage/);
+    await assert.rejects(engine.readAgentOperation(python.id, 'unmapped-agent', operation, null, actor), /mapping/);
+  }
   const observationManifest = { models: [], tools: [], limits: { rpm: 10, tokens_per_day: 100, usd_per_day: 1 }, environments: ['dev'] };
   const lifecycle = await workflow.currentLifecycle(discoveredAgent.id);
   assert.ok(lifecycle);

@@ -28,6 +28,7 @@ export function RestConnectionWizard(props: Props) {
   const [agents, setAgents] = useState<RestAgent[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const can = useCan();
   useEffect(() => {
     if (!props.connectionId || !can('connectors.manage')) return;
@@ -50,12 +51,12 @@ export function RestConnectionWizard(props: Props) {
     return saved;
   };
   const save = async (): Promise<void> => {
-    setBusy(true); setError(null);
-    try { await persist(); } catch (error) { setError(error as ApiError); } finally { setBusy(false); }
+    setBusy(true); setError(null); setNotice(null);
+    try { await persist(); setNotice('Connection settings saved. Test the connection to verify the API.'); } catch (error) { setError(error as ApiError); } finally { setBusy(false); }
   };
   const connect = async (): Promise<void> => {
     let testedId: string | null = null;
-    setBusy(true); setError(null); setAgents(null);
+    setBusy(true); setError(null); setNotice(null); setAgents(null);
     try {
       const saved = await persist();
       testedId = saved.id;
@@ -87,21 +88,22 @@ export function RestConnectionWizard(props: Props) {
     <p className="mb-4 text-sm text-ink-2">Enter your API address and credentials. Review API settings once to map your provider's endpoints and agent fields, then test and choose agents to onboard.</p>
     <form aria-busy={busy} data-testid="rest-connect-form" className="space-y-4" onSubmit={(event) => { event.preventDefault(); void connect(); }}><fieldset disabled={busy || !can('connectors.manage')} className="space-y-4">
       <fieldset disabled={busy || !can('connectors.manage')} className="grid gap-3 md:grid-cols-2">
-        <label className="label">Base URL<input data-testid="rest-url" className="input" required type="url" placeholder="https://your-platform.com" value={baseUrl} onChange={(event) => { setBaseUrl(event.target.value); setAgents(null); setError(null); }} /></label>
-        {draft.config.auth !== 'none' && <label className="label">API key / secret<input data-testid="rest-secret" className="input" type="password" autoComplete="new-password" required={!connectionId} value={credential} placeholder={connectionId ? 'Leave blank to keep your saved key' : 'Paste your platform API key'} onChange={(event) => { setCredential(event.target.value); setAgents(null); setError(null); }} /></label>}
+        <label className="label">Base URL<input data-testid="rest-url" className="input" required type="url" placeholder="https://your-platform.com" value={baseUrl} onChange={(event) => { setBaseUrl(event.target.value); setAgents(null); setError(null); setNotice(null); }} /></label>
+        {draft.config.auth !== 'none' && <label className="label">API key / secret<input data-testid="rest-secret" className="input" type="password" autoComplete="new-password" required={!connectionId} value={credential} placeholder={connectionId ? 'Leave blank to keep your saved key' : 'Paste your platform API key'} onChange={(event) => { setCredential(event.target.value); setAgents(null); setError(null); setNotice(null); }} /></label>}
       </fieldset>
-      <details className="rounded-lg border border-line p-3"><summary>API settings and endpoint mapping</summary><div className="mt-3"><ExternalConnectionFields draft={{ config: { ...draft.config, base_url: baseUrl }, credential }} onChange={(next) => { setDraft(next); setBaseUrl(next.config.base_url); setCredential(next.credential); setHealth(null); setAgents(null); }} /></div></details>
-      <div className="flex flex-wrap gap-3"><button type="button" data-testid="rest-save" className="btn" disabled={busy || !can('connectors.manage')} onClick={() => void save()}>Save connection / mappings</button><button data-testid="rest-connect" disabled={busy || !can('connectors.manage')} className="btn-primary">{busy ? 'Please wait...' : agents === null ? 'Test connection & find agents' : 'Test & refresh agents'}</button><button type="button" data-testid="rest-close" disabled={busy} className="btn-ghost" onClick={() => { if (connectionId) props.onSaved(); else props.onCancel(); }}>Close</button></div>
+      <details className="rounded-lg border border-line p-3"><summary>API settings and endpoint mapping</summary><div className="mt-3"><ExternalConnectionFields draft={{ config: { ...draft.config, base_url: baseUrl }, credential }} onChange={(next) => { setDraft(next); setBaseUrl(next.config.base_url); setCredential(next.credential); setHealth(null); setAgents(null); setNotice(null); }} /></div></details>
+      <div className="flex flex-wrap gap-3"><button type="button" data-testid="rest-save" className="btn-ghost" disabled={busy || !can('connectors.manage')} onClick={() => void save()}>Save connection / mappings</button><button data-testid="rest-connect" disabled={busy || !can('connectors.manage')} className="btn-primary">{busy ? 'Please wait...' : agents === null ? 'Test connection & find agents' : 'Test & refresh agents'}</button><button type="button" data-testid="rest-close" disabled={busy} className="btn-ghost" onClick={() => { if (connectionId) props.onSaved(); else props.onCancel(); }}>Close</button></div>
     </fieldset></form>
-    <div role="status" aria-live="polite" className="mt-3 text-sm">{busy ? 'Testing or updating connection...' : health ? <span>{health.reachable ? 'Reachable' : 'Reachability unverified'} ? {health.authentication === 'valid' ? 'Configured credentials accepted' : health.authentication === 'not_required' ? 'No authentication configured' : 'Authentication unverified'} ? {health.endpoint_verified ? 'Test endpoint verified' : 'Test endpoint unverified'} ? Last tested: {health.last_tested_at ?? 'Never'}</span> : 'Save and test your API configuration.'}</div>
+    <div role="status" aria-live="polite" className="mt-4 space-y-2 text-sm">{busy ? <p>Updating connection. Please wait...</p> : health ? <><div className="flex flex-wrap gap-2"><span className="rounded-full border border-line px-3 py-1">{health.reachable === true ? 'Reachable' : health.reachable === false ? 'Unreachable' : 'Reachability unverified'}</span><span className={`rounded-full border border-line px-3 py-1 ${health.authentication === 'invalid' ? 'text-bad' : health.authentication === 'unverified' ? 'text-warn' : 'text-ok'}`}>{health.authentication === 'valid' ? 'Authentication verified' : health.authentication === 'invalid' ? 'Authentication failed' : health.authentication === 'not_required' ? 'Authentication not required' : 'Authentication unverified'}</span><span className="rounded-full border border-line px-3 py-1">{health.endpoint_verified ? 'Test endpoint verified' : 'Test endpoint unverified'}</span></div><p className="text-xs text-ink-3">Last tested: {health.last_tested_at ? new Date(health.last_tested_at).toLocaleString() : 'Never'}</p></> : <p className="text-ink-3">Save and test your API configuration.</p>}</div>
     {health?.endpoint_verified && !draft.config.agents_mapping && <p className="mt-2 text-sm text-ink-3">Connection test passed. Configure the discovery endpoint and agent response mapping to find agents.</p>}
     <ErrorNote error={error} />
+    {notice && <p role="status" className="mt-3 rounded-lg border border-line bg-ok-50 px-3 py-2 text-sm text-ok">{notice}</p>}
     {agents !== null && <section data-testid="rest-agent-list" className="mt-6 space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold">Agents from your API ({agents.length})</h3><span className="text-sm text-ok">{health?.authentication === 'valid' || health?.authentication === 'not_required' ? 'API connected' : 'Endpoint responded; authentication unverified'}</span></div>
+      <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold">Agents from your API ({agents.length})</h3><span className={`text-sm ${health?.authentication === 'unverified' ? 'text-warn' : 'text-ok'}`}>{health?.authentication === 'valid' || health?.authentication === 'not_required' ? 'API connected' : 'Endpoint responded; authentication unverified'}</span></div>
       {!agents.length && <p className="rounded-lg bg-canvas p-4 text-sm">Your API returned no agents. Add agents on your platform, then refresh this list.</p>}
       <ul className="space-y-3">{agents.map((agent) => <li key={agent.id} data-testid={`rest-agent-${agent.id}`} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line p-4">
-        <div><p className="font-semibold">{agent.name}</p><p className="text-xs text-ink-3">{agent.status ?? 'Available'} · {agent.agent_id ? 'Onboarding started' : 'Not onboarded'}</p></div>
-        {agent.agent_id ? <Link data-testid={`rest-onboarded-${agent.id}`} className="btn" to={`/agents/${agent.agent_id}?tab=lifecycle`}>Continue approval</Link> : <button data-testid={`rest-onboard-${agent.id}`} disabled={busy || !can('discovery.write')} className="btn-primary" onClick={() => void onboard(agent.id)}>Onboard</button>}
+        <div><p className="font-semibold">{agent.name}</p><p className="text-xs text-ink-3">{agent.status ?? 'Available'} · {agent.agent_id ? 'Registered in Signet' : 'Not onboarded'}</p></div>
+        {agent.agent_id ? <Link data-testid={`rest-onboarded-${agent.id}`} className="btn-ghost" to={`/agents/${agent.agent_id}?tab=lifecycle`}>View agent</Link> : <button data-testid={`rest-onboard-${agent.id}`} disabled={busy || !can('discovery.write')} className="btn-primary" onClick={() => void onboard(agent.id)}>Onboard</button>}
       </li>)}</ul>
       <p className="text-xs text-ink-3">Onboard starts Signet's approval process for that agent. Connecting this API does not route its model calls through the Gateway.</p>
     </section>}
