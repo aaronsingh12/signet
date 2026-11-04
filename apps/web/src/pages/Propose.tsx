@@ -91,19 +91,34 @@ export function Propose() {
       setBusy(false);
     }
   };
-  const gate: [string, boolean][] = [
-    ['Owner named (you)', true],
-    ['Sponsor named', !!f.sponsor],
-    ['Purpose complete', f.purpose.length >= 10],
-    ['Autonomy level set', !!f.autonomy_level],
-    ['Who it affects', intake.users_affected.length > 0],
-    ['Handle is kebab-case', /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(f.handle)],
-    ...(kind === 'third_party' ? [['Vendor named', !!rt.vendor.trim()] as [string, boolean]] : []),
+  // One source of truth: the checklist shows these and the Continue and Register buttons obey them.
+  const outbound = direction === 'outbound' && (method === 'rest' || method === 'oauth');
+  const checklist: { label: string; items: [string, boolean][] }[] = [
+    { label: 'Connection', items: [
+      [`Connection method: ${CONNECTION_METHODS.find((item) => item.id === method)?.label}`, true],
+      [`Agent type: ${KINDS.find(([value]) => value === kind)?.[1]}`, true],
+      ...(kind === 'third_party' ? [['Vendor named', !!rt.vendor.trim()] as [string, boolean]] : []),
+      ...(outbound ? [['External connection name and URL', !!connectionDraft.config.name.trim() && !!connectionDraft.config.base_url.trim()] as [string, boolean]] : []),
+    ] },
+    { label: 'Agent details', items: [
+      ['Agent name', !!f.name.trim()],
+      ['Handle is valid', /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(f.handle) && f.handle.length <= 63],
+      ['Owner named (you)', true],
+      ['Sponsor named', !!f.sponsor.trim()],
+      ['Purpose complete (10+ characters)', f.purpose.trim().length >= 10],
+      [`Autonomy level: ${f.autonomy_level}`, !!f.autonomy_level],
+    ] },
+    { label: 'Permissions & review', items: [
+      ['Who it affects', intake.users_affected.length > 0],
+      ...(intake.decisions_about_individuals ? [['Decision areas chosen', intake.individual_domains.length > 0] as [string, boolean]] : []),
+    ] },
   ];
+  const stepDone = checklist.map((s) => s.items.every(([, ok]) => ok));
+  const stillNeeded = checklist[step]!.items.filter(([, ok]) => !ok).map(([label]) => label);
   return (
     <>
       <PageHeader title="Connect an AI agent" subtitle="Choose a connection, add your agent's details, then review its permissions. Credentials become available after approval." actions={<Link data-testid="quick-connect-link" className="btn-primary" to="/agents/quick">Quick connect</Link>} />
-      <ol className="mb-4 grid grid-cols-3 gap-3" aria-label="Add agent progress">{['Connection', 'Agent details', 'Permissions & review'].map((label, index) => <li key={label} aria-current={step === index ? 'step' : undefined} className={`rounded-lg border p-3 text-sm ${step === index ? 'border-royal bg-royal-50 text-royal' : 'border-line bg-white text-ink-3'}`}><span className="mr-2 font-semibold">{index + 1}</span>{label}</li>)}</ol>
+      <ol className="mb-4 grid grid-cols-3 gap-3" aria-label="Add agent progress">{checklist.map(({ label }, index) => <li key={label} aria-current={step === index ? 'step' : undefined} className={`rounded-lg border p-3 text-sm ${step === index ? 'border-royal bg-royal-50 text-royal' : 'border-line bg-white text-ink-3'}`}><span className="mr-2 font-semibold">{index < step && stepDone[index] ? '✓' : index + 1}</span>{label}</li>)}</ol>
       <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
         <div className="space-y-4">
           {step === 0 && <>
@@ -114,22 +129,22 @@ export function Propose() {
           {method === 'bootstrap' && <Card title="Workload identity setup"><p className="text-sm text-ink-2">Register this agent, complete classification and approval, then generate a one-time bootstrap credential in its Connection tab. Token exchange and accepted Gateway calls have separate status indicators. SDK, sidecar and HTTP setup use your configured Signet URLs.</p></Card>}
           {method === 'hybrid' && <Card title="Private network setup"><p className="text-sm text-ink-2">Enroll an outbound connector runner in Connectors or the agent's Connection tab, register approved private HTTP tools, and add those actions to the agent's approval manifest. Credentials remain on the runner. Private MCP transport and full local DLP are not supported by this runner.</p></Card>}
           <Card title="Agent type (optional for REST)">
-            <select data-testid="agent-kind" aria-label="Agent hosting" className="input" value={kind} onChange={(event) => { setKind(event.target.value); if (event.target.value === 'third_party') setMethod('oauth'); }}>{KINDS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
+            <select data-testid="agent-kind" aria-label="Agent hosting" className="input" value={kind} onChange={(event) => { const next = event.target.value; if (next === 'third_party') setMethod('oauth'); else if (kind === 'third_party') setMethod('rest'); setKind(next); }}>{KINDS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
             <p className="mt-2 text-xs text-ink-3">{KINDS.find(([value]) => value === kind)?.[2]}</p>
             {kind === 'third_party' ? (
               <div className="mt-4 grid gap-3 md:grid-cols-2">
-                <div><label className="label">Vendor</label><input className="input" value={rt.vendor} onChange={(e) => setRt({ ...rt, vendor: e.target.value })} placeholder="Microsoft Copilot Studio" /></div>
-                <div><label className="label">Contract or agreement</label><input className="input" value={rt.contract} onChange={(e) => setRt({ ...rt, contract: e.target.value })} placeholder="MSA-2026-114" /></div>
-                <div><label className="label">Vendor contact</label><input className="input" value={rt.vendor_contact} onChange={(e) => setRt({ ...rt, vendor_contact: e.target.value })} /></div>
-                <div><label className="label">Data residency</label><input className="input" value={rt.data_residency} onChange={(e) => setRt({ ...rt, data_residency: e.target.value })} placeholder="EU" /></div>
-                <div className="md:col-span-2"><label className="label">Documentation (security whitepaper, DPA link)</label><input className="input" value={rt.documentation} onChange={(e) => setRt({ ...rt, documentation: e.target.value })} /></div>
+                <div><label className="label" htmlFor="propose-1">Vendor</label><input id="propose-1" className="input" value={rt.vendor} onChange={(e) => setRt({ ...rt, vendor: e.target.value })} placeholder="Microsoft Copilot Studio" /></div>
+                <div><label className="label" htmlFor="propose-2">Contract or agreement</label><input id="propose-2" className="input" value={rt.contract} onChange={(e) => setRt({ ...rt, contract: e.target.value })} placeholder="MSA-2026-114" /></div>
+                <div><label className="label" htmlFor="propose-3">Vendor contact</label><input id="propose-3" className="input" value={rt.vendor_contact} onChange={(e) => setRt({ ...rt, vendor_contact: e.target.value })} /></div>
+                <div><label className="label" htmlFor="propose-4">Data residency</label><input id="propose-4" className="input" value={rt.data_residency} onChange={(e) => setRt({ ...rt, data_residency: e.target.value })} placeholder="EU" /></div>
+                <div className="md:col-span-2"><label className="label" htmlFor="propose-5">Documentation (security whitepaper, DPA link)</label><input id="propose-5" className="input" value={rt.documentation} onChange={(e) => setRt({ ...rt, documentation: e.target.value })} /></div>
                 <p className="text-xs text-ink-3 md:col-span-2">The vendor's model runs outside Signet and is not intercepted. Signet governs the company tools this agent may call, through the gateway, with OAuth client credentials.</p>
               </div>
             ) : (
               <details className="mt-4"><summary className="cursor-pointer text-sm text-ink-2">Runtime and framework (optional)</summary><div className="mt-3 grid gap-3 md:grid-cols-3">
-                <div><label className="label">Runtime</label><input className="input" list="runtimes" value={rt.runtime} onChange={(e) => setRt({ ...rt, runtime: e.target.value })} placeholder="runpod" /></div>
-                <div><label className="label">Framework</label><input className="input" list="frameworks" value={rt.framework} onChange={(e) => setRt({ ...rt, framework: e.target.value })} placeholder="langchain" /></div>
-                <div><label className="label">Built against (model provider)</label><input className="input" value={rt.model_provider} onChange={(e) => setRt({ ...rt, model_provider: e.target.value })} placeholder="openai-compatible" /></div>
+                <div><label className="label" htmlFor="propose-6">Runtime</label><input id="propose-6" className="input" list="runtimes" value={rt.runtime} onChange={(e) => setRt({ ...rt, runtime: e.target.value })} placeholder="runpod" /></div>
+                <div><label className="label" htmlFor="propose-7">Framework</label><input id="propose-7" className="input" list="frameworks" value={rt.framework} onChange={(e) => setRt({ ...rt, framework: e.target.value })} placeholder="langchain" /></div>
+                <div><label className="label" htmlFor="propose-8">Built against (model provider)</label><input id="propose-8" className="input" value={rt.model_provider} onChange={(e) => setRt({ ...rt, model_provider: e.target.value })} placeholder="openai-compatible" /></div>
                 <datalist id="runtimes">{['runpod', 'aws_ec2', 'aws_ecs', 'docker', 'kubernetes', 'on_prem', 'azure_vm', 'gcp_vm'].map((x) => <option key={x} value={x} />)}</datalist>
                 <datalist id="frameworks">{['custom-python', 'langchain', 'langgraph', 'crewai', 'autogen', 'llamaindex', 'n8n', 'flowise', 'dify', 'custom-node'].map((x) => <option key={x} value={x} />)}</datalist>
                 <p className="text-xs text-ink-3 md:col-span-3">Its model calls will go to the tenant's one cloud LLM through the gateway, whatever it was built against.</p>
@@ -152,28 +167,28 @@ export function Propose() {
           <Card title="Purpose, owners, autonomy">
             <div className="grid gap-4 md:grid-cols-2">
               <div>
-                <label className="label">Agent name</label>
-                <input data-testid="agent-name" className="input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value, handle: f.handle === handleOf(f.name) ? handleOf(e.target.value) : f.handle })} placeholder="Refund Concierge" />
+                <label className="label" htmlFor="propose-9">Agent name</label>
+                <input id="propose-9" data-testid="agent-name" className="input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value, handle: f.handle === handleOf(f.name) ? handleOf(e.target.value) : f.handle })} placeholder="Refund Concierge" />
               </div>
               <div>
-                <label className="label">Handle (kebab-case, unique)</label>
-                <input data-testid="agent-handle" className="input mono" value={f.handle} onChange={set('handle')} placeholder="Generated from the agent name" />
+                <label className="label" htmlFor="propose-10">Handle (kebab-case, unique)</label>
+                <input id="propose-10" data-testid="agent-handle" className="input mono" value={f.handle} onChange={set('handle')} placeholder="Generated from the agent name" />
               </div>
               <div className="md:col-span-2">
-                <label className="label">Business purpose</label>
-                <textarea data-testid="agent-purpose" className="input min-h-20" value={f.purpose} onChange={set('purpose')} placeholder="What the agent does, for whom, and why (at least 10 characters)" />
+                <label className="label" htmlFor="propose-11">Business purpose</label>
+                <textarea id="propose-11" data-testid="agent-purpose" className="input min-h-20" value={f.purpose} onChange={set('purpose')} placeholder="What the agent does, for whom, and why (at least 10 characters)" />
               </div>
               <div>
-                <label className="label">Accountable owner</label>
-                <input className="input" value={me.principal.id} disabled />
+                <label className="label" htmlFor="propose-12">Accountable owner</label>
+                <input id="propose-12" className="input" value={me.principal.id} disabled />
               </div>
               <div>
-                <label className="label">Sponsor</label>
-                <input data-testid="agent-sponsor" className="input" value={f.sponsor} onChange={set('sponsor')} placeholder="Business sponsor's identity" />
+                <label className="label" htmlFor="propose-13">Sponsor</label>
+                <input id="propose-13" data-testid="agent-sponsor" className="input" value={f.sponsor} onChange={set('sponsor')} placeholder="Business sponsor's identity" />
               </div>
               <div className="md:col-span-2">
-                <label className="label">Build team (comma-separated emails; independent approval requires a reviewer or administrator)</label>
-                <input className="input" value={f.team} onChange={set('team')} placeholder="arjun.mehta@northwind.example" />
+                <label className="label" htmlFor="propose-14">Build team (comma-separated emails; independent approval requires a reviewer or administrator)</label>
+                <input id="propose-14" className="input" value={f.team} onChange={set('team')} placeholder="arjun.mehta@northwind.example" />
               </div>
             </div>
             <div className="mt-5">
@@ -200,8 +215,8 @@ export function Propose() {
                 </div>
               </div>
               <div>
-                <label className="label">Can its actions be undone?</label>
-                <select className="input" value={intake.reversibility} onChange={(e) => setIntake({ ...intake, reversibility: e.target.value })}>
+                <label className="label" htmlFor="propose-15">Can its actions be undone?</label>
+                <select id="propose-15" className="input" value={intake.reversibility} onChange={(e) => setIntake({ ...intake, reversibility: e.target.value })}>
                   <option value="yes">Yes, fully</option><option value="partly">Partly</option><option value="no">No</option>
                 </select>
               </div>
@@ -220,31 +235,39 @@ export function Propose() {
                 )}
               </div>
               <div className="md:col-span-2">
-                <label className="label">Planned tools and actions (comma-separated)</label>
-                <input className="input" value={intake.planned_tools} onChange={(e) => setIntake({ ...intake, planned_tools: e.target.value })} placeholder="lookup_order (read), issue_refund (privileged)" />
+                <label className="label" htmlFor="propose-16">Planned tools and actions (comma-separated)</label>
+                <input id="propose-16" className="input" value={intake.planned_tools} onChange={(e) => setIntake({ ...intake, planned_tools: e.target.value })} placeholder="lookup_order (read), issue_refund (privileged)" />
               </div>
               <div className="md:col-span-2">
-                <label className="label">Business value</label>
-                <input className="input" value={intake.business_value} onChange={(e) => setIntake({ ...intake, business_value: e.target.value })} />
+                <label className="label" htmlFor="propose-17">Business value</label>
+                <input id="propose-17" className="input" value={intake.business_value} onChange={(e) => setIntake({ ...intake, business_value: e.target.value })} />
               </div>
             </div>
           </Card>
           </>}
           <div className="flex items-center gap-3">
             <button data-testid="agent-back" className="btn" disabled={step === 0 || busy} onClick={() => setStep(step - 1)}>Back</button>
-            {step < 2 ? <button data-testid="agent-next" className="btn-primary" disabled={step === 0 ? kind === 'third_party' && !rt.vendor.trim() : !f.name.trim() || !f.sponsor.trim() || f.purpose.trim().length < 10 || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(f.handle) || f.handle.length > 63} onClick={() => setStep(step + 1)}>Continue</button> : <button data-testid="agent-create" className="btn-primary" disabled={busy || gate.some(([, ok]) => !ok) || (intake.decisions_about_individuals && !intake.individual_domains.length)} onClick={() => void submit()}>{busy ? 'Registering…' : 'Register agent'}</button>}
+            {step < 2 ? <button data-testid="agent-next" className="btn-primary" disabled={!stepDone[step]} onClick={() => setStep(step + 1)}>Continue</button> : <button data-testid="agent-create" className="btn-primary" disabled={busy || !stepDone.every(Boolean)} onClick={() => void submit()}>{busy ? 'Registering…' : 'Register agent'}</button>}
+            {stillNeeded.length > 0 && <span data-testid="still-needed" className="text-xs text-ink-3">Still needed: {stillNeeded.join(', ')}</span>}
             <ErrorNote error={error} />
           </div>
         </div>
         <Card title="Registration checklist" className="h-fit">
-          <ul className="space-y-2 text-sm">
-            {gate.map(([l, ok]) => (
-              <li key={l} className="flex items-center gap-2">
-                <span className={`flex h-4 w-4 items-center justify-center rounded-full text-[10px] text-white ${ok ? 'bg-ok' : 'bg-slate-300'}`}>✓</span>
-                {l}
-              </li>
+          <div className="space-y-4" data-testid="registration-checklist">
+            {checklist.map(({ label, items }, index) => (
+              <div key={label} aria-current={step === index ? 'step' : undefined} className={step === index ? '' : 'opacity-60'}>
+                <div className={`mb-1.5 flex items-center justify-between text-xs font-semibold ${step === index ? 'text-royal' : 'text-ink-3'}`}><span>{index + 1}. {label}</span><span>{items.filter(([, ok]) => ok).length}/{items.length}</span></div>
+                <ul className="space-y-2 text-sm">
+                  {items.map(([l, ok]) => (
+                    <li key={l} className="flex items-center gap-2">
+                      <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[10px] text-white ${ok ? 'bg-ok' : 'bg-slate-300'}`}>✓</span>
+                      {l}
+                    </li>
+                  ))}
+                </ul>
+              </div>
             ))}
-          </ul>
+          </div>
           <p className="mt-4 text-xs text-ink-3">{me.single_operator ? 'You are the only administrator: T4 needs no signature, and for T3 to T1 your one approval fills every slot and is recorded as one person approving. Higher tiers still need their assessments and test evidence.' : 'Approval routing: T4 needs no manual signature; T3 needs Owner + Security; T2 also needs Risk; T1 also needs two Governance Board members. An administrator can approve the certificate directly after lifecycle checks. Open My Approvals when the request is ready.'}</p>
         </Card>
       </div>

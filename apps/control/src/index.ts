@@ -206,7 +206,9 @@ api.get('/agents', requires('agents.read'), route(async (req) => {
 // Stage 1 Propose: the agent gets its permanent ID and a lifecycle (BP 6).
 api.post('/agents', requires('agents.write'), route(async (req, res) => {
   const p = principalOf(res);
-  const agent = (await registry.registerAgent(req.body, p));
+  // A person's agent gets its tier from classification, never from the request.
+  const { tier, ...requested } = (req.body ?? {}) as Record<string, unknown>;
+  const agent = (await registry.registerAgent((p.kind === 'human' ? requested : req.body) as never, p));
   const lc = (await workflow.start(agent, req.body?.intake ?? { template: req.body?.template }, p));
   return [201, { ...agent, lifecycle_id: lc.id }];
 }));

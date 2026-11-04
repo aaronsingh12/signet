@@ -36,6 +36,9 @@ test('out-of-manifest attempts accumulate and erasing the agent clears its count
 });
 
 test('failed sign-ins lock out an address after ten attempts, other addresses keep working', async () => {
+  // Failures count within a fixed 15-minute window; don't let this test straddle two of them.
+  const leftInWindow = 900_000 - (Date.now() % 900_000);
+  if (leftInWindow < 60_000) await new Promise((resolve) => setTimeout(resolve, leftInWindow + 100));
   for (let i = 0; i < 10; i++) {
     await counters.assertLoginAllowed('203.0.113.7', 'admin');
     await counters.recordLoginFailure('203.0.113.7', 'admin');

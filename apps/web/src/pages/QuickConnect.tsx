@@ -5,7 +5,7 @@ import { ApiError, api, useApi } from '../lib/api';
 import { useMe } from '../lib/auth';
 
 type Result =
-  | { state: 'connected'; agent_id: string; lifecycle_id: string; tier: string; deployment_credential: string; expires_at: string; rollout: string }
+  | { state: 'connected'; agent_id: string; lifecycle_id: string; tier: string; deployment_credential: string; expires_at: string; rollout: string; open_gaps: string[] }
   | { state: 'needs_answers'; agent_id: string; lifecycle_id: string; tier: string; questions: { id: string; text: string }[] }
   | { state: 'needs_review' | 'awaiting_approval'; agent_id: string; lifecycle_id: string; tier: string; reason: string };
 type TestResult = { ok: boolean; status: number; reply?: string; code?: string; message?: string; hint?: string; record_id?: string };
@@ -44,11 +44,11 @@ export function QuickConnect() {
         {!result && (
           <Card title="About your agent">
             <div className="space-y-4">
-              <div><label className="label">Agent name</label><input data-testid="quick-name" className="input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="FAQ Bot" /></div>
-              <div><label className="label">What does it do?</label><textarea data-testid="quick-purpose" className="input min-h-20" value={f.purpose} onChange={(e) => setF({ ...f, purpose: e.target.value })} placeholder="What the agent does, for whom, and why (at least 10 characters)" /></div>
+              <div><label className="label" htmlFor="quick-1">Agent name</label><input id="quick-1" data-testid="quick-name" className="input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="FAQ Bot" /></div>
+              <div><label className="label" htmlFor="quick-2">What does it do?</label><textarea id="quick-2" data-testid="quick-purpose" className="input min-h-20" value={f.purpose} onChange={(e) => setF({ ...f, purpose: e.target.value })} placeholder="What the agent does, for whom, and why (at least 10 characters)" /></div>
               <div><label className="label">Who does it affect?</label><div className="flex flex-wrap gap-3 text-sm">{USERS.map(([v, l]) => <label key={v} className="flex items-center gap-1.5"><input data-testid={`quick-audience-${v}`} type="checkbox" checked={f.users_affected.includes(v!)} onChange={() => setF({ ...f, users_affected: toggle(f.users_affected, v!) })} /> {l}</label>)}</div></div>
               <div><label className="label">What data does it see? (leave empty if none of these)</label><div className="flex flex-wrap gap-3 text-sm">{DATA.map(([v, l]) => <label key={v} className="flex items-center gap-1.5"><input type="checkbox" checked={f.data_touched.includes(v!)} onChange={() => setF({ ...f, data_touched: toggle(f.data_touched, v!) })} /> {l}</label>)}</div></div>
-              <div><label className="label">Can its actions be undone?</label><select data-testid="quick-reversibility" className="input" value={f.reversibility} onChange={(e) => setF({ ...f, reversibility: e.target.value })}><option value="yes">Yes, fully</option><option value="partly">Partly</option><option value="no">No</option></select></div>
+              <div><label className="label" htmlFor="quick-3">Can its actions be undone?</label><select id="quick-3" data-testid="quick-reversibility" className="input" value={f.reversibility} onChange={(e) => setF({ ...f, reversibility: e.target.value })}><option value="yes">Yes, fully</option><option value="partly">Partly</option><option value="no">No</option></select></div>
               <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.decisions_about_individuals} onChange={(e) => setF({ ...f, decisions_about_individuals: e.target.checked })} /> It makes or shapes decisions about individual people</label>
               <p className="text-xs text-ink-3">{me.single_operator ? 'You are the only administrator, so continuing also records your approval in the ledger, marked as one person approving.' : 'Approvers are asked in My Approvals when the risk level needs them.'}</p>
               <button data-testid="quick-submit" className="btn-primary" disabled={!ready || busy} onClick={() => void run(() => api<Result>('/agents/quick-connect', { method: 'POST', body: f }))}>{busy ? 'Connecting…' : 'Continue'}</button>
@@ -57,12 +57,12 @@ export function QuickConnect() {
         )}
         {result?.state === 'needs_answers' && (
           <Card title={<span className="flex items-center gap-2">A few checks for this risk level <TierChip tier={result.tier} /></span>}>
-            <p className="mb-3 text-sm text-ink-2">Answer honestly. A "No" records a gap and sends the agent to the full review, so nothing gets approved by accident.</p>
+            <p className="mb-3 text-sm text-ink-2">Answer honestly. "No" or "Partly" records a gap. A high or critical gap sends the agent to the full review with no key; a lower one is recorded for you to close later.</p>
             <div className="space-y-3">
               {result.questions.map((q) => (
                 <div key={q.id} className="grid items-center gap-2 sm:grid-cols-[1fr_8rem]">
                   <span className="text-sm">{q.text}</span>
-                  <select data-testid={`quick-answer-${q.id}`} aria-label={q.text} className="input" value={answers[q.id] ?? ''} onChange={(e) => setAnswers({ ...answers, [q.id]: e.target.value })}><option value="">Choose</option><option value="yes">Yes</option><option value="no">No</option><option value="na">Not applicable</option></select>
+                  <select data-testid={`quick-answer-${q.id}`} aria-label={q.text} className="input" value={answers[q.id] ?? ''} onChange={(e) => setAnswers({ ...answers, [q.id]: e.target.value })}><option value="">Choose</option><option value="yes">Yes</option><option value="partial">Partly</option><option value="no">No</option><option value="na">Not applicable</option></select>
                 </div>
               ))}
             </div>
@@ -72,7 +72,7 @@ export function QuickConnect() {
         {(result?.state === 'needs_review' || result?.state === 'awaiting_approval') && (
           <Card title={<span className="flex items-center gap-2">{result.state === 'awaiting_approval' ? 'Waiting for approval' : 'This agent needs the full review'} <TierChip tier={result.tier} /></span>}>
             <p className="text-sm text-ink-2">{result.reason}. The agent is registered and no key has been issued.</p>
-            <Link className="btn-primary mt-3 inline-block" to={`/agents/${result.agent_id}`}>Continue on the agent page</Link>
+            <Link data-testid="quick-agent-link" className="btn-primary mt-3 inline-block" to={`/agents/${result.agent_id}`}>Continue on the agent page</Link>
           </Card>
         )}
         <ErrorNote error={error} />
@@ -117,6 +117,11 @@ function Connected({ r }: { r: Extract<Result, { state: 'connected' }> }) {
           {test && !test.ok && <div data-testid="quick-test-result" className="mt-3 text-sm"><p className="text-bad">Failed ({test.code}): {test.message}</p><p className="mt-1 text-ink-2">{test.hint}</p></div>}
           <div className="mt-2"><ErrorNote error={testError} /></div>
         </Card>
+        {r.open_gaps.length > 0 && (
+          <Card title="Gaps to close">
+            <ul className="list-disc pl-5 text-sm text-ink-2">{r.open_gaps.map((g) => <li key={g}>{g}</li>)}</ul>
+          </Card>
+        )}
         {r.rollout === 'shadow' && (
           <Card title="Your agent starts in shadow mode">
             <p className="text-sm text-ink-2">Limits and key checks apply now. Policy findings are recorded as "would block" without stopping requests, so you can see the effect first. Move it to enforcing on the agent page.</p>

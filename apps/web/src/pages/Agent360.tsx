@@ -20,7 +20,7 @@ export function Agent360() {
   useEffect(() => { setTab(params.get('tab') ?? 'overview'); }, [params]);
   const [ladder, setLadder] = useState<Ladder | null>(null);
   if (error) return <ErrorNote error={error} />;
-  if (!data) return null;
+  if (!data) return <p className="py-10 text-center text-sm text-ink-3" role="status">Loading agent…</p>;
   const { agent, certificate: cert, enforcement } = data;
   const own = agent.owner === me.principal.id;
   const ladderAllowed = (a: Ladder) => can(`ladder.${a}`) && (own || !me.principal.roles.every((r) => r === 'agent_owner'));
@@ -38,8 +38,8 @@ export function Agent360() {
           <span className="flex flex-wrap items-center gap-2">
             {cert ? <Pill value="sealed" label={`Approved until ${date(cert.valid_to)}`} /> : <Pill value={agent.status} />}
             <Pill value={enforcement.level} label={enforcement.level === 'active' ? 'Safety checks active' : LEVEL_LABEL[enforcement.level] ?? enforcement.level} />
-            <TierChip tier={agent.tier} />
-            <ConnectionPill state={data.connection.state} />
+            {cert || data.lifecycle?.classification?.confirmed_by ? <TierChip tier={agent.tier} /> : <Pill value="neutral" label="Risk not classified yet" />}
+            {cert && <ConnectionPill state={data.connection.state} />}
             <span className="text-xs text-ink-3">{agent.purpose}</span>
           </span>
         }

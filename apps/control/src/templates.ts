@@ -81,7 +81,7 @@ export function manifestFrom(t: Template | null) {
     data_classes: { prompt: t?.prompt_tags ?? [], forbidden: t?.forbidden_tags ?? ['payment_card', 'special_category'] },
     hitl: [],
     limits: t?.limits ?? { rpm: 60, tokens_per_day: 500_000, usd_per_day: 50, tool_calls_per_session: 40 },
-    environments: ['dev'],
+    environments: [process.env.SIGNET_ENV ?? 'dev'],
     tags: [],
   };
 }
