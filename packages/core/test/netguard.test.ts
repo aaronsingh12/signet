@@ -1,7 +1,9 @@
 import { strict as assert } from 'node:assert';
+import dns from 'node:dns';
+import { syncBuiltinESMExports } from 'node:module';
 import { createServer } from 'node:http';
 import { test } from 'node:test';
-import { DestinationBlocked, addressAllowed, checkDestination, classifyAddress, request } from '../src/index';
+import { DestinationBlocked, addressAllowed, checkDestination, classifyAddress, guardedLookup, request } from '../src/index';
 
 test('address classes: metadata and link-local are never reachable; private only when allowed', () => {
   assert.equal(classifyAddress('169.254.169.254'), 'link_local');
@@ -40,4 +42,17 @@ test('guarded requests check the address actually dialled', async () => {
   } finally {
     srv.close();
   }
+});
+
+
+test('DNS rebinding is checked at socket lookup even after a public registration lookup', async (context) => {
+  let lookups = 0;
+  context.mock.method(dns, 'lookup', ((_host: string, _options: object, callback: (error: Error | null, addresses: { address: string; family: number }[]) => void) => callback(null, [{ address: ++lookups === 1 ? '93.184.216.34' : '127.0.0.1', family: 4 }])) as typeof dns.lookup);
+  syncBuiltinESMExports();
+  context.after(() => { context.mock.restoreAll(); syncBuiltinESMExports(); });
+  await checkDestination('https://rebind.example/', { allowPrivate: false });
+  await assert.rejects(new Promise<void>((resolve, reject) => guardedLookup({ allowPrivate: false })('rebind.example', {}, (error) => error ? reject(error) : resolve())), DestinationBlocked);
+  assert.equal(lookups, 2);
+  assert.equal(classifyAddress('198.18.0.1'), 'reserved');
+  assert.equal(classifyAddress('2001:db8::1'), 'reserved');
 });

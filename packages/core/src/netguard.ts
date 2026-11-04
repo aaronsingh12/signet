@@ -23,10 +23,11 @@ export function classifyAddress(ip: string): AddressClass {
     a = `${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`;
   }
   if (isIP(a) === 4) {
-    const [o1, o2] = v4(a) as [number, number];
+    const [o1, o2, o3] = v4(a) as [number, number, number];
     if (o1 === 0) return 'unspecified';
     if (o1 === 127) return 'loopback';
     if (o1 === 10 || (o1 === 172 && o2 >= 16 && o2 <= 31) || (o1 === 192 && o2 === 168) || (o1 === 100 && o2 >= 64 && o2 <= 127)) return 'private';
+    if ((o1 === 192 && o2 === 0 && [0, 2].includes(o3)) || (o1 === 198 && ([18, 19].includes(o2) || (o2 === 51 && o3 === 100))) || (o1 === 203 && o2 === 0 && o3 === 113)) return 'reserved';
     if (o1 === 169 && o2 === 254) return 'link_local'; // includes 169.254.169.254, the cloud metadata service
     if (o1 >= 224 && o1 <= 239) return 'multicast';
     if (o1 >= 240) return 'reserved';
@@ -38,7 +39,9 @@ export function classifyAddress(ip: string): AddressClass {
     if (/^f[cd]/.test(a)) return 'private';
     if (/^fe[89ab]/.test(a)) return 'link_local';
     if (/^ff/.test(a)) return 'multicast';
-    return 'public';
+    if (a.startsWith('2001:db8:') || a.startsWith('2001:0:') || a.startsWith('2002:')) return 'reserved';
+    const prefix = parseInt(a.split(':')[0]!, 16);
+    return prefix >= 0x2000 && prefix < 0x4000 ? 'public' : 'reserved';
   }
   return 'reserved';
 }
@@ -68,6 +71,7 @@ export function guardedLookup(policy: DestinationPolicy) {
     dnsLookup(hostname, { ...(options as object), all: true }, (err, addresses) => {
       if (err) return callback(err, '', 4);
       const list = addresses as LookupAddress[];
+      if (!list.length) return callback(new DestinationBlocked('DNS returned no reachable addresses'), '', 4);
       const bad = list.find((x) => !addressAllowed(x.address, policy).ok);
       if (bad) return callback(new DestinationBlocked(`${hostname} resolves to ${bad.address} (${classifyAddress(bad.address)}), which tools may not reach`), '', 4);
       if ((options as { all?: boolean }).all) return callback(null, list);
@@ -88,6 +92,7 @@ export async function checkDestination(url: string | URL, policy: DestinationPol
     return { addresses: [host] };
   }
   const addresses = await new Promise<LookupAddress[]>((resolve, reject) => dnsLookup(host, { all: true }, (e, a) => (e ? reject(new DestinationBlocked(`cannot resolve ${host}: ${e.message}`)) : resolve(a))));
+  if (!addresses.length) throw new DestinationBlocked('DNS returned no reachable addresses');
   for (const a of addresses) {
     const r = addressAllowed(a.address, policy);
     if (!r.ok) throw new DestinationBlocked(`${host} resolves to ${a.address}, a ${r.cls.replace('_', '-')} address, which tools may not reach${r.cls === 'loopback' || r.cls === 'private' ? ' (set SIGNET_TOOL_PRIVATE_DESTINATIONS=allow for tools on your own network)' : ''}`);

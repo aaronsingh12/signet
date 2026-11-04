@@ -2,6 +2,7 @@ import type { ActivityBucket, AgentAnalytics, AgentAnalyticsResponse } from '@si
 import { db } from './db';
 import { agentLevel } from './enforcement';
 import { tenant } from './tenant';
+import { providerAnalytics } from './provider-analytics';
 
 interface AgentRow {
   id: string; name: string; handle: string; purpose: string; owner: string; tier: string; status: string;
@@ -20,6 +21,7 @@ export async function agentAnalytics(): Promise<AgentAnalyticsResponse> {
   const firstHour = new Date(from);
   firstHour.setUTCMinutes(0, 0, 0);
   const hours: string[] = Array.from({ length: 25 }, (_, index) => new Date(firstHour.getTime() + index * 3_600_000).toISOString().slice(0, 13));
+  const providers = await providerAnalytics(from.toISOString(), to.toISOString(), hours);
   const agents = (await db.prepare(`SELECT a.id, a.name, a.handle, a.purpose, a.owner, a.tier, a.status, c.valid_to,
       (jsonb_extract_path_text(c.body::jsonb, 'limits', 'usd_per_day'))::double precision AS daily_budget_usd
     FROM agent a LEFT JOIN certificate c ON c.agent_id = a.id AND c.status = 'active'
@@ -49,6 +51,7 @@ export async function agentAnalytics(): Promise<AgentAnalyticsResponse> {
     const count = sum('latency_count');
     return {
       ...agent, enforcement: (await agentLevel(agent.id)),
+      provider: providers.get(agent.id) ?? { connection_ids: [], last_sync_at: null, executions: 0, succeeded: 0, failed: 0, other: 0, avg_duration_ms: null, activity: [], recent: [] },
       requests: sum('requests'), allowed: sum('allowed'), blocked: sum('blocked'), review: sum('review'), failed: sum('failed'),
       tokens: sum('tokens'), cost_usd: sum('cost_usd'), avg_latency_ms: count ? sum('latency_total') / count : null,
       last_activity: usage.map((row) => row.last_activity).sort().at(-1) ?? null, activity,

@@ -1,3 +1,4 @@
+import { RestConnectionWizard } from '../components/RestConnectionWizard';
 import { ExternalConnectionFields, newConnectionDraft, type ConnectionDraft } from '../components/ExternalConnections';
 import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
@@ -80,7 +81,7 @@ export function Propose() {
         },
       });
       setRegisteredId(a.id);
-      if (direction === 'outbound' && (method === 'rest' || method === 'oauth')) {
+      if (direction === 'outbound' && method === 'oauth') {
         await api('/connections', { method: 'POST', body: { agent_id: a.id, ...connectionDraft, config: { ...connectionDraft.config, method } } });
         setConnectionDraft({ ...connectionDraft, credential: '' });
       }
@@ -92,7 +93,7 @@ export function Propose() {
     }
   };
   // One source of truth: the checklist shows these and the Continue and Register buttons obey them.
-  const outbound = direction === 'outbound' && (method === 'rest' || method === 'oauth');
+  const outbound = direction === 'outbound' && method === 'oauth';
   const checklist: { label: string; items: [string, boolean][] }[] = [
     { label: 'Connection', items: [
       [`Connection method: ${CONNECTION_METHODS.find((item) => item.id === method)?.label}`, true],
@@ -115,6 +116,11 @@ export function Propose() {
   ];
   const stepDone = checklist.map((s) => s.items.every(([, ok]) => ok));
   const stillNeeded = checklist[step]!.items.filter(([, ok]) => !ok).map(([label]) => label);
+  if (method === 'rest') return <>
+    <PageHeader title="Connect an AI platform" subtitle="Connect your REST API, see its agents, and choose which ones to onboard." />
+    <RestConnectionWizard agentId={null} initialDraft={newConnectionDraft('rest')} connectionId={null} onSaved={() => nav('/connectors')} onCancel={() => nav('/agents')} />
+    <details className="mt-4 rounded-lg border border-line p-3"><summary className="text-sm text-ink-3">Other connection methods</summary><div className="mt-3 flex flex-wrap gap-2">{CONNECTION_METHODS.filter((item) => item.id !== 'rest').map((item) => <button key={item.id} data-testid={`connect-method-${item.id}`} className="btn-ghost" onClick={() => setMethod(item.id)}>{item.label}</button>)}</div></details>
+  </>;
   return (
     <>
       <PageHeader title="Connect an AI agent" subtitle="Choose a connection, add your agent's details, then review its permissions. Credentials become available after approval." actions={<Link data-testid="quick-connect-link" className="btn-primary" to="/agents/quick">Quick connect</Link>} />
@@ -125,7 +131,7 @@ export function Propose() {
           <Card title="How would you like to connect?">
             <div className="grid gap-3 md:grid-cols-2">{CONNECTION_METHODS.map((item) => <button key={item.id} data-testid={`connect-method-${item.id}`} aria-pressed={method === item.id} disabled={kind === 'third_party' && (item.id === 'bootstrap' || item.id === 'hybrid')} onClick={() => { setMethod(item.id); if (item.id === 'rest' || item.id === 'oauth') setConnectionDraft(newConnectionDraft(item.id)); }} className={`rounded-lg border p-4 text-left disabled:opacity-40 ${method === item.id ? 'border-royal bg-royal-50' : 'border-line hover:bg-canvas'}`}><div className="font-semibold">{item.label}</div><p className="mt-1 text-sm text-ink-2">{item.description}</p></button>)}</div>
           </Card>
-          {(method === 'rest' || method === 'oauth') && <Card title="Connection configuration"><label className="label">Direction<select data-testid="wizard-direction" className="input" value={direction} onChange={(e) => { setDirection(e.target.value); setConnectionDraft(newConnectionDraft(method)); }}><option value="inbound">External agent calls Signet</option><option value="outbound">Signet connects to external platform</option></select></label>{direction === 'outbound' ? <ExternalConnectionFields draft={{ ...connectionDraft, config: { ...connectionDraft.config, method, auth: method === 'oauth' ? 'oauth' : connectionDraft.config.auth } }} onChange={setConnectionDraft} /> : <p className="mt-2 text-sm text-ink-2">Register the agent and complete approval to issue environment-bound client credentials. Setup includes the actual token URL, SDK and REST examples.</p>}</Card>}
+          {method === 'oauth' && <Card title="Connection configuration"><label className="label">Direction<select data-testid="wizard-direction" className="input" value={direction} onChange={(e) => { setDirection(e.target.value); setConnectionDraft(newConnectionDraft(method)); }}><option value="inbound">External agent calls Signet</option><option value="outbound">Signet connects to external platform</option></select></label>{direction === 'outbound' ? <ExternalConnectionFields draft={{ ...connectionDraft, config: { ...connectionDraft.config, method, auth: method === 'oauth' ? 'oauth' : connectionDraft.config.auth } }} onChange={setConnectionDraft} /> : <p className="mt-2 text-sm text-ink-2">Register the agent and complete approval to issue environment-bound client credentials. Setup includes the actual token URL, SDK and REST examples.</p>}</Card>}
           {method === 'bootstrap' && <Card title="Workload identity setup"><p className="text-sm text-ink-2">Register this agent, complete classification and approval, then generate a one-time bootstrap credential in its Connection tab. Token exchange and accepted Gateway calls have separate status indicators. SDK, sidecar and HTTP setup use your configured Signet URLs.</p></Card>}
           {method === 'hybrid' && <Card title="Private network setup"><p className="text-sm text-ink-2">Enroll an outbound connector runner in Connectors or the agent's Connection tab, register approved private HTTP tools, and add those actions to the agent's approval manifest. Credentials remain on the runner. Private MCP transport and full local DLP are not supported by this runner.</p></Card>}
           <Card title="Agent type (optional for REST)">

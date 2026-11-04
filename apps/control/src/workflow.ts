@@ -844,7 +844,7 @@ export async function view(lcId: string) {
   const deploy = lc.data.deploy && lc.data.cert_id ? { ...lc.data.deploy, stats: (await deployStats(lc.data.cert_id, lc.data.deploy.mode_since)), days_in_mode: (Date.now() - Date.parse(lc.data.deploy.mode_since)) / DAY } : null;
   return {
     lifecycle: lc,
-    agent: { id: agent.id, handle: agent.handle, tier: agent.tier, owner: agent.owner, status: agent.status },
+    agent: { id: agent.id, handle: agent.handle, kind: agent.kind, tier: agent.tier, owner: agent.owner, status: agent.status },
     stages: stages.map((s) => ({ ...s, gate: JSON.parse(s.gate) })),
     gate,
     classification: (await classificationOf(lc.id)),

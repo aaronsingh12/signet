@@ -53,4 +53,33 @@ test('dashboard aggregates real ledger records per agent without counting detect
   assert.equal(lab.last_activity, null);
   assert(lab.activity.every((bucket) => bucket.requests === 0));
   assert.throws(() => parseAgentAnalytics({ ...snapshot, agents: [{ ...appointment, requests: -1 }] }), /nonnegative/);
+  const { create } = await import('../src/external-connections');
+  const { db } = await import('../src/db');
+  const admin: Principal = { ...owner, roles: ['platform_admin'], permissions: permissionsFor(['platform_admin']) };
+  const connection = await create(null, { credential: '', config: { name: 'Analytics REST provider', method: 'rest', auth: 'none', base_url: 'https://provider.example', header: '', client_id: '', token_url: '', scopes: '', token_auth: 'client_secret_basic', timeout_ms: 1000, sync_interval_seconds: 60, remote_management: false, endpoints: { test: { method: 'GET', path: '/status' } }, agents_mapping: null, executions_mapping: null, tracking_pointer: '', private_connector: null, execution_pagination: null } }, admin);
+  const eventTime = new Date().toISOString();
+  await db.prepare('INSERT INTO external_agent_mapping (connection_id, external_id, agent_id, last_seen_at) VALUES (?, ?, ?, ?)').run(connection.id, 'external-lab', agents[2]!.id, eventTime);
+  for (const [externalId, metadata] of [
+    ['success', { status: 'success', timestamp: eventTime, duration_ms: 6500 }],
+    ['failure', { status: 'failed', timestamp: eventTime, duration_ms: null }],
+    ['running', { status: 'running', timestamp: eventTime, duration_ms: null }],
+    ['old', { status: 'success', timestamp: new Date(Date.now() - 90_000_000).toISOString() }],
+    ['undated', { status: 'success', timestamp: null }],
+  ] as const) {
+    await db.prepare('INSERT INTO external_observation (connection_id, external_agent_id, external_id, kind, metadata, observed_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(connection_id, external_agent_id, kind, external_id) DO UPDATE SET observed_at = excluded.observed_at').run(connection.id, 'external-lab', externalId, 'execution', JSON.stringify(metadata), eventTime);
+  }
+  await db.prepare('INSERT INTO external_observation (connection_id, external_agent_id, external_id, kind, metadata, observed_at) VALUES (?, ?, ?, ?, ?, ?)').run(connection.id, 'external-lab', 'tracking', 'tracking', JSON.stringify({ status: 'active', timestamp: eventTime }), eventTime);
+  const synced = parseAgentAnalytics(await agentAnalytics());
+  const external = synced.agents.find((agent) => agent.id === agents[2]!.id)!;
+  assert.equal(external.requests, 0);
+  assert.equal(external.cost_usd, 0);
+  assert.equal(external.provider.executions, 3);
+  assert.equal(external.provider.succeeded, 1);
+  assert.equal(external.provider.failed, 1);
+  assert.equal(external.provider.other, 1);
+  assert.equal(external.provider.avg_duration_ms, 6500);
+  assert.equal(external.provider.activity.reduce((sum, bucket) => sum + bucket.executions, 0), 3);
+  assert.equal(external.provider.recent.length, 3);
+  assert.equal(synced.agents.find((agent) => agent.id === agents[0]!.id)!.requests, 4);
+  assert.equal(synced.agents.find((agent) => agent.id === agents[1]!.id)!.provider.executions, 0);
 });

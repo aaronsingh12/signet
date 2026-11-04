@@ -131,13 +131,16 @@ export interface SealInput {
 }
 
 // Seal validation: every check cites the rule it enforces.
-export async function validateSeal(agent: Pick<AgentRow, 'tier'> & { kind?: AgentKind }, input: SealInput) {
+export async function validateSeal(agent: Pick<AgentRow, 'tier'> & { id?: string; kind?: AgentKind }, input: SealInput) {
   if (input.models !== undefined && !Array.isArray(input.models)) throw invalid('models must be a list');
   if (input.tools !== undefined && !Array.isArray(input.tools)) throw invalid('tools must be a list');
   if (agent.kind === 'third_party') {
     // The vendor's model runs outside Signet; a model grant would claim coverage Signet does not have.
     if (input.models?.length) throw new PolicyError('VALIDATION', 'a third-party agent uses its vendor\'s model, which Signet cannot route; list no models, only the company tools it may call');
-    if (!input.tools?.length) throw new PolicyError('VALIDATION', 'a third-party agent is governed through the company tools it calls; list at least one');
+    if (!input.tools?.length) {
+      const externalIdentity = agent.id ? await db.prepare('SELECT 1 FROM external_agent_mapping m JOIN external_connection c ON c.id = m.connection_id WHERE m.agent_id = ? AND c.tenant_id = ?').get(agent.id, tenant.id) : undefined;
+      if (!externalIdentity) throw new PolicyError('VALIDATION', 'a third-party agent needs a mapped REST platform connection or at least one company tool');
+    }
   } else if (!input.models?.length) throw new PolicyError('RB-BL-01', 'a seal needs at least one model');
   if (input.detector_unavailability !== undefined && !['hold', 'audit'].includes(input.detector_unavailability)) throw invalid('detector_unavailability must be hold or audit');
   for (const m of input.models) {

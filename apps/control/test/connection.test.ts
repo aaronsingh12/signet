@@ -43,7 +43,9 @@ async function until(check: () => Promise<boolean>, description: string): Promis
 
 after(dropTestDatabase);
 
-test('OAuth and bootstrap identities reach a private API through a real outbound runner; policy and revocation deny access', { timeout: 120_000 }, async (context) => {
+test('OAuth and bootstrap identities reach a private API through a real outbound runner; policy and revocation deny access', { timeout: 180_000 }, async (context) => {
+  let logs = '';
+  try {
   const { permissionsFor } = await import('../src/rbac');
   const { db } = await import('../src/db');
   const { registerAgent, issueSeal } = await import('../src/registry');
@@ -90,7 +92,6 @@ test('OAuth and bootstrap identities reach a private API through a real outbound
   const gatewayPort = await unusedPort();
   const controlUrl = `http://127.0.0.1:${controlPort}`;
   const gatewayUrl = `http://127.0.0.1:${gatewayPort}`;
-  let logs = '';
   const env: NodeJS.ProcessEnv = { ...process.env, SIGNET_CONTROL_PORT: String(controlPort), SIGNET_GATEWAY_PORT: String(gatewayPort), SIGNET_CONTROL_URL: controlUrl + '/', SIGNET_NODE_ID: 'connect-test', SIGNET_AUTH_MODE: 'local', SIGNET_ADMIN_ID: 'connect-admin', SIGNET_ADMIN_PASSWORD: 'isolated-test-password', SIGNET_PUBLIC_URL: controlUrl, SIGNET_LLM_BASE_URL: 'http://127.0.0.1:1/v1', SIGNET_ENV: 'dev', SIGNET_EDGE_RUNNER_ID: runner.id, SIGNET_EDGE_RUNNER_SECRET: runner.runner_secret, SIGNET_EDGE_TOOLS_FILE: toolsFile, SIGNET_TEST_PRIVATE_TOKEN: 'local-only-test-token' };
   const start = (entry: string): ChildProcess => {
     const child = spawn(process.execPath, ['--import', 'tsx', resolve(entry)], { env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
@@ -177,4 +178,24 @@ test('OAuth and bootstrap identities reach a private API through a real outbound
   assert.equal((await external.view(connection.id)).health.gateway_enforcement, false);
   const retained = (await db.prepare("SELECT COUNT(*) AS n FROM edge_job WHERE args_json <> '{}' OR result_json IS NOT NULL").get()) as { n: number };
   assert.equal(retained.n, 0, 'completed connector payloads must be cleared');
+  // Exercise the same authenticated routes used by the REST configuration controls against the real control server.
+  const restConfig = { name: 'UI REST contract', method: 'rest', private_connector: null, base_url: 'https://unreachable-provider.invalid', auth: 'none', header: '', client_id: '', token_url: '', scopes: '', token_auth: 'client_secret_basic', timeout_ms: 1000, sync_interval_seconds: 60, remote_management: false, endpoints: { test: { method: 'GET', path: '/status' } }, agents_mapping: null, executions_mapping: null, tracking_pointer: '', execution_pagination: null };
+  const savedRest = await fetch(`${controlUrl}/api/v1/connections`, { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ agent_id: null, config: restConfig, credential: '' }) });
+  assert.equal(savedRest.status, 201, await savedRest.clone().text());
+  const rest = await savedRest.json() as { id: string; configuration_status: string; health: { endpoint_verified: boolean } };
+  assert.equal(rest.configuration_status, 'configured');
+  assert.equal(rest.health.endpoint_verified, false);
+  const failedRestTest = await fetch(`${controlUrl}/api/v1/connections/${rest.id}/test`, { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: '{}' });
+  assert.notEqual(failedRestTest.status, 200, 'A saved configuration must not pretend an unreachable provider is connected');
+  assert.equal(((await failedRestTest.json()) as { rule: string }).rule, 'EXTERNAL_DNS');
+  const restHistory = await fetch(`${controlUrl}/api/v1/connections/${rest.id}/history`, { headers: { cookie } });
+  assert.equal(restHistory.status, 200);
+  assert.equal(((await restHistory.json()) as { items: { outcome: string }[] }).items[0]!.outcome, 'failed');
+  assert.equal((await fetch(`${controlUrl}/api/v1/connections/${rest.id}`, { method: 'DELETE', headers: { cookie, 'content-type': 'application/json' } })).status, 200);
+  assert.equal((await fetch(`${controlUrl}/api/v1/connections/${rest.id}`, { headers: { cookie } })).status, 404);
+  assert.equal((await fetch(`${controlUrl}/api/v1/connections`)).status, 401);
+  } catch (error) {
+    context.diagnostic(logs.replaceAll(process.env.DATABASE_URL ?? 'not-configured', '[database URL redacted]'));
+    throw error;
+  }
 });

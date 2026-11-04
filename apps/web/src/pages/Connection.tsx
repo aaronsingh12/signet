@@ -48,6 +48,8 @@ export function ConnectionTab({ data, onChange }: { data: any; onChange: () => v
     if (reason) void act(() => api(`/clients/${id}/revoke`, { method: 'POST', body: { reason } }));
   };
 
+  if (agent.connection_method === 'rest') return <ConnectionSetup key={agent.id} agent={agent} certificate={cert} state={c.state} onChange={onChange} />;
+
   return (
     <div className="space-y-4">
       <ConnectionSetup key={agent.id} agent={agent} certificate={cert} state={c.state} onChange={onChange} />

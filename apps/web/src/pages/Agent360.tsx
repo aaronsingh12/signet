@@ -37,7 +37,7 @@ export function Agent360() {
         subtitle={
           <span className="flex flex-wrap items-center gap-2">
             {cert ? <Pill value="sealed" label={`Approved until ${date(cert.valid_to)}`} /> : <Pill value={agent.status} />}
-            <Pill value={enforcement.level} label={enforcement.level === 'active' ? 'Safety checks active' : LEVEL_LABEL[enforcement.level] ?? enforcement.level} />
+            <Pill value={enforcement.level} label={enforcement.level === 'active' ? agent.kind === 'third_party' ? 'Gateway safeguards configured' : 'Safety checks active' : LEVEL_LABEL[enforcement.level] ?? enforcement.level} />
             {cert || data.lifecycle?.classification?.confirmed_by ? <TierChip tier={agent.tier} /> : <Pill value="neutral" label="Risk not classified yet" />}
             {cert && <ConnectionPill state={data.connection.state} />}
             <span className="text-xs text-ink-3">{agent.purpose}</span>

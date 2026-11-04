@@ -107,7 +107,7 @@ const IMPACTS = ['read', 'write', 'privileged', 'critical'];
 
 // The everyday manifest fields as a form. It edits the same JSON, so fields it does not show (argument
 // constraints, approval rules) are kept.
-function ManifestForm({ text, onChange }: { text: string; onChange: (text: string) => void }) {
+function ManifestForm({ text, onChange, agentKind }: { text: string; onChange: (text: string) => void; agentKind: string }) {
   const { data: catalogue } = useApi<{ catalogue: { model: string; region: string }[] }>('/catalogue');
   const { data: registered } = useApi<{ items: { alias: string; kind: string }[] }>('/tools');
   let m: any;
@@ -119,7 +119,7 @@ function ManifestForm({ text, onChange }: { text: string; onChange: (text: strin
   const update = (fn: (draft: any) => void) => {
     const draft = JSON.parse(text);
     fn(draft);
-    if (!draft.models?.length && catalogue?.catalogue[0]) draft.models = [{ model: catalogue.catalogue[0].model, region: catalogue.catalogue[0].region }];
+    if (agentKind !== 'third_party' && !draft.models?.length && catalogue?.catalogue[0]) draft.models = [{ model: catalogue.catalogue[0].model, region: catalogue.catalogue[0].region }];
     onChange(JSON.stringify(draft, null, 2));
   };
   const number = (key: string, label: string) => (
@@ -172,7 +172,8 @@ function ManifestEditor({ v, onChange }: { v: any; onChange: () => void }) {
   };
   return (
     <Card title="Manifest draft" action={<button className="btn-ghost" disabled={a.busy} onClick={save}>Save manifest</button>}>
-      <ManifestForm text={text} onChange={setText} />
+      <ManifestForm text={text} onChange={setText} agentKind={v.agent.kind} />
+      {v.agent.kind === 'third_party' && <p className="mt-2 text-sm text-ink-3">Vendor models run outside Signet. Keep models empty. REST-connected agents can have no company tools; this grants no tool access or control over their internal model calls.</p>}
       <details className="mt-4"><summary className="cursor-pointer text-sm text-ink-2">Edit as JSON (advanced: constraints, approval rules)</summary>
       <textarea className="input mono mt-2 min-h-[300px] text-xs" spellCheck={false} value={text} onChange={(e) => setText(e.target.value)} />
       </details>

@@ -616,15 +616,35 @@ CREATE TABLE IF NOT EXISTS platform_usage (
 -- External observations are separate from Gateway transactions and never confer certification.
 CREATE TABLE IF NOT EXISTS external_connection (
   id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL REFERENCES tenant(id),
-  agent_id TEXT NOT NULL REFERENCES agent(id) ON DELETE CASCADE,
+  agent_id TEXT REFERENCES agent(id) ON DELETE CASCADE,
   secret_id TEXT NOT NULL REFERENCES secret(id), state TEXT NOT NULL,
   health TEXT NOT NULL, next_sync_at BIGINT NOT NULL, busy_until BIGINT NOT NULL,
   created_by TEXT NOT NULL, created_at TEXT NOT NULL
 );
+ALTER TABLE external_connection ALTER COLUMN agent_id DROP NOT NULL;
+ALTER TABLE external_connection ADD COLUMN IF NOT EXISTS updated_at TEXT NOT NULL DEFAULT '';
+UPDATE external_connection SET updated_at = created_at WHERE updated_at = '';
+ALTER TABLE external_connection ADD COLUMN IF NOT EXISTS webhook_secret_id TEXT REFERENCES secret(id);
+ALTER TABLE external_connection ADD COLUMN IF NOT EXISTS webhook_mapping TEXT;
+ALTER TABLE external_connection ADD COLUMN IF NOT EXISTS sync_failures INTEGER NOT NULL DEFAULT 0;
 CREATE TABLE IF NOT EXISTS external_agent_mapping (
   connection_id TEXT NOT NULL REFERENCES external_connection(id) ON DELETE CASCADE,
   external_id TEXT NOT NULL, agent_id TEXT NOT NULL REFERENCES agent(id) ON DELETE CASCADE,
   last_seen_at TEXT NOT NULL, PRIMARY KEY(connection_id, external_id)
+);
+ALTER TABLE external_agent_mapping ADD COLUMN IF NOT EXISTS normalized TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE external_agent_mapping ADD COLUMN IF NOT EXISTS presence TEXT NOT NULL DEFAULT 'present';
+CREATE TABLE IF NOT EXISTS external_operation_run (
+  id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL REFERENCES tenant(id),
+  connection_id TEXT NOT NULL REFERENCES external_connection(id) ON DELETE CASCADE,
+  operation TEXT NOT NULL, outcome TEXT NOT NULL, actor TEXT NOT NULL,
+  started_at TEXT NOT NULL, completed_at TEXT, correlation_id TEXT NOT NULL,
+  error_category TEXT, detail TEXT, record_count INTEGER
+);
+CREATE INDEX IF NOT EXISTS external_operation_history ON external_operation_run (tenant_id, connection_id, started_at DESC);
+CREATE TABLE IF NOT EXISTS external_webhook_nonce (
+  connection_id TEXT NOT NULL REFERENCES external_connection(id) ON DELETE CASCADE,
+  event_id TEXT NOT NULL, received_at TEXT NOT NULL, PRIMARY KEY (connection_id, event_id)
 );
 CREATE TABLE IF NOT EXISTS external_observation (
   connection_id TEXT NOT NULL REFERENCES external_connection(id) ON DELETE CASCADE,

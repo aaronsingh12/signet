@@ -6,7 +6,7 @@ import * as hub from './hub';
 import { forgetAgent } from './live';
 import type { Principal } from './rbac';
 import { eraseAgentLedger } from './erasure-ledger';
-import { GATEWAY_STALE_MS, eraseAgent as eraseAgentCounters } from './counters';
+import { eraseAgent as eraseAgentCounters } from './counters';
 import { eraseDeploymentArtifacts, eraseEvidenceFiles } from './erasure-files';
 
 function assertAdministrator(actor: Principal): void {
@@ -26,29 +26,12 @@ export async function agentRemovalPreview(agentRef: string, actor: Principal): P
   };
 }
 
-/** Clear Gateway state for runtime identities; unprovisioned proposals have no Gateway state to erase. */
-async function gatewaysForErasure(agentId: string): Promise<string[]> {
-  const runtime = await db.prepare(`
-    SELECT 1 AS present FROM certificate WHERE agent_id = ?
-    UNION ALL SELECT 1 FROM agent_instance WHERE agent_id = ?
-    UNION ALL SELECT 1 FROM issued_token WHERE agent_id = ?
-    UNION ALL SELECT 1 FROM ledger_record WHERE agent_id = ? AND kind = 'transaction'
-      AND jsonb_extract_path_text(data::jsonb, 'action_type') IN ('llm_call', 'tool_call')
-    LIMIT 1
-  `).get(agentId, agentId, agentId, agentId);
-  if (!runtime) return [];
-  // Only gateways seen recently can hold agent state; containers from earlier deploys are gone.
-  return ((await db.prepare('SELECT id FROM gateway_node WHERE last_seen >= ?').all(new Date(Date.now() - GATEWAY_STALE_MS).toISOString())) as { id: string }[]).map((node) => node.id);
-}
-
 /** Explicit administrator erasure: stop execution, clear applicable gateways, erase owned data and retain anonymous signed chain commitments. */
 export async function removeAgent(agentRef: string, confirmation: string, actor: Principal): Promise<{ deleted: true; erased_records: number }> {
   assertAdministrator(actor);
   const agent = (await getAgent(agentRef));
   if (confirmation !== agent.handle) throw invalid(`Type the exact agent handle ${agent.handle} to permanently delete this agent and its data`);
-  const nodes = await gatewaysForErasure(agent.id);
-  const unavailable = nodes.filter((node) => !hub.connectedNodes().includes(node));
-  if (unavailable.length) throw new PolicyError('ERASURE_GATEWAY', `Deletion was not started. Reconnect registered gateways ${unavailable.join(', ')} so their agent data can be cleared, then retry.`, 503);
+  const nodes = hub.connectedNodes();
   if ((await agentLevel(agent.id)) !== 'killed') (await applyLadder({ agentId: agent.id }, 'kill', { actor: actor.id, reason: 'Administrator requested permanent agent and data erasure' }));
   const tokens = ((await db.prepare('SELECT jti FROM issued_token WHERE agent_id = ?').all(agent.id)) as { jti: string }[]).map((row) => row.jti);
   const instances = ((await db.prepare('SELECT id FROM agent_instance WHERE agent_id = ?').all(agent.id)) as { id: string }[]).map((row) => row.id);
@@ -99,9 +82,12 @@ export async function removeAgent(agentRef: string, confirmation: string, actor:
     (await db.prepare('DELETE FROM discovered_asset WHERE agent_id = ?').run(agent.id));
     (await db.prepare('DELETE FROM control_result WHERE scope = ?').run(`agent:${agent.id}`));
     (await db.prepare('DELETE FROM external_observation WHERE (connection_id, external_agent_id) IN (SELECT connection_id, external_id FROM external_agent_mapping WHERE agent_id = ?)').run(agent.id));
-    const connectionSecrets = (await db.prepare('SELECT secret_id FROM external_connection WHERE agent_id = ?').all(agent.id)) as { secret_id: string }[];
+    const connectionSecrets = (await db.prepare('SELECT secret_id, webhook_secret_id FROM external_connection WHERE agent_id = ?').all(agent.id)) as { secret_id: string; webhook_secret_id: string | null }[];
     (await db.prepare('DELETE FROM external_connection WHERE agent_id = ?').run(agent.id));
-    for (const secret of connectionSecrets) (await db.prepare('DELETE FROM secret WHERE id = ?').run(secret.secret_id));
+    for (const secret of connectionSecrets) {
+      await db.prepare('DELETE FROM secret WHERE id = ?').run(secret.secret_id);
+      if (secret.webhook_secret_id) await db.prepare('DELETE FROM secret WHERE id = ?').run(secret.webhook_secret_id);
+    }
     (await db.prepare('DELETE FROM agent WHERE id = ?').run(agent.id));
     (await eraseEvidenceFiles(result.days));
     eraseDeploymentArtifacts(agent.id);

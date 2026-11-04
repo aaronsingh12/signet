@@ -26,9 +26,9 @@ export function AgentCard({ agent }: { agent: AgentAnalytics }) {
     <div className="agent-card-top"><AgentSymbol handle={agent.handle} color={color} /><AgentStatus agent={agent} /></div>
     <h3><Link to={`/agents/${agent.id}`}>{agent.name}</Link></h3>
     <p className="agent-purpose" title={agent.purpose}>{agent.purpose}</p>
-    <div className="agent-stats"><div><span>Requests</span><strong>{num(agent.requests)}</strong></div><div><span>Blocked</span><strong className={agent.blocked ? 'text-bad' : ''}>{num(agent.blocked)}</strong></div><div><span>Est. cost</span><strong>{money(agent.cost_usd)}</strong></div></div>
-    <div className="agent-mini-chart"><Sparkline values={agent.activity.map((bucket) => bucket.requests)} color={color} label={`${agent.name}: ${agent.requests} requests in the last 24 hours`} /></div>
-    <div className="agent-card-footer"><span>{agent.last_activity ? `Last request ${ago(agent.last_activity)}` : 'No activity in the last 24h'}</span><Link to={`/agents/${agent.id}`} aria-label={`View ${agent.name} details`}>View agent <ArrowRight size={12} /></Link></div>
+    <div className="agent-stats"><div><span>{agent.provider.connection_ids.length ? 'Provider executions' : 'Gateway requests'}</span><strong>{num(agent.provider.connection_ids.length ? agent.provider.executions : agent.requests)}</strong></div><div><span>Gateway blocked</span><strong className={agent.blocked ? 'text-bad' : ''}>{num(agent.blocked)}</strong></div><div><span>Gateway cost</span><strong>{money(agent.cost_usd)}</strong></div></div>
+    <div className="agent-mini-chart"><Sparkline values={agent.provider.connection_ids.length ? agent.provider.activity.map((bucket) => bucket.executions) : agent.activity.map((bucket) => bucket.requests)} color={color} label={`${agent.name}: ${agent.provider.connection_ids.length ? agent.provider.executions : agent.requests} ${agent.provider.connection_ids.length ? 'provider executions' : 'Gateway requests'} in the last 24 hours`} /></div>
+    <div className="agent-card-footer"><span>{agent.provider.connection_ids.length ? agent.provider.last_sync_at ? `Provider synced ${ago(agent.provider.last_sync_at)}` : 'Provider sync pending' : agent.last_activity ? `Last request ${ago(agent.last_activity)}` : 'No activity in the last 24h'}</span><Link to={`/agents/${agent.id}`} aria-label={`View ${agent.name} details`}>View agent <ArrowRight size={12} /></Link></div>
   </article>;
 }
 
@@ -85,9 +85,9 @@ export function AgentMetrics({ agents }: { agents: AgentAnalytics[] }) {
   const cost = agents.reduce((sum, agent) => sum + agent.cost_usd, 0);
   const metrics = [
     { label: 'Governed agents', value: `${governed}`, description: `${agents.length} registered · active approvals`, icon: ShieldCheck, color: '#17877d' },
-    { label: 'Total requests', value: num(requests), description: 'Model & tool requests in the last 24h', icon: Activity, color: '#8170d4' },
-    { label: 'Blocked requests', value: num(blocked), description: requests ? `${(blocked / requests * 100).toFixed(1)}% of requests stopped by safety checks` : 'No requests recorded yet', icon: ShieldX, color: '#c68a32' },
-    { label: 'Estimated cost', value: money(cost), description: 'Recorded usage · last 24 hours · USD', icon: Bot, color: '#4b8ecb' },
+    { label: 'Gateway requests', value: num(requests), description: 'Requests routed through Signet / last 24h', icon: Activity, color: '#8170d4' },
+    { label: 'Blocked requests', value: num(blocked), description: requests ? `${(blocked / requests * 100).toFixed(1)}% of requests stopped by safety checks` : 'No Gateway requests recorded yet', icon: ShieldX, color: '#c68a32' },
+    { label: 'Gateway cost', value: money(cost), description: 'Recorded usage · last 24 hours · USD', icon: Bot, color: '#4b8ecb' },
   ];
   return <div className="metric-grid">{metrics.map(({ label, value, description, icon: Icon, color }) => <div className="metric-card" style={{ '--metric-color': color } as CSSProperties} key={label}><div className="metric-top"><span>{label}</span><span className="metric-icon" style={{ color, background: `${color}12` }}><Icon size={17} strokeWidth={1.7} /></span></div><div className="metric-number">{value}</div><div className="metric-description">{description}</div></div>)}</div>;
 }

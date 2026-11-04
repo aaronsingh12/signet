@@ -205,5 +205,12 @@ export interface Rollout {
   mode: 'shadow' | 'canary' | 'enforce';
   canary_pct: number;
 }
-export type { ResponseMapping, ExternalOperation, ConnectionEndpoint, ExternalConnectionConfig, ConnectionHealth, ExternalConnectionView } from './connections';
-export { supportLabConnectionConfig } from './connections';
+export type { ConnectorJson, ResponseMapping, ExternalOperation, ConnectionEndpoint, ExternalConnectionConfig, ConnectionHealth, ExternalConnectionView } from './connections';
+
+
+/** Field paths observed in an external agent list; response values stay on the server. */
+export interface AgentListFields {
+  path: string;
+  count: number;
+  fields: string[];
+}

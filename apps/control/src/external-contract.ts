@@ -1,5 +1,6 @@
-import type { ExternalConnectionConfig, ExternalOperation, ResponseMapping } from '@signet/core/types';
+import type { AgentListFields, ExternalConnectionConfig, ExternalOperation, ResponseMapping } from '@signet/core/types';
 import { invalid } from './errors';
+import { connectionOptions, endpointOptions } from './external-options';
 
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 export function object(value: unknown, field: string): Record<string, unknown> {
@@ -13,13 +14,13 @@ function text(value: unknown, field: string, max: number): string {
 export function publicUrl(value: string): URL {
   let url: URL;
   try { url = new URL(value); } catch { throw invalid('External endpoint must be an absolute HTTPS URL'); }
-  if (url.protocol !== 'https:' || url.username || url.password || url.hash || url.search) throw invalid('External endpoints require HTTPS without credentials, query or fragment; use an enrolled runner for private APIs');
+  if (url.protocol !== 'https:' || url.username || url.password || url.hash || url.search || (url.port && url.port !== '443') || url.hostname.length > 253) throw invalid('External endpoints require HTTPS without credentials, query or fragment; use an enrolled runner for private APIs');
   return url;
 }
 export function endpointUrl(base: string, path: string, id: string | null): URL {
   if (!path.startsWith('/') || path.startsWith('//') || path.includes('\\') || /(?:\.\.|%2e|%2f|%5c)/i.test(path)) throw invalid('Endpoint path must start with / and cannot contain traversal or encoded separators');
-  const filled = path.replaceAll('{id}', id === null ? '{id}' : encodeURIComponent(id));
-  if (/[{}]/.test(filled)) throw invalid('Endpoint requires an external agent ID, or contains an unsupported template parameter');
+  const filled = path.replaceAll('{agent_id}', '{id}').replaceAll('{id}', id === null ? '{id}' : encodeURIComponent(id));
+  if (/[{}#\r\n]/.test(filled)) throw invalid('Endpoint requires an external agent ID, or contains an unsupported template parameter');
   const root = publicUrl(base);
   const url = new URL(root.toString().replace(/\/$/, '') + filled);
   if (url.origin !== root.origin || !url.pathname.startsWith(root.pathname.replace(/\/$/, '') + '/')) throw invalid('Endpoint escapes the configured API base URL');
@@ -30,6 +31,12 @@ function mapping(value: unknown, field: string): ResponseMapping | null {
   const row = object(value, field);
   const result = Object.fromEntries(['items', 'id', 'name', 'status', 'timestamp'].map((key) => [key, text(row[key], `${field}.${key}`, 200)])) as unknown as ResponseMapping;
   for (const path of Object.values(result)) if (path && (!path.startsWith('/') || /~(?![01])/g.test(path))) throw invalid(`${field}: mappings must be JSON pointers (empty string selects the root)`);
+  if (row.fields !== undefined) {
+    const fields = object(row.fields, `${field}.fields`);
+    if (Object.keys(fields).length > 20 || Object.entries(fields).some(([key, path]) => !/^[a-z][a-z0-9_]{0,39}$/.test(key) || ['internal_id', 'tenant_id', 'agent_id', 'connection_id', 'owner', 'approved', 'tier'].includes(key) || typeof path !== 'string' || !path.startsWith('/') || path.length > 200 || /~(?![01])/.test(path))) throw invalid('Metadata mapping requires at most 20 non-reserved names and JSON Pointers');
+    if (Object.entries(fields).some(([key, path]) => /^(token|access_token|refresh_token|api_key|password|secret|credential|authorization)$/i.test(key) || String(path).split('/').some((part) => /^(token|access_token|refresh_token|api_key|password|secret|credential|authorization)$/i.test(part)))) throw invalid('Secret values cannot be retained as provider metadata');
+    result.fields = fields as Record<string, string>;
+  }
   if (!result.id) throw invalid(`${field}.id must point to a stable ID field`);
   return result;
 }
@@ -38,7 +45,7 @@ export function parseConfig(value: unknown): ExternalConnectionConfig {
   const name = text(input.name, 'name', 120).trim();
   if (!name) throw invalid('Connection name is required');
   if (input.method !== 'rest' && input.method !== 'oauth' && input.method !== 'hybrid') throw invalid('method must be rest, oauth or hybrid');
-  if (!['none', 'api_key', 'bearer', 'oauth', 'connector'].includes(String(input.auth))) throw invalid('Unsupported authentication type');
+  if (!['none', 'api_key', 'api_key_query', 'basic', 'custom_headers', 'bearer', 'oauth', 'connector'].includes(String(input.auth))) throw invalid('Unsupported authentication type');
   if (input.method === 'oauth' && input.auth !== 'oauth') throw invalid('OAuth connections require OAuth authentication');
   const base = text(input.base_url, 'base_url', 2000);
   let privateConnector: ExternalConnectionConfig['private_connector'] = null;
@@ -51,7 +58,7 @@ export function parseConfig(value: unknown): ExternalConnectionConfig {
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw invalid('Private endpoint must be HTTP(S) without credentials, query or fragment');
   } else { publicUrl(base); if (input.auth === 'connector') throw invalid('Connector identity requires a private connection'); }
   const header = text(input.header, 'header', 100);
-  if (input.auth === 'api_key' && (!/^[a-zA-Z0-9_-]+$/.test(header) || /^(host|cookie|connection|content-length|transfer-encoding|proxy-.*|x-signet-.*)$/i.test(header))) throw invalid('API key header is invalid or reserved');
+  if (['api_key', 'api_key_query'].includes(String(input.auth)) && (!/^[a-zA-Z0-9_-]+$/.test(header) || /^(host|cookie|connection|content-length|transfer-encoding|proxy-.*|x-signet-.*)$/i.test(header))) throw invalid('API key header is invalid or reserved');
   const tokenUrl = text(input.token_url, 'token_url', 2000);
   const clientId = text(input.client_id, 'client_id', 500);
   if (input.auth === 'oauth') { publicUrl(tokenUrl); if (!clientId) throw invalid('OAuth client ID is required'); }
@@ -70,17 +77,22 @@ export function parseConfig(value: unknown): ExternalConnectionConfig {
     if (Object.values(pagination).some((path) => !path.startsWith('/') || /~(?![01])/.test(path))) throw invalid('Execution pagination requires total, offset and limit JSON pointers');
   }
   const provided = object(input.endpoints, 'endpoints');
-  for (const op of ['test', 'discover', 'track', 'executions', 'run', 'pause', 'stop', 'activate'] as const) {
+  for (const op of ['test', 'discover', 'agent', 'track', 'executions', 'execution', 'logs', 'metrics', 'run', 'pause', 'stop', 'activate'] as const) {
     if (provided[op] === undefined) continue;
     const spec = object(provided[op], `endpoints.${op}`);
     const path = text(spec.path, `${op}.path`, 1000);
-    endpointUrl(input.method === 'hybrid' ? 'https://private-placeholder.example' : base, path, 'validation-id');
+    const options = endpointOptions(spec);
+    const checkedPath = Object.keys(options.variables ?? {}).reduce((result, key) => result.replaceAll(`{${key}}`, 'validation-id'), path).replaceAll('{execution_id}', 'validation-execution');
+    endpointUrl(input.method === 'hybrid' ? 'https://private-placeholder.example' : base, checkedPath, 'validation-id');
+    const checkedUrl = endpointUrl(input.method === 'hybrid' ? 'https://private-placeholder.example' : base, checkedPath, 'validation-id');
+    for (const key of checkedUrl.searchParams.keys()) if (/^(token|access_token|refresh_token|api_key|password|secret|credential|authorization)$/i.test(key) || (input.auth === 'api_key_query' && key === header)) throw invalid('Do not put credential values in endpoint paths; use the encrypted authentication credential');
+    for (const key of Object.keys(options.query ?? {})) if (/^(token|access_token|refresh_token|api_key|password|secret|credential|authorization)$/i.test(key) || (input.auth === 'api_key_query' && key === header)) throw invalid('Secret query parameters must come from the encrypted authentication credential');
     if (!['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(String(spec.method))) throw invalid(`${op}: unsupported HTTP method`);
-    if (['test', 'discover', 'track', 'executions'].includes(op) && spec.method !== 'GET') throw invalid(`${op} must use read-only GET`);
-    endpoints[op as ExternalOperation] = { path, method: spec.method as 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' };
+    if (op === 'test' && spec.method !== 'GET') throw invalid(`${op} must use read-only GET`);
+    endpoints[op as ExternalOperation] = { ...options, path, method: spec.method as 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' };
   }
-  if (!endpoints.test || endpoints.test.path.includes('{id}')) throw invalid('Configure a harmless test GET endpoint without an agent ID');
-  return { name, method: input.method, private_connector: privateConnector, base_url: base, auth: input.auth as ExternalConnectionConfig['auth'], header, token_url: tokenUrl, client_id: clientId, token_auth: input.token_auth as ExternalConnectionConfig['token_auth'], scopes: text(input.scopes, 'scopes', 1000), timeout_ms: Number(input.timeout_ms), sync_interval_seconds: Number(input.sync_interval_seconds), remote_management: input.remote_management, endpoints, agents_mapping: mapping(input.agents_mapping, 'agents_mapping'), executions_mapping: mapping(input.executions_mapping, 'executions_mapping'), tracking_pointer: trackingPointer, execution_pagination: pagination };
+  if (!endpoints.test || /[{}]/.test(endpoints.test.path)) throw invalid('Configure a harmless test GET endpoint without an agent ID');
+  return { ...connectionOptions(input), name, method: input.method, private_connector: privateConnector, base_url: base, auth: input.auth as ExternalConnectionConfig['auth'], header, token_url: tokenUrl, client_id: clientId, token_auth: input.token_auth as ExternalConnectionConfig['token_auth'], scopes: text(input.scopes, 'scopes', 1000), timeout_ms: Number(input.timeout_ms), sync_interval_seconds: Number(input.sync_interval_seconds), remote_management: input.remote_management, endpoints, agents_mapping: mapping(input.agents_mapping, 'agents_mapping'), executions_mapping: mapping(input.executions_mapping, 'executions_mapping'), tracking_pointer: trackingPointer, execution_pagination: pagination };
 }
 
 /** Offset pagination is opt-in and must use the platform's observed total/offset/limit schema. */
@@ -102,14 +114,15 @@ export function pointer(value: Json, path: string): Json | undefined {
     return Object.hasOwn(current, key) ? current[key] : undefined;
   }, value);
 }
-export interface ImportedRecord { id: string; name: string | null; status: string | null; timestamp: string | null }
+export interface ImportedRecord { id: string; name: string | null; status: string | null; timestamp: string | null; metadata?: Record<string, Json> }
 /** Retain only explicitly mapped metadata; never persist arbitrary remote payloads or credentials. */
 export function adaptRecords(value: Json, contract: ResponseMapping): ImportedRecord[] {
   const rows = pointer(value, contract.items);
   if (!Array.isArray(rows) || rows.length > 1000) throw invalid('Mapped response items must be an array of at most 1000 records; configure pagination at the platform');
   const read = (row: Json, path: string, field: string): string | null => {
     if (!path) return null;
-    const result = pointer(row, path);
+    const raw = pointer(row, path);
+    const result = field === 'id' && typeof raw === 'number' && Number.isSafeInteger(raw) && raw >= 0 ? String(raw) : raw;
     if (typeof result !== 'string' || !result || result.length > 500) throw invalid(`Mapped ${field} must be a non-empty string of at most 500 characters`);
     return result;
   };
@@ -118,8 +131,34 @@ export function adaptRecords(value: Json, contract: ResponseMapping): ImportedRe
     if (!id || id === '.' || id === '..') throw invalid('Mapped record ID must be a stable non-dot string');
     const timestamp = read(row, contract.timestamp, 'timestamp');
     if (timestamp && !Number.isFinite(Date.parse(timestamp))) throw invalid('Mapped timestamp must be an ISO date');
-    return { id, name: read(row, contract.name, 'name'), status: read(row, contract.status, 'status'), timestamp };
+    const metadata = Object.fromEntries(Object.entries(contract.fields ?? {}).map(([key, path]) => { const value = pointer(row, path); if (value === undefined) throw invalid(`Mapped metadata field ${key} is missing`); return [key, value]; }));
+    for (const key of ['description', 'framework', 'provider']) if (metadata[key] !== undefined && metadata[key] !== null && (typeof metadata[key] !== 'string' || String(metadata[key]).length > 4000)) throw invalid(`Mapped ${key} must be text or null`);
+    if (metadata.capabilities !== undefined && metadata.capabilities !== null && (!Array.isArray(metadata.capabilities) || metadata.capabilities.length > 100 || !metadata.capabilities.every((item) => typeof item === 'string' && item.length <= 200))) throw invalid('Mapped capabilities must be at most 100 text entries');
+    if (JSON.stringify(metadata).length > 8192) throw invalid('Mapped metadata exceeds 8 KiB per record');
+    return { metadata, id, name: read(row, contract.name, 'name'), status: read(row, contract.status, 'status'), timestamp };
   });
   if (new Set(records.map((row) => row.id)).size !== records.length) throw invalid('Response contains duplicate external IDs');
   return records;
+}
+
+/** Describe selectable string fields without returning remote record values or guessing a schema. */
+export function agentListFields(value: Json): AgentListFields[] {
+  const escape = (key: string): string => key.replaceAll('~', '~0').replaceAll('/', '~1');
+  const strings = (item: Json, path: string, depth: number): string[] => {
+    if (depth > 12) throw invalid('Agent response nesting exceeds 12 levels; use a simpler agent list endpoint');
+    if (typeof item === 'string') return item ? [path] : [];
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
+    return Object.entries(item).flatMap(([key, child]) => strings(child, `${path}/${escape(key)}`, depth + 1));
+  };
+  const lists = (item: Json, path: string, depth: number): AgentListFields[] => {
+    if (depth > 12) throw invalid('Agent response nesting exceeds 12 levels; use a simpler agent list endpoint');
+    if (Array.isArray(item)) {
+      if (item.length > 1000) throw invalid('Agent list exceeds 1000 records; narrow the API scope');
+      const fields = item.length ? strings(item[0]!, '', 0).filter((field) => item.every((record) => typeof pointer(record, field) === 'string' && Boolean(pointer(record, field)))) : [];
+      return [{ path, count: item.length, fields }];
+    }
+    if (!item || typeof item !== 'object') return [];
+    return Object.entries(item).flatMap(([key, child]) => lists(child, `${path}/${escape(key)}`, depth + 1));
+  };
+  return lists(value, '', 0);
 }
