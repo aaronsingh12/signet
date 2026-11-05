@@ -84,7 +84,7 @@ export function AgentMetrics({ agents }: { agents: AgentAnalytics[] }) {
   const governed = agents.filter((agent) => agentState(agent).tone === 'ok').length;
   const cost = agents.reduce((sum, agent) => sum + agent.cost_usd, 0);
   const metrics = [
-    { label: 'Protected agents', value: `${governed}`, description: `${agents.length} registered · active approvals`, icon: ShieldCheck, color: '#17877d' },
+    { label: 'Governed agents', value: `${governed}`, description: `${agents.length} registered · active approvals`, icon: ShieldCheck, color: '#17877d' },
     { label: 'Gateway requests', value: num(requests), description: 'Requests routed through Signet / last 24h', icon: Activity, color: '#8170d4' },
     { label: 'Blocked requests', value: num(blocked), description: requests ? `${(blocked / requests * 100).toFixed(1)}% of requests stopped by safety checks` : 'No Gateway requests recorded yet', icon: ShieldX, color: '#c68a32' },
     { label: 'Gateway cost', value: money(cost), description: 'Recorded usage · last 24 hours · USD', icon: Bot, color: '#4b8ecb' },

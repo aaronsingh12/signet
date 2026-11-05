@@ -98,10 +98,3 @@ Awaiting setup: `SIGNET_GATEWAY_PUBLIC_URL` on the deployed Signet; real platfor
 Running the e2e suites needs: `E2E_DATABASE_URL`, the Keycloak dev realm with test users, and `SIGNET_DEMO_OWNER_ID`, `SIGNET_DEMO_SECURITY_ID`, `SIGNET_DEMO_RISK_ID`, `SIGNET_DEMO_PLATFORM_ID`, `SIGNET_DEMO_PASSWORD`, `SIGNET_AUTOMATION_CLIENT_SECRET` (kept out of git on purpose).
 
 Still needing real accounts (code is done, only live confirmation is missing): Vercel token, AWS keys, Azure app registration, Google service account, Copilot Studio environment, OpenAI/Anthropic admin keys, a ServiceNow instance with AI Control Tower.
-
-## Console redesign (2026-11-05)
-
-| Item | State | Evidence |
-| --- | --- | --- |
-| Six-item menu, guided Add an agent path, Needs you, Activity, Reports, Settings directory, clay theme in green on warm white; old addresses redirect | implemented, type-checked, builds | driven in Chrome against a fake API: 24 checks, no console errors. Not yet run against a live control plane |
-| T1/T2 detector holds | unchanged by design (DA 2 fail safe, SGC-SELF-010); explained in the console | clearing them needs DET-JB and DET-PII (E39) |
