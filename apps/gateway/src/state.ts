@@ -156,6 +156,30 @@ export async function refresh() {
   bundle = { ...next, certificates: verifiedCertificates, policies: Object.fromEntries(verifiedPolicies), enforcement, revoked_jti: revokedTokens, rollouts: Object.fromEntries(rollouts) };
 }
 
+function isUnknownSigningKey(error: unknown): boolean {
+  return error instanceof Error && /^unknown signing key\b/.test(error.message);
+}
+
+async function refreshTrust() {
+  const trust = await internal<{ ca: PublicJwk; token: PublicJwk }>('/internal/trust');
+  caKeys = new Map([[trust.ca.kid, fromJwk(trust.ca)]]);
+  tokenKeys = new Map([[trust.token.kid, fromJwk(trust.token)]]);
+}
+
+// Control-plane deployments can rotate the CA after the trust document has been
+// read but before the bundle arrives. Re-read the authenticated trust document
+// once, then verify the bundle again. Any other verification failure remains
+// fail-closed.
+async function refreshWithCurrentTrust() {
+  try {
+    await refresh();
+  } catch (error) {
+    if (!isUnknownSigningKey(error)) throw error;
+    await refreshTrust();
+    await refresh();
+  }
+}
+
 async function eraseAgentMemory(agentId: string, sessionIds: string[], instanceIds: string[], tokenIds: string[]): Promise<void> {
   const runtime = agentRuntime.get(agentId);
   const sessions = [...new Set([...sessionIds, ...(runtime?.sessions ?? [])])];
@@ -226,13 +250,13 @@ async function subscribe() {
           } else if (type === 'enforcement') {
             applyScope(String(ev.scope_key), ev.state as ScopeState); // apply first, then confirm
             internal('/internal/acks', { method: 'POST', body: JSON.stringify({ event_id: ev.event_id, node_id: NODE_ID }) }).catch(() => {});
-            refresh().catch(() => {});
+            refreshWithCurrentTrust().catch(() => {});
           } else if (type === 'hitl') {
             onHitl(String(ev.approval_id));
           } else if (type === 'secret') {
             secretCache.delete(String(ev.secret_id));
           } else {
-            refresh().catch(() => {});
+            refreshWithCurrentTrust().catch(() => {});
           }
         }
       }
@@ -251,20 +275,18 @@ let heartbeatExtra: () => unknown = () => null;
 export const setHeartbeatExtra = (fn: () => unknown) => (heartbeatExtra = fn);
 
 export async function init() {
-  let trust: { ca: PublicJwk; token: PublicJwk } | undefined;
-  for (let attempt = 1; !trust; attempt++) {
+  for (let attempt = 1; ; attempt++) {
     try {
-      trust = await internal<{ ca: PublicJwk; token: PublicJwk }>('/internal/trust');
+      await refreshTrust();
+      break;
     } catch (e) {
       if (attempt >= 40) throw e;
       await new Promise((r) => setTimeout(r, 500)); // control plane still starting
     }
   }
-  caKeys = new Map([[trust.ca.kid, fromJwk(trust.ca)]]);
-  tokenKeys = new Map([[trust.token.kid, fromJwk(trust.token)]]);
-  await refresh();
+  await refreshWithCurrentTrust();
   void subscribe();
-  setInterval(() => refresh().catch(() => {}), POLL_MS).unref();
+  setInterval(() => refreshWithCurrentTrust().catch(() => {}), POLL_MS).unref();
   void heartbeat();
   setInterval(heartbeat, 10_000).unref();
 }
