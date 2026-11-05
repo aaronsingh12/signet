@@ -3,6 +3,21 @@
 @tailwind utilities;
 
 :root {
+  color-scheme: light;
+  --color-canvas: 237 241 248;
+  --color-line: 220 227 239;
+  --color-ink: 35 51 77;
+  --color-ink-2: 80 97 124;
+  --color-ink-3: 101 117 141;
+  --color-royal: 79 99 187;
+  --color-royal-600: 62 80 157;
+  --color-royal-50: 233 237 252;
+  --color-ok: 21 128 61;
+  --color-ok-50: 236 253 243;
+  --color-warn: 180 83 9;
+  --color-warn-50: 255 247 230;
+  --color-bad: 180 35 24;
+  --color-bad-50: 254 240 238;
   --clay-surface: linear-gradient(145deg, #ffffff, #f1f4fb);
   --clay-raised: 9px 9px 22px #b6c2d43d, -6px -6px 18px #ffffffbf, inset 3px 3px 6px #ffffff, inset -4px -4px 9px #bac6dc29;
   --clay-small: 4px 4px 10px #b5c1d43d, -3px -3px 8px #ffffffbf, inset 2px 2px 4px #ffffffcc, inset -2px -2px 5px #b9c5dd29;
@@ -205,3 +220,58 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 3px solid
   .metric-card { padding: 16px; border-radius: 19px; }
   .chart-card, .agent-card { border-radius: 21px; }
 }
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-canvas: 15 23 38;
+  --color-line: 51 65 85;
+  --color-ink: 230 237 247;
+  --color-ink-2: 185 199 219;
+  --color-ink-3: 155 173 197;
+  --color-royal: 155 173 255;
+  --color-royal-600: 123 146 242;
+  --color-royal-50: 41 51 83;
+  --color-ok: 96 211 148;
+  --color-ok-50: 24 57 43;
+  --color-warn: 250 194 105;
+  --color-warn-50: 65 48 27;
+  --color-bad: 255 150 143;
+  --color-bad-50: 67 35 41;
+  --clay-surface: linear-gradient(145deg, #243147, #1a2537);
+  --clay-raised: 7px 7px 20px #080e1c66, inset 1px 1px 2px #ffffff0a;
+  --clay-small: 3px 3px 9px #080e1c66, inset 1px 1px 2px #ffffff0a;
+  --clay-inset: inset 3px 3px 7px #080e1c80, inset -2px -2px 5px #ffffff08;
+  --clay-border: #394960;
+}
+[data-theme="dark"] body { background: radial-gradient(ellipse at 90% 0%, #243454 0%, transparent 46%), #0f1726; }
+[data-theme="dark"] .app-sidebar, [data-theme="dark"] .app-header { background: var(--clay-surface); }
+[data-theme="dark"] .input { background: #141e30; border-color: var(--clay-border); }
+[data-theme="dark"] .btn-ghost { border-color: var(--clay-border); }
+[data-theme="dark"] .bg-white, [data-theme="dark"] .dashboard-loading { background-color: #1c293c; }
+[data-theme="dark"] .metric-card, [data-theme="dark"] .agent-card { background: var(--clay-surface); }
+[data-theme="dark"] .agent-card:hover { box-shadow: var(--clay-raised); }
+[data-theme="dark"] .sidebar-link, [data-theme="dark"] .icon-button, [data-theme="dark"] .period-chip, [data-theme="dark"] .filter-chip { color: #b9c7db; }
+[data-theme="dark"] .sidebar-link:hover, [data-theme="dark"] .icon-button:hover { background: #2b3d54; color: #e6edf7; }
+[data-theme="dark"] .sidebar-link.selected, [data-theme="dark"] .filter-chip.active { background: #2d3b63; color: #bbc8ff; border-color: #435680; box-shadow: var(--clay-small); }
+[data-theme="dark"] .safety-banner { background: #18392b; border-color: #335b48; }
+[data-theme="dark"] .safety-banner.attention { background: #41301b; border-color: #6a502c; }
+[data-theme="dark"] .safety-banner p { color: #c0d2c9; }
+[data-theme="dark"] .safety-banner.attention p { color: #e0cdb0; }
+[data-theme="dark"] .safety-banner a, [data-theme="dark"] .section-heading a, [data-theme="dark"] .agent-card-footer a, [data-theme="dark"] .eyebrow { color: #78d8c5; }
+[data-theme="dark"] .metric-icon { background: #234739; color: #78d8c5; border-color: #395f50; }
+[data-theme="dark"] .agent-status { background: #334155; color: #cbd5e1; }
+[data-theme="dark"] .agent-status.ok { background: #18392b; color: #60d394; }
+[data-theme="dark"] .agent-status.bad { background: #432329; color: #ff968f; }
+[data-theme="dark"] .agent-status.warn { background: #41301b; color: #fac269; }
+[data-theme="dark"] .agent-stats strong, [data-theme="dark"] .donut-key strong, [data-theme="dark"] .header-breadcrumb strong { color: #e6edf7; }
+[data-theme="dark"] .brand small, [data-theme="dark"] .workspace-label small, [data-theme="dark"] .nav-caption,
+[data-theme="dark"] .dashboard-heading p, [data-theme="dark"] .metric-top, [data-theme="dark"] .metric-description,
+[data-theme="dark"] .section-heading p, [data-theme="dark"] .agent-purpose, [data-theme="dark"] .agent-stats span,
+[data-theme="dark"] .agent-card-footer, [data-theme="dark"] .chart-heading p, [data-theme="dark"] .chart-legend span,
+[data-theme="dark"] .chart-note, [data-theme="dark"] .donut-key > div { color: #a6b7ce; }
+[data-theme="dark"] .agent-card-footer, [data-theme="dark"] .settings-navigation { border-color: var(--clay-border); }
+[data-theme="dark"] .comparison-track { background: #334155; }
+[data-theme="dark"] .donut-center { box-shadow: var(--clay-inset); }
+[data-theme="dark"] .bg-slate-100, [data-theme="dark"] .bg-slate-50, [data-theme="dark"] .bg-slate-300 { background-color: #334155; }
+[data-theme="dark"] .bg-ink, [data-theme="dark"] .bg-ink-2 { background-color: #425570; }
+[data-theme="dark"] .bg-bad { background-color: #a33036; }

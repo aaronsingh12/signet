@@ -6,6 +6,7 @@ import { signOut, useMe } from '../lib/auth';
 import { ago } from '../lib/format';
 import { Logo } from './Logo';
 import { Modal } from './ui';
+import { ThemeToggle } from './ThemeToggle';
 
 const mainLinks = [
   { to: '/', label: 'Overview', icon: LayoutDashboard },
@@ -59,7 +60,7 @@ export function Shell() {
         <header className="app-header">
           <button className="icon-button mobile-menu" data-testid="navigation-toggle" aria-label="Open navigation" aria-expanded={mobileOpen} onClick={() => setMobileOpen(!mobileOpen)}>{mobileOpen ? <X size={20} /> : <Menu size={20} />}</button>
           <div className="header-breadcrumb"><span>Workspace</span><ChevronRight size={14} /><strong>{section}</strong></div>
-          <div className="header-actions"><Notifications /><span className="header-safety"><ShieldCheck size={15} /> Independent AI governance</span><button className="icon-button" aria-label="Open quick guide" onClick={() => setHelpOpen(true)}><CircleHelp size={19} /></button><div className="profile-avatar">{initials}</div><div className="profile-info"><strong>{me.principal.name}</strong><small>{me.principal.roles.includes('tenant_admin') ? 'Administrator' : 'Workspace member'}</small></div><button className="icon-button" aria-label="Sign out" onClick={() => void signOut()}><LogOut size={17} /></button></div>
+          <div className="header-actions"><ThemeToggle /><Notifications /><span className="header-safety"><ShieldCheck size={15} /> Independent AI governance</span><button className="icon-button" aria-label="Open quick guide" onClick={() => setHelpOpen(true)}><CircleHelp size={19} /></button><div className="profile-avatar">{initials}</div><div className="profile-info"><strong>{me.principal.name}</strong><small>{me.principal.roles.includes('tenant_admin') ? 'Administrator' : 'Workspace member'}</small></div><button className="icon-button" aria-label="Sign out" onClick={() => void signOut()}><LogOut size={17} /></button></div>
         </header>
         <main id="main-content" className="app-main"><Outlet /></main>
         <footer className="app-footer"><span>Signet · A clearer view of your AI</span><span><ShieldCheck size={13} /> Every action has a record</span></footer>
