@@ -358,6 +358,7 @@ api.get('/connect/info', requires('agents.read'), route(async () => {
     gateway_url_source: process.env.SIGNET_GATEWAY_PUBLIC_URL ? 'SIGNET_GATEWAY_PUBLIC_URL' : live[0] ? `gateway node ${live[0].id} (local address; set SIGNET_GATEWAY_PUBLIC_URL for remote agents)` : 'no live gateway node',
     control_url: process.env.SIGNET_CONTROL_PUBLIC_URL ?? `http://localhost:${PORT}`,
     control_url_source: process.env.SIGNET_CONTROL_PUBLIC_URL ? 'SIGNET_CONTROL_PUBLIC_URL' : 'local address; set SIGNET_CONTROL_PUBLIC_URL for remote agents',
+    environment: process.env.SIGNET_ENV ?? 'dev',
     models: tenant.settings.catalogue.map((c) => c.model),
     tools: (await tools.listTools()).map((t) => ({ alias: t.alias, kind: t.kind, actions: Object.keys(t.actions) })),
   };

@@ -369,7 +369,7 @@ function Gaps({ v, onChange }: { v: any; onChange: () => void }) {
   );
 }
 
-function AssessStage({ v, onChange }: { v: any; onChange: () => void }) {
+export function AssessStage({ v, onChange }: { v: any; onChange: () => void }) {
   const a = useAction(onChange);
   return (
     <div className="grid gap-4 xl:grid-cols-[1fr_320px]">
@@ -383,7 +383,7 @@ function AssessStage({ v, onChange }: { v: any; onChange: () => void }) {
       <Card title="Exit gate">
         <div className="mb-3 text-xs text-ink-3">Required for {v.agent.tier}: {v.required_assessments.join(', ') || 'none'}</div>
         <Gate gate={v.gate} />
-        <button className="btn-primary mt-4 w-full" disabled={a.busy} onClick={() => void a.run(`/lifecycles/${v.lifecycle.id}/stages/assess/submit`, 'POST')}>Submit for testing</button>
+        <button className="btn-primary mt-4 w-full" disabled={a.busy} onClick={() => void a.run(`/lifecycles/${v.lifecycle.id}/stages/assess/submit`, 'POST')}>Continue to tests</button>
         <div className="mt-2"><ErrorNote error={a.error} /></div>
       </Card>
     </div>
@@ -409,7 +409,7 @@ function Suites({ suites }: { suites: any[] }) {
   );
 }
 
-function TestStage({ v, onChange }: { v: any; onChange: () => void }) {
+export function TestStage({ v, onChange }: { v: any; onChange: () => void }) {
   const [functional, setFunctional] = useState('');
   const [bias, setBias] = useState('');
   const [redTeam, setRedTeam] = useState('');
@@ -448,7 +448,7 @@ function ApproveStage({ v }: { v: any }) {
   const r = v.approval;
   if (!r) return <Card><Empty>Waiting for the approval request.</Empty></Card>;
   return (
-    <Card title="Approval" action={<Link className="btn-primary" to={`/approvals?id=${r.id}`}>Open approval pack</Link>}>
+    <Card title="Approval" action={<Link className="btn-primary" to={`/needs-you?id=${r.id}`}>Open approval</Link>}>
       <KV
         rows={[
           ['Request', <Mono key="r">{r.id}</Mono>],
@@ -462,7 +462,7 @@ function ApproveStage({ v }: { v: any }) {
   );
 }
 
-function DeployStage({ v, onChange }: { v: any; onChange: () => void }) {
+export function DeployStage({ v, onChange }: { v: any; onChange: () => void }) {
   const d = v.deploy;
   const [reason, setReason] = useState('');
   const [ack, setAck] = useState(false);
@@ -473,32 +473,32 @@ function DeployStage({ v, onChange }: { v: any; onChange: () => void }) {
   const need = d.mode === 'shadow' ? d.shadow_days : 1;
   return (
     <div className="grid gap-4 xl:grid-cols-[1fr_340px]">
-      <Card title={<span>Rollout: <span className="capitalize">{d.mode}</span>{d.mode === 'canary' ? ` (${d.canary_pct}% of sessions enforced)` : ''}</span>}>
+      <Card title={<span>Stage: <span>{d.mode === 'shadow' ? 'Trial' : d.mode === 'canary' ? 'Partial protection' : 'Protected'}</span>{d.mode === 'canary' ? ` (${d.canary_pct}% of sessions enforced)` : ''}</span>}>
         <KV
           rows={[
-            ['Path', `shadow ${d.shadow_days} d${d.canary ? ` → ${d.canary_pct}% canary 1 d` : ''} → enforce`],
-            ['In this mode', `${d.days_in_mode.toFixed(2)} of ${need} days`],
-            ['Transactions', d.stats.transactions],
-            ['Would have been blocked', `${d.stats.would_block} (${d.stats.critical_would_block} critical)`],
-            ['Upstream errors', d.stats.upstream_errors],
-            ['Overrides', d.overrides.length ? d.overrides.join(' · ') : '—'],
+            ['Path', `Trial for ${d.shadow_days} days${d.canary ? `, then ${d.canary_pct}% of conversations for 1 day` : ''}, then full protection`],
+            ['So far', `${d.days_in_mode.toFixed(2)} of ${need} days`],
+            ['Requests', d.stats.transactions],
+            ['Would have been stopped or held', `${d.stats.would_block} (${d.stats.critical_would_block} critical)`],
+            ['Service errors', d.stats.upstream_errors],
+            ['Shortened by', d.overrides.length ? d.overrides.join(' · ') : '—'],
           ]}
         />
-        <p className="mt-3 text-xs text-ink-3">In shadow, Signet records what it would have blocked and lets the call through; kill rules, secrets exfiltration and the one-LLM rule are enforced from the first call. Look at the would-blocks in the Ledger Explorer before moving on.</p>
+        <p className="mt-3 text-xs text-ink-3">During the trial, Signet records what it would have stopped and lets the request through; emergency stops, leaked secrets and the one-AI-model rule are enforced from the first call. Look at the would-blocks in the Ledger Explorer before moving on.</p>
         <Link className="mt-1 inline-block text-xs text-royal hover:underline" to={`/ledger?agent=${v.agent.id}`}>Open this agent's records</Link>
       </Card>
-      <Card title={`Move to ${next}`}>
+      <Card title={next === 'canary' ? 'Protect 10% of conversations' : 'Turn on protection'}>
         {d.stats.critical_would_block > 0 && (
           <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} className="mt-1" /> I reviewed the {d.stats.critical_would_block} critical would-block decision(s)</label>
         )}
         {d.days_in_mode < need && (
           <>
-            <label className="mt-2 flex items-start gap-2 text-sm"><input type="checkbox" checked={override} onChange={(e) => setOverride(e.target.checked)} className="mt-1" /> Cut the {d.mode} period short (dev only, recorded)</label>
+            <label className="mt-2 flex items-start gap-2 text-sm"><input type="checkbox" checked={override} onChange={(e) => setOverride(e.target.checked)} className="mt-1" /> End this stage early (dev only, recorded)</label>
             {override && <input className="input mt-2" placeholder="Reason" value={reason} onChange={(e) => setReason(e.target.value)} />}
           </>
         )}
         <button className="btn-primary mt-3 w-full" disabled={a.busy} onClick={() => void a.run(`/lifecycles/${v.lifecycle.id}/deploy`, 'POST', { to: next, acknowledge_would_blocks: ack || undefined, dev_override: override || undefined, reason: reason || undefined })}>
-          Move to {next}
+          {next === 'canary' ? 'Start partial protection' : 'Turn on protection'}
         </button>
         <div className="mt-2"><ErrorNote error={a.error} /></div>
       </Card>

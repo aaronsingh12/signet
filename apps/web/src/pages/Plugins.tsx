@@ -70,7 +70,7 @@ export function Plugins() {
             <p className="mt-1 text-sm text-ink-2">Create and govern an agent directly in Signet, as before.</p>
           </div>
           <Link className="btn-primary inline-flex items-center gap-2" to="/agents/new">
-            <Rocket size={15} /> Propose agent <ExternalLink size={14} />
+            <Rocket size={15} /> Add as an agent <ExternalLink size={14} />
           </Link>
         </div>
       </Card>

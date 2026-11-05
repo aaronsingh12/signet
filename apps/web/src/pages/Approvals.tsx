@@ -4,16 +4,18 @@ import { Card, Empty, ErrorNote, KV, Mono, PageHeader, Pill, Tabs, TierChip } fr
 import { ApiError, api, useApi } from '../lib/api';
 import { useMe } from '../lib/auth';
 import { ago, date, hash } from '../lib/format';
+import { agentState, useAgentAnalytics } from '../lib/analytics';
+import { DETECTOR_HOLD_NOTE, isHighRisk } from '../lib/plain';
 
 // My Approvals (BP 7): every request with a slot I can fill, the approval pack I sign over, and the
 // decision. T1/T2 decisions need a sign-in within 5 minutes; the console sends me back to the IdP.
 
 const TYPE_LABEL: Record<string, string> = {
-  certificate: 'Seal',
-  risk_acceptance: 'Risk acceptance',
-  runtime_hitl: 'Runtime action',
-  quarantine_release: 'Quarantine release',
-  retirement: 'Retirement',
+  certificate: 'Approval',
+  risk_acceptance: 'Accept a risk',
+  runtime_hitl: 'Agent is waiting',
+  quarantine_release: 'Restart a paused agent',
+  retirement: 'Retire an agent',
 };
 
 const STATUS_PILL: Record<string, string> = { pending: 'require_approval', approved: 'allow', rejected: 'deny', sent_back: 'step_up', expired: 'deny', cancelled: 'none' };
@@ -31,11 +33,13 @@ export function Approvals() {
   const [tab, setTab] = useState('mine');
   const path = tab === 'mine' ? '/approvals?mine=1' : tab === 'pending' ? '/approvals?status=pending' : '/approvals?limit=100';
   const { data, reload } = useApi<any>(path, [tab]);
-  const items = (data?.items ?? []).filter((r: any) => tab !== 'decided' || r.status !== 'pending');
+  // Agents that are held mid-action come first: they time out.
+  const items = (data?.items ?? []).filter((r: any) => tab !== 'decided' || r.status !== 'pending').sort((a: any, b: any) => Number(b.type === 'runtime_hitl') - Number(a.type === 'runtime_hitl'));
   return (
     <>
-      <PageHeader title="My Approvals" subtitle="Each decision is signed over the approval pack's hash and written to the decision ledger. Owners sign the owner slot; independent reviewers sign the remaining slots. Administrators can complete certificate approval directly, including for their own agent. Every decision is audited." />
-      <Tabs active={tab} onChange={setTab} tabs={[{ id: 'mine', label: 'Waiting for me' }, { id: 'pending', label: 'All pending' }, { id: 'decided', label: 'Decided' }]} />
+      <PageHeader title="Needs you" subtitle="Everything waiting on you, most urgent first. Every decision is recorded." />
+      <PausedAgents />
+      <Tabs active={tab} onChange={setTab} tabs={[{ id: 'mine', label: 'Waiting for me' }, { id: 'pending', label: 'Waiting for anyone' }, { id: 'decided', label: 'Decided' }]} />
       <div className="grid gap-4 xl:grid-cols-[420px_1fr]">
         <Card pad={false}>
           {items.length ? (
@@ -58,7 +62,7 @@ export function Approvals() {
             <Empty>{tab === 'mine' ? 'Nothing is waiting for you.' : 'No requests.'}</Empty>
           )}
         </Card>
-        {selected ? <ApprovalDetail id={selected} onDecided={() => void reload()} /> : <Card><Empty>Select a request to see its approval pack.</Empty></Card>}
+        {selected ? <ApprovalDetail id={selected} onDecided={() => void reload()} /> : <Card><Empty>Choose an item to see the details and decide.</Empty></Card>}
       </div>
     </>
   );
@@ -79,11 +83,12 @@ export function ApprovalDetail({ id, onDecided, compact = false }: { id: string;
             ['Summary', r.summary || '—'],
             ['Requested', `${ago(r.created_at)} by ${r.created_by}`],
             ['Due', r.status === 'pending' ? <span key="d">{date(r.sla_due)} · {sla(r.sla_due)}{r.escalation ? ` · escalation level ${r.escalation}` : ''}</span> : date(r.decided_at)],
-            ['Pack hash', <Mono key="h" title={r.pack_hash}>{hash(r.pack_hash)}</Mono>],
+            
           ]}
         />
       </Card>
-      <Card title="Who must sign" pad={false}>
+      <WhatItCan r={r} />
+      <Card title="Who needs to approve" pad={false}>
         {r.type === 'certificate' && <p className="px-4 py-3 text-sm text-ink-2">{r.my_slots.includes('admin') ? 'You are an administrator. Approve below to complete this request without collecting the individual signatures.' : 'An administrator can also complete this certificate approval directly.'}</p>}
         <table className="w-full">
           <tbody>
@@ -129,7 +134,7 @@ function DecisionForm({ r, onDone }: { r: any; onDone: () => void }) {
   const reauth = () => location.assign(`/api/v1/auth/login?max_age=0&return_to=${encodeURIComponent(location.pathname + location.search)}`);
   return (
     <Card title="Your decision">
-      {solo && <p className="mb-3 rounded-md bg-warn-50 px-3 py-2 text-xs text-warn">Single-administrator workspace: approving signs every open slot ({r.my_slots.join(', ')}) at once. The ledger records that separation of duties was waived.</p>}
+      {solo && <p className="mb-3 rounded-md bg-warn-50 px-3 py-2 text-xs text-warn">You are the only administrator, so your approval fills every open place. The record shows that one person approved.</p>}
       {!solo && r.my_slots.length > 1 && (
         <div className="mb-3">
           <label className="label">Sign as</label>
@@ -138,15 +143,15 @@ function DecisionForm({ r, onDone }: { r: any; onDone: () => void }) {
           </select>
         </div>
       )}
-      <label className="label">Comment (required to reject or send back)</label>
+      <label className="label">Note (needed to refuse or send back)</label>
       <textarea className="input min-h-16" value={comment} onChange={(e) => setComment(e.target.value)} />
-      {(r.tier === 'T1' || r.tier === 'T2') && !runtime && <p className="mt-2 text-xs text-ink-3">{r.tier} decisions need a sign-in within the last 5 minutes (step-up, BP 7.3).</p>}
+      {(r.tier === 'T1' || r.tier === 'T2') && !runtime && <p className="mt-2 text-xs text-ink-3">At this risk level you need to have signed in within the last 5 minutes.</p>}
       <div className="mt-3 flex flex-wrap gap-2">
-        <button className="btn-primary" disabled={busy} onClick={() => void decide('approve')}>Approve{runtime ? ' once' : r.my_slots.includes('admin') ? ' as administrator' : ''}</button>
-        {runtime && <button className="btn-ghost" disabled={busy} onClick={() => void decide('approve_session')}>Approve for this session</button>}
-        {r.type === 'certificate' && <button className="btn-ghost" disabled={busy || !comment.trim()} onClick={() => void decide('send_back')}>Send back to Assess</button>}
-        <button className="btn-ghost text-bad" disabled={busy || !comment.trim()} onClick={() => void decide('reject')}>Reject</button>
-        {runtime && <button className="btn-danger" disabled={busy || !comment.trim()} onClick={() => void decide('reject_quarantine')}>Reject and quarantine</button>}
+        <button className="btn-primary" disabled={busy} onClick={() => void decide('approve')}>{runtime ? 'Allow once' : r.my_slots.includes('admin') ? 'Approve as administrator' : 'Approve'}</button>
+        {runtime && <button className="btn-ghost" disabled={busy} onClick={() => void decide('approve_session')}>Allow for 8 hours in this conversation</button>}
+        {r.type === 'certificate' && <button className="btn-ghost" disabled={busy || !comment.trim()} onClick={() => void decide('send_back')}>Send back with questions</button>}
+        <button className="btn-ghost text-bad" disabled={busy || !comment.trim()} onClick={() => void decide('reject')}>{runtime ? 'Refuse' : 'Reject'}</button>
+        {runtime && <button className="btn-danger" disabled={busy || !comment.trim()} onClick={() => void decide('reject_quarantine')}>Refuse and pause the agent</button>}
       </div>
       {error && (
         <div className="mt-3 space-y-2">
@@ -162,7 +167,7 @@ function Pack({ r, compact }: { r: any; compact: boolean }) {
   const p = r.pack ?? {};
   if (r.type === 'runtime_hitl') {
     return (
-      <Card title="The action waiting">
+      <Card title="What it wants to do">
         <KV
           rows={[
             ['Action', <Mono key="a">{p.action}</Mono>],
@@ -172,7 +177,8 @@ function Pack({ r, compact }: { r: any; compact: boolean }) {
             ['Session', <Mono key="s">{p.session_id}</Mono>],
           ]}
         />
-        <p className="mt-3 text-xs text-ink-3">No decision before the hold time ends is a rejection (RB-INV-11). “Approve for this session” lets the same action through for this session for 8 hours.</p>
+        <p className="mt-3 text-xs text-ink-3">If nobody decides in time, the request is refused.</p>
+        {(p.rules ?? []).includes('RB-INV-06') && <p className="note mt-3">{DETECTOR_HOLD_NOTE}</p>}
       </Card>
     );
   }
@@ -201,7 +207,7 @@ function Pack({ r, compact }: { r: any; compact: boolean }) {
           />
         </Card>
         {!compact && (
-          <Card title="Manifest to be sealed">
+          <Card title="Technical permissions">
             <pre className="mono max-h-96 overflow-auto rounded-md bg-canvas p-3 text-xs">{JSON.stringify(p.manifest, null, 2)}</pre>
           </Card>
         )}
@@ -222,11 +228,43 @@ export function MobileApproval() {
   return (
     <div className="mx-auto min-h-screen max-w-md bg-canvas p-4">
       <div className="mb-3 flex items-center justify-between text-xs text-ink-3">
-        <span className="font-semibold text-ink">Signet approval</span>
+        <span className="font-semibold text-ink">Signet</span>
         <span>{me.principal.name}</span>
       </div>
       <ApprovalDetail id={id!} compact />
-      <Link className="mt-4 block text-center text-xs text-royal" to="/approvals">Open My Approvals</Link>
+      <Link className="mt-4 block text-center text-xs text-royal" to="/needs-you">Open Needs you</Link>
     </div>
+  );
+}
+
+// Paused and stopped agents also wait on a person, though they are not approval requests.
+function PausedAgents() {
+  const { data } = useAgentAnalytics();
+  const agents = (data?.agents ?? []).filter((a) => ['bad', 'warn'].includes(agentState(a).tone));
+  if (!agents.length) return null;
+  return (
+    <Card className="mb-4" title="Agents that need attention" pad={false}>
+      <ul className="divide-y divide-line">
+        {agents.map((a) => <li key={a.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3"><div><b className="text-sm">{a.name}: {agentState(a).label}</b><div className="text-xs text-ink-3">{agentState(a).description}</div></div><Link className="btn-ghost" to={`/agents/${a.id}`}>See why</Link></li>)}
+      </ul>
+    </Card>
+  );
+}
+
+// The approver's question in plain words: what can this agent do, and what can't it?
+function WhatItCan({ r }: { r: any }) {
+  const m = r.pack?.manifest;
+  if (r.type !== 'certificate' || !m) return null;
+  const actions = (m.tools ?? []).flatMap((t: any) => (t.actions ?? []).map((a: any) => ({ key: `${t.server}.${a.name}`, name: a.name, impact: a.impact })));
+  const held = new Set((m.hitl ?? []).map((h: any) => h.action));
+  return (
+    <Card title="What you're approving">
+      {r.pack.agent?.purpose && <p className="mb-3 text-sm text-ink-2">{r.pack.agent.purpose}</p>}
+      <div className="grid gap-4 md:grid-cols-2">
+        <div><div className="label">It can</div><ul className="space-y-1 text-sm">{(m.models ?? []).length > 0 && <li>✓ Use the approved AI model</li>}{actions.map((a: any) => <li key={a.key}>✓ {a.name.replace(/_/g, ' ')}{held.has(a.key) ? ' (asks a person first)' : ''}</li>)}{(m.data_classes?.prompt ?? []).map((t: string) => <li key={t}>✓ Send {t.replace(/_/g, ' ')} data to the model</li>)}</ul></div>
+        <div><div className="label">It cannot</div><ul className="space-y-1 text-sm"><li>✕ Do anything not listed here</li>{(m.data_classes?.forbidden ?? []).map((t: string) => <li key={t}>✕ Send {t.replace(/_/g, ' ')} data to the model</li>)}<li>✕ Make over {m.limits?.rpm} requests a minute</li><li>✕ Spend over ${m.limits?.usd_per_day} a day</li></ul></div>
+      </div>
+      {isHighRisk(r.tier) && <p className="note mt-3">{DETECTOR_HOLD_NOTE}</p>}
+    </Card>
   );
 }

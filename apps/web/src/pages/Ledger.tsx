@@ -38,12 +38,12 @@ export function Ledger() {
   return (
     <>
       <PageHeader
-        title="Activity history"
+        title="History"
         subtitle="A permanent record of your agents’ actions. Open an entry to see what happened, or verify and export records for a review."
         actions={
           can('evidence.export') && (
             <a className="btn-primary" href="/api/v1/ledger/export">
-              Export as .sep
+              Download evidence package
             </a>
           )
         }

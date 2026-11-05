@@ -218,7 +218,7 @@ function LinkModal({ connectionId, platform, workload, onClose, onDone }: { conn
             {sealed.length ? (
               <select className="input" value={f.agent_id} onChange={(e) => setF({ ...f, agent_id: e.target.value })}>{sealed.map((a) => <option key={a.id} value={a.id}>{a.name} ({a.handle})</option>)}</select>
             ) : (
-              <p className="text-ink-2">No approved agent yet. {workload.registered_agent_id ? <Link className="text-royal hover:underline" to={`/agents/${workload.registered_agent_id}?tab=lifecycle`}>Finish this workload's agent approval</Link> : <Link className="text-royal hover:underline" to={`/agents/new?name=${encodeURIComponent(workload.name)}&runtime=${platform}`}>Propose an agent for it</Link>}, then come back.</p>
+              <p className="text-ink-2">No approved agent yet. {workload.registered_agent_id ? <Link className="text-royal hover:underline" to={`/agents/${workload.registered_agent_id}?tab=lifecycle`}>Finish this workload's agent approval</Link> : <Link className="text-royal hover:underline" to={`/agents/new?name=${encodeURIComponent(workload.name)}&runtime=${platform}`}>Add an agent for it</Link>}, then come back.</p>
             )}
           </div>
           <div className="grid gap-3 md:grid-cols-3">

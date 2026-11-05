@@ -59,17 +59,16 @@ export function Agent360() {
         }
       />
       {killed && <div className="mb-4 rounded-md border border-bad/30 bg-bad-50 px-4 py-2.5 text-sm text-bad">This agent is permanently stopped. It must go through a new approval process before it can return.</div>}
+      {data.lifecycle?.lifecycle.status === 'in_progress' && data.lifecycle.lifecycle.kind === 'initial' && <div className="note mb-4 flex flex-wrap items-center justify-between gap-3"><span>{agent.name} isn't finished yet. It's at the {data.lifecycle.lifecycle.stage === 'deploy' ? 'connect and trial' : data.lifecycle.lifecycle.stage} step.</span><Link className="btn-primary" data-testid="continue-setup" to={`/agents/${agent.id}/setup`}>Continue setup</Link></div>}
       <Tabs
         active={tab}
         onChange={setTab}
         tabs={[
-          { id: 'overview', label: 'Overview' },
+          { id: 'overview', label: 'Summary' },
+          { id: 'manifest', label: 'What it can do' },
+          { id: 'ledger', label: 'Activity' },
           { id: 'connection', label: 'Connection' },
-          { id: 'lifecycle', label: data.lifecycle?.lifecycle.status === 'in_progress' ? `Lifecycle · ${data.lifecycle.lifecycle.stage}` : 'Lifecycle' },
-          { id: 'seal', label: 'Approval certificate' },
-          { id: 'manifest', label: 'Permissions & limits' },
-          { id: 'instances', label: `Deployments (${data.instances.length})` },
-          { id: 'ledger', label: 'Activity history' },
+          { id: 'lifecycle', label: 'Approval & history' },
         ]}
       />
       {tab === 'overview' && (
@@ -119,9 +118,10 @@ export function Agent360() {
           </Card>
         </div></details></>
       )}
-      {tab === 'seal' && <SealTab agentId={agent.id} cert={cert} history={data.certificates} />}
+      {tab === 'manifest' && !cert && <Card><Empty>Its permissions are set during the safety check and take effect when it is approved.</Empty></Card>}
+      {tab === 'lifecycle' && <SealTab agentId={agent.id} cert={cert} history={data.certificates} />}
       {tab === 'manifest' && cert && <ManifestTab cert={cert} />}
-      {tab === 'instances' && (
+      {tab === 'connection' && data.instances.length > 0 && (
         <Card pad={false}>
           {data.instances.length ? (
             <table className="w-full">
