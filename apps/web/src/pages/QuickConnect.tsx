@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Card, ErrorNote, Mono, PageHeader, TierChip } from '../components/ui';
+import { Card, ErrorNote, Mono, TierChip } from '../components/ui';
+import { FlowFrame } from './AddAgent';
 import { ApiError, api, useApi } from '../lib/api';
 import { useMe } from '../lib/auth';
 
@@ -38,8 +39,9 @@ export function QuickConnect() {
 
   if (result?.state === 'connected') return <Connected r={result} />;
   return (
-    <>
-      <PageHeader title="Quick connect" subtitle="For an agent that only calls the model. Answer a few questions and get a key. Signet works out the risk level; riskier agents go through the full review." actions={<Link className="btn" to="/agents/new">Full registration</Link>} />
+    <FlowFrame step={result ? 3 : 0} back="/agents/new">
+      <div className="flex flex-wrap items-start justify-between gap-3"><h1 className="flow-title">Quick connect</h1><Link className="btn" to="/agents/new/one">Full registration</Link></div>
+      <p className="flow-lead mb-6">For an agent that only calls the model. Answer a few questions and get a key. Signet works out the risk level; riskier agents go through the full review.</p>
       <div className="max-w-3xl space-y-4">
         {!result && (
           <Card title="About your agent">
@@ -77,7 +79,7 @@ export function QuickConnect() {
         )}
         <ErrorNote error={error} />
       </div>
-    </>
+    </FlowFrame>
   );
 }
 
@@ -99,8 +101,9 @@ function Connected({ r }: { r: Extract<Result, { state: 'connected' }> }) {
     }
   };
   return (
-    <>
-      <PageHeader title="Your agent is connected" subtitle="Point your agent at these two values. Everything else in its code stays the same." />
+    <FlowFrame step={5} back="/agents">
+      <h1 className="flow-title">Your agent is connected</h1>
+      <p className="flow-lead mb-6">Point your agent at these two values. Everything else in its code stays the same.</p>
       <div className="max-w-3xl space-y-4">
         <Card title="Connection details">
           <div className="space-y-3 text-sm">
@@ -129,6 +132,6 @@ function Connected({ r }: { r: Extract<Result, { state: 'connected' }> }) {
         )}
         <Link className="btn" to={`/agents/${r.agent_id}`}>Open the agent page</Link>
       </div>
-    </>
+    </FlowFrame>
   );
 }

@@ -101,7 +101,13 @@ export async function buildBundle(): Promise<string> {
     tenant: tenant.id,
     issued_at: new Date(now).toISOString(),
     expires_at: new Date(now + BUNDLE_TTL_MS).toISOString(),
-    certificates: rows.filter((r) => policies[(JSON.parse(r.body) as CertificateBody).cert_id]).map((r) => r.jws),
+    // A bundle is an assertion from the current CA. Re-sign the persisted
+    // certificate body here instead of forwarding an historical database JWS:
+    // this keeps gateways verifiable after a configured CA rotation while the
+    // immutable certificate body and its policy hash remain unchanged.
+    certificates: rows
+      .filter((r) => policies[(JSON.parse(r.body) as CertificateBody).cert_id])
+      .map((r) => signJws(JSON.parse(r.body) as CertificateBody, keys.ca, 'signet-seal')),
     policies,
     enforcement,
     revoked_jti: ((await db.prepare('SELECT jti FROM revoked_jti WHERE exp > ?').all(Math.floor(now / 1000))) as { jti: string }[]).map((r) => r.jti),

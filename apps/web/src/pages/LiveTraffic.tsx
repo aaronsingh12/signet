@@ -4,6 +4,7 @@ import { Card, Empty, KV, Mono, PageHeader, Pill } from '../components/ui';
 import { api, useApi, useLive } from '../lib/api';
 import { dlpSummary, time } from '../lib/format';
 import { useAgentAnalytics } from '../lib/analytics';
+import { explainRecord } from '../lib/plain';
 
 // Every gateway decision as it happens. Payload values never appear here, only classes, counts and
 // hashes (Console UI & UX, Live Traffic).
@@ -25,7 +26,7 @@ export function LiveTraffic() {
   return (
     <>
       <PageHeader
-        title="Live activity"
+        title="Activity"
         subtitle="Follow your agents’ requests as they happen. Select a request to see its safety checks and outcome."
         actions={<button data-testid="live-activity-toggle" aria-pressed={paused} className="btn-ghost" onClick={() => setPaused(!paused)}>{paused ? 'Resume updates' : 'Pause updates'}</button>}
       />
@@ -41,7 +42,7 @@ export function LiveTraffic() {
           </div>
           {shown.length ? (
             <table className="w-full">
-              <thead><tr>{['Time (UTC)', 'Agent', 'Target', 'Decision', 'DLP', 'ms'].map((h) => <th key={h} className="th">{h}</th>)}</tr></thead>
+              <thead><tr>{['Time (UTC)', 'Agent', 'Action', 'Outcome', 'Sensitive data', 'ms'].map((h) => <th key={h} className="th">{h}</th>)}</tr></thead>
               <tbody>
                 {shown.map((r) => (
                   <tr key={r.record_id} className={`cursor-pointer hover:bg-canvas ${selected?.record?.record_id === r.record_id ? 'bg-royal-50' : ''}`} onClick={() => void api(`/ledger/records/${r.record_id}`).then(setSelected)}>
@@ -56,11 +57,11 @@ export function LiveTraffic() {
               </tbody>
             </table>
           ) : (
-            <Empty>No gateway traffic yet. Connect an agent (Agent 360 → Connection) and its model and tool calls appear here as they happen.</Empty>
+            <Empty>Nothing yet. Once an agent is connected, its requests appear here as they happen.</Empty>
           )}
         </Card>
-        <Card title="Gateway pipeline">
-          {selected ? <Pipeline r={selected.record} /> : <Empty>Select a decision to see each of the 14 pipeline steps.</Empty>}
+        <Card title="What happened">
+          {selected ? <Pipeline r={selected.record} /> : <Empty>Choose an entry to see what happened and why.</Empty>}
         </Card>
       </div>
     </>
@@ -71,6 +72,8 @@ export function Pipeline({ r }: { r: any }) {
   const d = r.data;
   return (
     <div className="space-y-3 text-sm">
+      <p className="note" data-testid="record-explanation">{explainRecord(d)}</p>
+      <details><summary className="cursor-pointer text-ink-2">What Signet checked, and technical details</summary><div className="mt-3 space-y-3">
       <KV
         rows={[
           ['Decision', <Pill key="d" value={d.policy_decision} />],
@@ -98,7 +101,8 @@ export function Pipeline({ r }: { r: any }) {
           Detectors: {d.detectors.map((x: any) => `${x.id} ${x.status}${x.score !== undefined ? ` ${x.score} (${x.band})` : ''}`).join(' · ')}
         </div>
       )}
-      <Link className="text-xs text-royal hover:underline" to={`/ledger?record=${r.record_id}`}>Open ledger record</Link>
+      </div></details>
+      <Link className="text-xs text-royal hover:underline" to={`/activity?tab=history&record=${r.record_id}`}>Open the permanent record</Link>
     </div>
   );
 }

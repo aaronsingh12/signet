@@ -369,7 +369,7 @@ function Gaps({ v, onChange }: { v: any; onChange: () => void }) {
   );
 }
 
-function AssessStage({ v, onChange }: { v: any; onChange: () => void }) {
+export function AssessStage({ v, onChange }: { v: any; onChange: () => void }) {
   const a = useAction(onChange);
   return (
     <div className="grid gap-4 xl:grid-cols-[1fr_320px]">
@@ -409,7 +409,7 @@ function Suites({ suites }: { suites: any[] }) {
   );
 }
 
-function TestStage({ v, onChange }: { v: any; onChange: () => void }) {
+export function TestStage({ v, onChange }: { v: any; onChange: () => void }) {
   const [functional, setFunctional] = useState('');
   const [bias, setBias] = useState('');
   const [redTeam, setRedTeam] = useState('');
@@ -448,7 +448,7 @@ function ApproveStage({ v }: { v: any }) {
   const r = v.approval;
   if (!r) return <Card><Empty>Waiting for the approval request.</Empty></Card>;
   return (
-    <Card title="Approval" action={<Link className="btn-primary" to={`/approvals?id=${r.id}`}>Open approval pack</Link>}>
+    <Card title="Approval" action={<Link className="btn-primary" to={`/needs-you?id=${r.id}`}>Open approval pack</Link>}>
       <KV
         rows={[
           ['Request', <Mono key="r">{r.id}</Mono>],
@@ -462,7 +462,7 @@ function ApproveStage({ v }: { v: any }) {
   );
 }
 
-function DeployStage({ v, onChange }: { v: any; onChange: () => void }) {
+export function DeployStage({ v, onChange }: { v: any; onChange: () => void }) {
   const d = v.deploy;
   const [reason, setReason] = useState('');
   const [ack, setAck] = useState(false);
