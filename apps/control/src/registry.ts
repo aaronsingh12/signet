@@ -150,11 +150,13 @@ export async function validateSeal(agent: Pick<AgentRow, 'tier'> & { id?: string
   }
   const actionKeys = new Set<string>();
   for (const t of input.tools ?? []) {
+    // Tools inside the agent have no address to register: the gateway checks them when the LLM proposes them.
+    const inline = t.server === 'inline://agent';
     const m = t.server.match(/^(mcp|http):\/\/([a-z0-9-]+)$/);
-    if (!m) throw invalid(`tool server ${t.server} must look like mcp://<alias> or http://<alias>`);
-    const alias = (await getTool(m[2]!));
-    if (!alias) throw new PolicyError('BP-5.1', `tool alias ${m[2]} is not registered`);
-    if (alias.kind !== m[1]) throw invalid(`tool alias ${m[2]} is a ${alias.kind} tool, not ${m[1]}`);
+    if (!inline && !m) throw invalid(`tool server ${t.server} must look like mcp://<alias>, http://<alias> or inline://agent`);
+    const alias = inline ? null : await getTool(m![2]!);
+    if (!inline && !alias) throw new PolicyError('BP-5.1', `tool alias ${m![2]} is not registered`);
+    if (alias && alias.kind !== m![1]) throw invalid(`tool alias ${m![2]} is a ${alias.kind} tool, not ${m![1]}`);
     for (const tag of t.data_scopes ?? []) {
       if (!DATA_TAGS.includes(tag)) throw invalid(`unknown data tag ${tag}`);
       if (tag === 'secrets') throw new PolicyError('RB-INV-16', 'secrets can never be passed in tool arguments; the gateway injects credentials');
@@ -164,7 +166,8 @@ export async function validateSeal(agent: Pick<AgentRow, 'tier'> & { id?: string
       if (agent.tier === 'T4' && (a.impact === 'privileged' || a.impact === 'critical')) {
         throw new PolicyError('RB-INV-17', `T4 seals cannot contain ${a.impact} action ${t.server}.${a.name}`);
       }
-      if (alias.kind === 'http' && !alias.actions[a.name]) throw invalid(`http tool ${m[2]} has no action ${a.name}`);
+      if (inline && !/^[A-Za-z0-9_-]{1,128}$/.test(a.name)) throw invalid(`tool name ${a.name} must be letters, numbers, _ or -, exactly as the agent's LLM names it`);
+      if (alias?.kind === 'http' && !alias.actions[a.name]) throw invalid(`http tool ${m![2]} has no action ${a.name}`);
       for (const [arg, c] of Object.entries(a.constraints ?? {})) {
         if (c.pattern) {
           try {

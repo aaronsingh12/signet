@@ -10,7 +10,7 @@ export type DataTag =
 export const DATA_TAGS: readonly DataTag[] = ['secrets', 'payment_card', 'special_category', 'legal_privileged', 'financial_account', 'personal', 'source_code', 'confidential_doc'];
 export const RESTRICTED_TAGS: readonly DataTag[] = ['secrets', 'payment_card', 'special_category', 'legal_privileged'];
 
-// The one cloud LLM (Rulebook v0.2, D-17). Every seal's models[] must point into this catalogue.
+// The approved LLMs: the default cloud LLM and any agent's own. Every seal's models[] must point into this catalogue.
 export interface CatalogueModel {
   model: string; // name agents send, e.g. gpt-oss:120b-cloud
   upstream_model: string; // name the provider reports back; anything else is family drift (RB-BL-02)
@@ -18,6 +18,8 @@ export interface CatalogueModel {
   region: string; // 'unverified' until the provider terms record is checked (RB-PROV-03)
   code_approved: boolean;
   price_per_1k_usd: { in: number; out: number };
+  // An agent's own LLM. Absent means the tenant's default cloud LLM. The key stays in the Secrets Broker.
+  upstream?: { base_url: string; secret_id: string | null };
 }
 
 export interface ModelGrant {
@@ -44,7 +46,7 @@ export interface ToolAction {
 }
 
 export interface ToolGrant {
-  server: string; // mcp://<alias> or http://<alias>
+  server: string; // mcp://<alias>, http://<alias>, or inline://agent for tools running inside the agent
   actions: ToolAction[];
   data_scopes?: DataTag[]; // tags this tool may receive in arguments
 }

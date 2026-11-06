@@ -9,6 +9,7 @@ import * as state from './state';
 import { handleTool } from './toolcall';
 import { forwardEdge } from './edge';
 import { ApiKeyRefused, resolveApiKey } from './apikey';
+import { chatToOllama, ollamaToChat, UnsupportedOllamaRequest } from './ollama';
 import { streamEvents, toChatRequest, toResponse, UnsupportedResponsesRequest } from './responses';
 
 const app = express();
@@ -29,7 +30,7 @@ app.post('/v1/identity/token', async (req, res, next) => {
 });
 
 // A deployment credential used as an API key (OPENAI_API_KEY=sdc_…) becomes the agent's workload token.
-app.use('/v1', (req, res, next) => {
+app.use(['/v1', '/api/chat', '/api/tags'], (req, res, next) => {
   resolveApiKey(req.headers).then(() => next(), (error: unknown) => {
     if (error instanceof ApiKeyRefused) {
       let detail = 'deployment credential refused';
@@ -41,17 +42,29 @@ app.use('/v1', (req, res, next) => {
   });
 });
 
-// The model list OpenAI-compatible clients check before chatting: only the tenant's one cloud LLM,
-// and only for a caller holding a valid key.
-app.get('/v1/models', (req, res) => {
+// The models a caller's seal grants; null when the key is not valid.
+function grantedModels(req: Request): string[] | null {
+  let claims: { exp: number; jti: string; cert_id: string };
   try {
-    const claims = verifyJws<{ exp: number; jti: string }>(String(req.headers.authorization ?? '').replace(/^Bearer\s+/i, ''), state.tokenKeys, 'JWT').payload;
-    if (claims.exp * 1000 < Date.now() || state.isRevoked(claims.jti)) throw new Error('expired or revoked');
+    claims = verifyJws<{ exp: number; jti: string; cert_id: string }>(String(req.headers.authorization ?? '').replace(/^Bearer\s+/i, ''), state.tokenKeys, 'JWT').payload;
+    if (claims.exp * 1000 < Date.now() || state.isRevoked(claims.jti)) return null;
   } catch {
-    return res.status(401).json({ error: { type: 'signet_policy', code: 'unauthenticated', message: 'a valid API key is required', decision: 'deny', rule_ids: ['BP-5.2-1'] } });
+    return null;
   }
+  const grants = state.certs.get(claims.cert_id)?.models ?? [];
+  const granted = (name: string) => grants.some((g) => new RegExp(`^${g.model.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}$`).test(name));
+  return (state.bundle?.catalogue ?? []).map((c) => c.model).filter(granted);
+}
+
+const unauthenticated = (res: Response) => res.status(401).json({ error: { type: 'signet_policy', code: 'unauthenticated', message: 'a valid API key is required', decision: 'deny', rule_ids: ['BP-5.2-1'] } });
+
+// The model list clients check before chatting: only what the seal grants, and only for a caller
+// holding a valid key.
+app.get('/v1/models', (req, res) => {
+  const models = grantedModels(req);
+  if (!models) return unauthenticated(res);
   const created = Math.floor(Date.parse(state.bundle?.issued_at ?? new Date().toISOString()) / 1000);
-  res.json({ object: 'list', data: (state.bundle?.catalogue ?? []).map((c) => ({ id: c.model, object: 'model', created, owned_by: 'signet' })) });
+  res.json({ object: 'list', data: models.map((id) => ({ id, object: 'model', created, owned_by: 'signet' })) });
 });
 
 const send = (res: Response, d: Done) => res.status(d.status).set(d.headers).json(d.body);
@@ -80,6 +93,30 @@ app.post(['/v1/chat/completions', '/v1/llm/chat/completions'], guard(async (req,
   const d = await handleChat(req.headers, req.body);
   if (d.status === 200 && req.body?.stream === true) return sendStream(res, d);
   send(res, d);
+}));
+
+// Ollama's native API, translated onto the same governed chat path. A streaming client gets the checked
+// answer as one final line, so outbound DLP has seen all of it.
+app.get('/api/tags', (req, res) => {
+  const models = grantedModels(req);
+  if (!models) return unauthenticated(res);
+  res.json({ models: models.map((name) => ({ name, model: name })) });
+});
+
+app.post('/api/chat', guard(async (req, res) => {
+  let chat: Record<string, unknown>;
+  try {
+    chat = ollamaToChat((req.body ?? {}) as Record<string, unknown>);
+  } catch (e) {
+    if (e instanceof UnsupportedOllamaRequest) return res.status(400).json({ error: { type: 'invalid_request_error', code: 'unsupported_ollama_feature', message: e.message } });
+    throw e;
+  }
+  const d = await handleChat(req.headers, chat);
+  if (d.status !== 200) return send(res, d);
+  const answer = chatToOllama(d.body as ChatResponse);
+  if (req.body?.stream === false) return send(res, { ...d, body: answer });
+  res.writeHead(200, { ...d.headers, 'content-type': 'application/x-ndjson' });
+  res.end(`${JSON.stringify(answer)}\n`);
 }));
 
 // OpenAI Responses API, translated onto the same governed chat path.

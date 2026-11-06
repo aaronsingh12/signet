@@ -9,10 +9,11 @@ import { cleanResponseText, inspectPrompt, newTextOf, textOf } from './policy';
 import { chatCompletion, credentialAttached, UpstreamRejected, UpstreamUnavailable, type ChatResponse } from './provider';
 import * as state from './state';
 import { taint, trackPending } from './taint';
+import { blockedAnswer, reviewProposedCalls } from './toolreview';
 import { detokenise, tokenise } from './vault';
 import { maybeEvaluate } from './evaluate';
 
-// Model calls to the one cloud LLM (BP 5.2 steps 6-13 for llm_call).
+// Model calls to an approved LLM (BP 5.2 steps 6-13 for llm_call).
 
 const OUTAGE_RETRY_AFTER_S = 30;
 type Msg = { role: string; content?: unknown };
@@ -30,7 +31,7 @@ export async function handleChat(headers: IncomingHttpHeaders, body: Record<stri
 }
 
 async function run(ctx: Ctx, headers: IncomingHttpHeaders, body: Record<string, unknown>, foreignProvider?: string): Promise<ChatResponse> {
-  const { claims, cert, policy } = await preflight(ctx, headers);
+  const { claims, cert, policy, eff } = await preflight(ctx, headers);
 
   // Only the cloud LLM may be called (RB-INV-19); other providers' API shapes count as out-of-manifest.
   if (foreignProvider) {
@@ -113,7 +114,7 @@ async function run(ctx: Ctx, headers: IncomingHttpHeaders, body: Record<string, 
   } else step(ctx, 10, 'pass', 'not required');
 
   // 11. Credential injection happens inside the provider adapter.
-  step(ctx, 11, 'pass', credentialAttached() ? 'brokered credential attached' : 'no provider credential configured');
+  step(ctx, 11, 'pass', model!.upstream ? (model!.upstream.secret_id ? "agent's own LLM: brokered credential attached" : "agent's own LLM: needs no credential") : credentialAttached() ? 'brokered credential attached' : 'no provider credential configured');
 
   // 12. Forward to the cloud LLM. A kill cuts the call mid-flight.
   const ctrl = new AbortController();
@@ -121,7 +122,7 @@ async function run(ctx: Ctx, headers: IncomingHttpHeaders, body: Record<string, 
   const t0 = performance.now();
   let resp: ChatResponse;
   try {
-    resp = await chatCompletion({ ...upstreamBody, model: model!.model }, ctrl.signal);
+    resp = await chatCompletion({ ...upstreamBody, model: model!.model }, ctrl.signal, model!.upstream);
     outage.record(claims.agent_id, true);
   } catch (e) {
     if (e instanceof UpstreamUnavailable) {
@@ -162,8 +163,26 @@ async function run(ctx: Ctx, headers: IncomingHttpHeaders, body: Record<string, 
     }
   }
 
-  // 13. DLP outbound: restore tokens for this caller, redact secrets, mask cards.
+  // The call was made, so it counts towards the budgets whatever happens to the answer next.
+  ctx.tokensIn = resp.usage?.prompt_tokens ?? estTokens;
+  ctx.tokensOut = resp.usage?.completion_tokens ?? 0;
+  ctx.costUsd = (ctx.tokensIn * model!.price_per_1k_usd.in + ctx.tokensOut * model!.price_per_1k_usd.out) / 1000;
+  limits.addUsage(claims.agent_id, ctx.tokensIn + ctx.tokensOut, ctx.costUsd);
+
   const restore = (s: string) => detokenise(s, claims.agent_id, ctx.sessionId).text;
+  // An agent on its own LLM may run tools in its own code: the tool calls its LLM proposes are checked here.
+  // Other agents call tools through the tool proxy, which checks them at that point.
+  if (model!.upstream) {
+    try {
+      await reviewProposedCalls(ctx, headers, resp, policy, eff.stepUp, restore);
+    } catch (e) {
+      if (!(e instanceof Halt) || e.status !== 403) throw e;
+      ctx.softBlock = e;
+      blockedAnswer(resp, e.message);
+    }
+  }
+
+  // 13. DLP outbound: restore tokens for this caller, redact secrets, mask cards.
   const allowedActions = new Set(Object.keys(policy.actions).map((k) => k.split('.').pop()));
   for (const choice of resp.choices ?? []) {
     const msg = choice.message;
@@ -177,9 +196,5 @@ async function run(ctx: Ctx, headers: IncomingHttpHeaders, body: Record<string, 
   const outActions = ctx.dlp.filter((d) => d.direction === 'out' && d.action !== 'allow').length;
   step(ctx, 13, 'pass', outActions ? `${outActions} value(s) redacted or masked` : 'clean');
 
-  ctx.tokensIn = resp.usage?.prompt_tokens ?? estTokens;
-  ctx.tokensOut = resp.usage?.completion_tokens ?? 0;
-  ctx.costUsd = (ctx.tokensIn * model!.price_per_1k_usd.in + ctx.tokensOut * model!.price_per_1k_usd.out) / 1000;
-  limits.addUsage(claims.agent_id, ctx.tokensIn + ctx.tokensOut, ctx.costUsd);
   return resp;
 }

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { AgentInsights } from '../components/AgentInsights';
+import { OnboardingGuide } from '../components/OnboardingGuide';
 import { Card, Empty, ErrorNote, KV, LEVEL_LABEL, Modal, Mono, PageHeader, Pill, Tabs, TierChip } from '../components/ui';
 import { ApiError, api, useApi } from '../lib/api';
 import { useCan, useMe } from '../lib/auth';
@@ -44,7 +45,7 @@ export function Agent360() {
           </span>
         }
         actions={
-          !killed && (
+          <div className="flex items-center gap-2"><OnboardingGuide />{!killed && (
             <details className="relative" data-testid="agent-management">
               <summary className="btn-ghost cursor-pointer">Manage agent</summary>
               <div className="absolute right-0 z-30 mt-2 flex w-64 flex-col gap-2 rounded-xl border border-line bg-white p-3 shadow-lg">
@@ -55,7 +56,7 @@ export function Agent360() {
               {ladderAllowed('kill') && <button className="btn-danger" onClick={() => setLadder('kill')}>Permanently stop agent</button>}
               </div>
             </details>
-          )
+          )}</div>
         }
       />
       {killed && <div className="mb-4 rounded-md border border-bad/30 bg-bad-50 px-4 py-2.5 text-sm text-bad">This agent is permanently stopped. It must go through a new approval process before it can return.</div>}

@@ -62,6 +62,21 @@ export async function reloadSettings(): Promise<TenantSettings> {
   return tenant.settings;
 }
 
+/** Adds or re-points an agent's own LLM. The tenant's default LLM cannot be overwritten this way. */
+export async function setAgentModel(model: string, upstream: NonNullable<CatalogueModel['upstream']>): Promise<CatalogueModel> {
+  await reloadSettings();
+  let entry = tenant.settings.catalogue.find((c) => c.model === model);
+  if (entry && !entry.upstream) throw new Error(`${model} is the default LLM`);
+  if (entry) entry.upstream = upstream;
+  else {
+    // Providers often report the name without its tag (beam:cloud answers as beam).
+    entry = { model, upstream_model: model.split(':')[0]!, family: model.split(':')[0]!, region: 'unverified', code_approved: false, price_per_1k_usd: { in: 0, out: 0 }, upstream };
+    tenant.settings.catalogue.push(entry);
+  }
+  (await db.prepare('UPDATE tenant SET settings = ? WHERE id = ?').run(JSON.stringify(tenant.settings), tenant.id));
+  return entry;
+}
+
 /** Price per 1,000 tokens for one catalogue model; costs, daily budgets and the per-request cost ceiling use it. */
 export async function setModelPrice(model: string, price: { in: number; out: number }): Promise<CatalogueModel> {
   await reloadSettings();

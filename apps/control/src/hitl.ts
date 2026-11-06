@@ -45,7 +45,7 @@ export async function open(input: HitlInput) {
     tier: agent.tier,
     created_by: `gateway:${input.node_id}`,
     sla_ms: tenant.settings.hitl_wait_seconds * 1000,
-    title: `Runtime approval · ${agent.handle} · ${input.action_key.replace(/^(mcp|http):\/\//, '')}`,
+    title: `Runtime approval · ${agent.handle} · ${input.action_key.replace(/^(mcp|http|inline):\/\//, '')}`,
     summary: input.reasons.join('; ') || input.rule_ids.join(', '),
     pack: { action: input.action_key, args: input.args_masked, rules: input.rule_ids, reasons: input.reasons, session_id: input.session_id, caller_user_id: input.caller_user_id, cert_id: input.cert_id },
     slots,
