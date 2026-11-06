@@ -30,6 +30,8 @@
     }
   },
   "rewrites": [
+    { "source": "/api/chat", "destination": { "service": "gateway" } },
+    { "source": "/api/tags", "destination": { "service": "gateway" } },
     { "source": "/api/:path*", "destination": { "service": "control" } },
     { "source": "/healthz", "destination": { "service": "control" } },
     { "source": "/v1/:path*", "destination": { "service": "gateway" } },
