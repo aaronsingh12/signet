@@ -100,10 +100,13 @@ export async function testCall(credential: unknown): Promise<{ ok: boolean; stat
   const base = process.env.SIGNET_GATEWAY_PUBLIC_URL ?? 'http://localhost:8100';
   let r;
   try {
+    // Test with a model this agent's seal grants: any other would count as an out-of-manifest attempt.
+    const listed = await request(`${base.replace(/\/+$/, '')}/v1/models`, { headers: { authorization: `Bearer ${credential}` }, timeoutMs: 10_000 });
+    const model = (listed.ok ? listed.json<{ data?: { id: string }[] }>().data?.[0]?.id : undefined) ?? tenant.settings.catalogue[0]!.model;
     r = await request(`${base.replace(/\/+$/, '')}/v1/chat/completions`, {
       method: 'POST', timeoutMs: 60_000,
       headers: { 'content-type': 'application/json', authorization: `Bearer ${credential}` },
-      body: JSON.stringify({ model: tenant.settings.catalogue[0]!.model, max_tokens: 200, messages: [{ role: 'user', content: 'Connection test: reply with the single word OK.' }] }),
+      body: JSON.stringify({ model, max_tokens: 200, messages: [{ role: 'user', content: 'Connection test: reply with the single word OK.' }] }),
     });
   } catch (e) {
     return { ok: false, status: 0, code: 'gateway_unreachable', message: (e as Error).message, hint: `Signet could not reach the gateway at ${base}. Check SIGNET_GATEWAY_PUBLIC_URL.` };

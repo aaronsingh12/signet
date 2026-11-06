@@ -1,6 +1,6 @@
 /** Clay surfaces use warm neutrals, a green seal and distinct safety colors. */
 export default {
-  content: ['./index.html', './src/**/*.{ts,tsx}'],
+  content: { relative: true, files: ['./index.html', './src/**/*.{ts,tsx}'] },
   theme: {
     extend: {
       colors: {

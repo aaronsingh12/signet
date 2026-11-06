@@ -19,7 +19,7 @@ interface SetupAgent { id: string; name: string; kind: string; connection_method
 
 /** Keep credentials in component memory only; registration and seal approval remain separate steps. */
 export function ConnectionSetup({ agent, certificate, state, onChange }: {
-  agent: SetupAgent; certificate: { environments: string[]; tools?: { server: string; actions: { name: string }[] }[] } | null; state: string; onChange: () => void;
+  agent: SetupAgent; certificate: { environments: string[]; models?: { model: string }[]; tools?: { server: string; actions: { name: string }[] }[] } | null; state: string; onChange: () => void;
 }) {
   const can = useCan();
   const { data: info, error: infoError } = useApi<ConnectInfo>('/connect/info');
@@ -35,7 +35,7 @@ export function ConnectionSetup({ agent, certificate, state, onChange }: {
   const [gatewayTest, setGatewayTest] = useState<string | null>(null);
   const control = info?.control_url ?? '<control-url>';
   const gateway = info?.gateway_url ?? '<gateway-url>';
-  const model = info?.models[0] ?? '<approved-model>';
+  const model = certificate?.models?.[0]?.model ?? info?.models[0] ?? '<approved-model>';
   const tokenUrl = `${control}/api/v1/identity/token`;
   const permitted = !!certificate && can('identity.bootstrap') && state !== 'revoked' && state !== 'suspended';
   const unsupported = agent.kind === 'third_party' && (method === 'bootstrap' || method === 'hybrid');

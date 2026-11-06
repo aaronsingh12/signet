@@ -1,6 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
 import express, { type NextFunction, type Request, type Response } from 'express';
-import { devSecret, env, toJwk, verifyJws, type CertificateBody } from '@signet/core';
+import { devSecret, env, newId, toJwk, verifyJws, type CertificateBody } from '@signet/core';
 import { db, nowIso } from './db';
 import * as detectors from './detectors';
 import * as discovery from './discovery';
@@ -23,7 +23,7 @@ import * as secrets from './secrets';
 import { commandCenter } from './stats';
 import { agentAnalytics } from './agent-analytics';
 import { agentRemovalPreview, removeAgent } from './agent-removal';
-import { reloadSettings, setModelPrice, tenant } from './tenant';
+import { reloadSettings, setAgentModel, setModelPrice, tenant } from './tenant';
 import * as approvals from './approvals';
 import * as controls from './controls';
 import * as hitl from './hitl';
@@ -200,6 +200,27 @@ api.get('/plugins/vercel/connect', requires('tenant.admin'), route((_req, res) =
 api.get('/plugins/vercel/callback', requires('tenant.admin'), route(async (req, res) => (await plugins.completeVercelConnection(req, res, principalOf(res)))));
 api.post('/plugins/vercel/disconnect', requires('tenant.admin'), route(async (_req, res) => (await plugins.disconnectVercel(principalOf(res)))));
 api.get('/catalogue', requires('agents.read'), route(async () => ({ catalogue: (await reloadSettings()).catalogue })));
+// An agent's own LLM: agents keep their model and Signet checks each call on its way there. The key goes
+// to the Secrets Broker, as kind tool so it can never be taken for the default LLM's credential.
+api.post('/catalogue', requires('tenant.admin'), route(async (req, res) => {
+  const p = principalOf(res);
+  const model = typeof req.body?.model === 'string' ? req.body.model.trim() : '';
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(model)) throw invalid('model must be the name the agent sends, such as beam:cloud');
+  let url: URL;
+  try { url = new URL(String(req.body?.base_url ?? '').trim()); } catch { throw invalid('base_url must be a full address, such as https://llm.example.com/v1'); }
+  const local = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(url.hostname);
+  if ((url.protocol !== 'https:' && !(url.protocol === 'http:' && local)) || url.username || url.password || url.search || url.hash) throw invalid('base_url must use HTTPS, with no credentials or query in it');
+  const key = typeof req.body?.api_key === 'string' ? req.body.api_key : '';
+  const existing = (await reloadSettings()).catalogue.find((c) => c.model === model);
+  if (existing && !existing.upstream) throw invalid(`${model} is the default LLM and cannot be re-pointed here`);
+  let secretId = existing?.upstream?.secret_id ?? null;
+  if (key && secretId) await secrets.rotateSecret(secretId, key, p);
+  else if (key) secretId = (await secrets.putSecret({ name: `llm-${model.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40)}-${newId('sec').slice(-6).toLowerCase()}`, kind: 'tool', value: key }, p)).id;
+  const entry = await setAgentModel(model, { base_url: url.toString().replace(/\/+$/, ''), secret_id: secretId });
+  await ledger.append({ kind: 'admin', data: { event: 'catalogue.agent_llm_set', model, base_url: entry.upstream!.base_url, key_stored: !!secretId, actor: p.id } });
+  hub.publish('bundle', { reason: 'catalogue.agent_llm_set', model });
+  return [existing ? 200 : 201, { model: { model: entry.model, base_url: entry.upstream!.base_url, key_stored: !!secretId } }];
+}));
 // Model prices drive recorded cost, daily cost budgets and the per-request cost ceiling.
 api.put('/catalogue/:model/price', requires('tenant.admin'), route(async (req, res) => {
   const model = String(req.params.model);

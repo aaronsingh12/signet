@@ -1,9 +1,9 @@
-import { env, request, type HttpResponse } from '@signet/core';
+import { destinationPolicyFromEnv, env, request, type CatalogueModel, type HttpResponse } from '@signet/core';
 import * as state from './state';
 
-// The single cloud LLM adapter (Rulebook v0.2, RB-PROV-01). Everything provider-specific lives here,
-// behind this interface, so a second provider later changes this file and the catalogue, not the rules.
-// Default target: gpt-oss:120b-cloud via the Ollama OpenAI-compatible endpoint.
+// The LLM adapter. Everything provider-specific lives here, behind this interface. Default target:
+// gpt-oss:120b-cloud via the Ollama OpenAI-compatible endpoint; a catalogue entry with an upstream
+// goes to that agent's own LLM instead, after the same checks.
 
 const BASE_URL = env('SIGNET_LLM_BASE_URL', 'http://localhost:11434/v1').replace(/\/$/, '');
 const TIMEOUT_MS = Number(env('SIGNET_LLM_TIMEOUT_MS', '120000'));
@@ -49,18 +49,25 @@ export function credentialAttached() {
   return Boolean(state.bundle?.llm_credential) || Boolean(process.env.SIGNET_LLM_API_KEY) || isLocal;
 }
 
-export async function chatCompletion(body: Record<string, unknown>, signal: AbortSignal): Promise<ChatResponse> {
+// An agent's own LLM gets only its own key: the default LLM's credential never leaves for another host.
+async function upstreamCredential(upstream: NonNullable<CatalogueModel['upstream']>): Promise<Awaited<ReturnType<typeof credential>>> {
+  return upstream.secret_id ? { value: await state.secret(upstream.secret_id), source: 'broker' } : { value: null, source: 'none' };
+}
+
+const DESTINATIONS = destinationPolicyFromEnv();
+
+export async function chatCompletion(body: Record<string, unknown>, signal: AbortSignal, upstream?: CatalogueModel['upstream']): Promise<ChatResponse> {
   const headers: Record<string, string> = { 'content-type': 'application/json' };
   let cred: Awaited<ReturnType<typeof credential>>;
   try {
-    cred = await credential();
+    cred = upstream ? await upstreamCredential(upstream) : await credential();
   } catch (e) {
     throw new UpstreamUnavailable(`cloud LLM credential unavailable from the Secrets Broker: ${(e as Error).message}`);
   }
   if (cred.value) headers.authorization = `Bearer ${cred.value}`;
   let r: HttpResponse;
   try {
-    r = await request(`${BASE_URL}/chat/completions`, { method: 'POST', headers, body: JSON.stringify({ ...body, stream: false }), signal, timeoutMs: TIMEOUT_MS });
+    r = await request(`${upstream?.base_url ?? BASE_URL}/chat/completions`, { method: 'POST', headers, body: JSON.stringify({ ...body, stream: false }), signal, timeoutMs: TIMEOUT_MS, ...(upstream ? { destination: DESTINATIONS } : {}) });
   } catch (e) {
     if (signal.aborted) throw e;
     throw new UpstreamUnavailable(`cloud LLM unreachable: ${(e as Error).message}`);
@@ -78,7 +85,7 @@ let status: LlmStatus = { state: 'not_checked', checked_at: null, detail: 'not c
 export const llmStatus = () => status;
 
 export async function probe(): Promise<LlmStatus> {
-  const models = (state.bundle?.catalogue ?? []).map((c) => c.upstream_model ?? c.model); // the name the gateway sends upstream
+  const models = (state.bundle?.catalogue ?? []).filter((c) => !c.upstream).map((c) => c.upstream_model ?? c.model); // the name the gateway sends upstream
   let cred: Awaited<ReturnType<typeof credential>> = { value: null, source: 'none' };
   const at = new Date().toISOString();
   try {

@@ -1,6 +1,8 @@
 import { ArrowLeft, Check, Plus, Trash2, X } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { AgentLlmPanel } from '../components/AgentLlmPanel';
+import { OnboardingGuide } from '../components/OnboardingGuide';
 import { RestConnectionWizard } from '../components/RestConnectionWizard';
 import { ExternalConnectionFields, newConnectionDraft, type ConnectionDraft } from '../components/ExternalConnections';
 import { CONNECTION_METHODS } from '../lib/connections';
@@ -26,7 +28,7 @@ export function FlowFrame({ step, back = '/agents', narrow, children }: { step: 
         <ol className="flow-steps" aria-label="Progress">
           {FLOW_STEPS.map((label, i) => <li key={label} aria-current={i === step ? 'step' : undefined} className={i < step ? 'done' : i === step ? 'now' : ''}><i>{i < step ? <Check size={13} /> : i + 1}</i><span>{label}</span></li>)}
         </ol>
-        <Link to="/agents" className="flow-exit">Exit</Link>
+        <div className="flex items-center gap-4"><OnboardingGuide /><Link to="/agents" className="flow-exit">Exit</Link></div>
       </header>
       <div className={`flow-body ${narrow ? 'narrow' : ''}`}>{children}</div>
     </div>
@@ -95,9 +97,9 @@ interface Draft {
   users: string[]; data: string[]; decisions: boolean | null; domains: string[]; undo: string;
   usesApps: boolean | null; actions: AppAction[]; autonomy: string;
   runKind: string; method: ConnectionMethod; runtime: string; framework: string; modelProvider: string; contract: string; vendorContact: string; residency: string; documentation: string;
-  team: string; value: string; plannedTools: string; template: string | null; environment: string;
+  team: string; value: string; plannedTools: string; template: string | null; environment: string; model: string;
 }
-const EMPTY: Draft = { name: '', purpose: '', sponsor: '', vendorHosted: false, vendor: '', users: [], data: [], decisions: null, domains: [], undo: '', usesApps: null, actions: [], autonomy: 'L1', runKind: 'self_hosted', method: 'rest', runtime: '', framework: '', modelProvider: '', contract: '', vendorContact: '', residency: '', documentation: '', team: '', value: '', plannedTools: '', template: null, environment: 'dev' };
+const EMPTY: Draft = { name: '', purpose: '', sponsor: '', vendorHosted: false, vendor: '', users: [], data: [], decisions: null, domains: [], undo: '', usesApps: null, actions: [], autonomy: 'L1', runKind: 'self_hosted', method: 'rest', runtime: '', framework: '', modelProvider: '', contract: '', vendorContact: '', residency: '', documentation: '', team: '', value: '', plannedTools: '', template: null, environment: 'dev', model: '' };
 const DRAFT_KEY = 'signet.add-agent-draft';
 
 function loadDraft(): Draft {
@@ -126,7 +128,9 @@ export function AddAgentFlow() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
   const [agentId, setAgentId] = useState<string | null>(null);
-  const { data: catalogue } = useApi<{ catalogue: { model: string; region: string }[] }>('/catalogue');
+  const { data: catalogue, reload: reloadCatalogue } = useApi<{ catalogue: { model: string; region: string; upstream?: unknown }[] }>('/catalogue');
+  const can = useCan();
+  const [addingLlm, setAddingLlm] = useState(false);
   // The draft holds no secrets: app keys go straight to the Secrets Broker.
   useEffect(() => { try { localStorage.setItem(DRAFT_KEY, JSON.stringify(d)); } catch { /* the form still works */ } }, [d]);
   const set = (patch: Partial<Draft>) => setD({ ...d, ...patch });
@@ -176,7 +180,7 @@ export function AddAgentFlow() {
         lifecycleId = (await api<any>(`/agents/${id}`)).lifecycle?.lifecycle.id;
       }
       const tools = [...new Set(actions.map((a) => a.server))].map((server) => ({ server, data_scopes: d.data.filter((t) => !RESTRICTED.includes(t)), actions: actions.filter((a) => a.server === server).map((a) => ({ name: a.name, impact: a.impact })) }));
-      const model = catalogue?.catalogue[0];
+      const model = catalogue?.catalogue.find((c) => c.model === d.model) ?? catalogue?.catalogue[0];
       await api(`/lifecycles/${lifecycleId}/manifest`, {
         method: 'PUT',
         body: {
@@ -263,6 +267,7 @@ export function AddAgentFlow() {
               <Choice on={d.usesApps === false} testId="flow-apps-no" title="No, it only answers" hint="Nothing else to set up." onClick={() => set({ usesApps: false })} />
               <Choice on={d.usesApps === true} testId="flow-apps-yes" title="Yes, it uses other apps" hint="List what it needs below." onClick={() => set({ usesApps: true })} />
             </div>
+            {d.usesApps && !d.vendorHosted && <InsideTools onAdd={(a) => set({ actions: [...d.actions.filter((x) => `${x.server}.${x.name}` !== `${a.server}.${a.name}`), a] })} />}
             {d.usesApps && (
               <div className="card mt-4 p-4">
                 {d.actions.map((a, i) => (
@@ -284,6 +289,9 @@ export function AddAgentFlow() {
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" role="radiogroup">{FREEDOM.map(([v, l, h]) => <Choice key={v} testId={`flow-freedom-${v}`} on={d.autonomy === v} title={l} hint={h} onClick={() => set({ autonomy: v })} />)}</div>
             <label className="flow-label" htmlFor="flow-planned">Other planned tools <span className="font-normal text-ink-3">(optional, comma-separated)</span></label>
             <input id="flow-planned" className="input" value={d.plannedTools} onChange={(e) => set({ plannedTools: e.target.value })} placeholder="lookup_order (read), issue_refund (privileged)" />
+            {!d.vendorHosted && <><label className="flow-label" htmlFor="flow-llm">Which LLM does it use?</label>
+              <select id="flow-llm" data-testid="flow-llm" className="input" value={d.model || catalogue?.catalogue[0]?.model || ''} onChange={(e) => set({ model: e.target.value })}>{(catalogue?.catalogue ?? []).map((c) => <option key={c.model} value={c.model}>{c.model}{c.upstream ? " (agent's own LLM)" : ' (Signet default)'}</option>)}</select>
+              {can('tenant.admin') ? <button type="button" className="mt-2 text-sm font-medium text-royal" data-testid="flow-add-llm" onClick={() => setAddingLlm(true)}>+ Add your agent's LLM</button> : <p className="mt-2 text-xs text-ink-3">Using its own LLM? Ask a tenant admin to add it.</p>}</>}
             <details className="mt-5 rounded-lg border border-line p-3" data-testid="flow-connection-details"><summary className="cursor-pointer text-sm font-medium">Connection method: {CONNECTION_METHODS.find((m) => m.id === d.method)?.label}</summary>
               <div className="mt-3 grid gap-3 md:grid-cols-2" role="radiogroup">{CONNECTION_METHODS.map((m) => <Choice key={m.id} testId={`connect-method-${m.id}`} on={d.method === m.id} title={m.label} hint={m.description} onClick={() => { if (!(d.vendorHosted && (m.id === 'bootstrap' || m.id === 'hybrid'))) { set({ method: m.id }); if (m.id === 'oauth') setConnectionDraft(newConnectionDraft('oauth')); } }} />)}</div>
               {d.method === 'oauth' && <div className="mt-3"><label className="label">Direction<select data-testid="wizard-direction" className="input" value={direction} onChange={(e) => { setDirection(e.target.value); setConnectionDraft(newConnectionDraft('oauth')); }}><option value="inbound">External agent calls Signet</option><option value="outbound">Signet connects to external platform</option></select></label>{direction === 'outbound' && <ExternalConnectionFields draft={{ ...connectionDraft, config: { ...connectionDraft.config, method: 'oauth', auth: 'oauth' } }} onChange={setConnectionDraft} />}</div>}
@@ -298,8 +306,29 @@ export function AddAgentFlow() {
           {step === 2 && <><h3>You can skip apps for now</h3><p>No setup is needed to get this far. If you add apps later, the agent's safety check will ask for them before approval.</p></>}
         </aside>
       </div>
+      {addingLlm && <AgentLlmPanel onClose={() => setAddingLlm(false)} onSaved={(model) => { set({ model }); setAddingLlm(false); void reloadCatalogue(); }} />}
       {adding && <AddActionPanel onClose={() => setAdding(false)} onAdd={(a) => { set({ actions: [...d.actions.filter((x) => `${x.server}.${x.name}` !== `${a.server}.${a.name}`), a] }); setAdding(false); }} />}
     </FlowFrame>
+  );
+}
+
+// Tools that run in the agent's own code have no address. Signet checks them when the agent's LLM proposes them.
+function InsideTools({ onAdd }: { onAdd: (a: AppAction) => void }) {
+  const [name, setName] = useState('');
+  const [impact, setImpact] = useState('read');
+  const [ask, setAsk] = useState(false);
+  const valid = /^[A-Za-z0-9_-]{1,128}$/.test(name.trim());
+  return (
+    <div className="card mt-4 p-4" data-testid="inside-tools">
+      <b className="text-sm">Tools inside the agent</b>
+      <p className="mt-1 text-xs text-ink-3">For tools in the agent's own code, with no web address. Type each name exactly as its LLM uses it.</p>
+      <div className="mt-3 grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+        <input aria-label="Tool name" data-testid="inside-tool-name" className="input mono" value={name} onChange={(e) => setName(e.target.value)} placeholder="get_order_status" />
+        <select aria-label="What it does to your data" data-testid="inside-tool-impact" className="input" value={impact} onChange={(e) => setImpact(e.target.value)}>{IMPACT.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+        <button type="button" className="btn-ghost" data-testid="inside-tool-add" disabled={!valid} onClick={() => { onAdd({ server: 'inline://agent', name: name.trim(), label: name.trim(), impact, ask }); setName(''); }}><Plus size={15} />Add</button>
+      </div>
+      <label className="mt-3 flex items-center gap-2 text-sm"><input type="checkbox" checked={ask} onChange={(e) => setAsk(e.target.checked)} />Always ask a person before it does this</label>
+    </div>
   );
 }
 

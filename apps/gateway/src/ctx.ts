@@ -25,6 +25,7 @@ export interface Step {
 }
 
 export interface Ctx {
+  softBlock?: Halt;
   requestId: string;
   clientAddress: string;
   started: number;
@@ -204,6 +205,8 @@ export interface Done {
 // 14. Log: the record is written before any answer leaves the gateway (RB-INV-15).
 export async function finish(ctx: Ctx, err: Halt | null, okBody: unknown): Promise<Done> {
   step(ctx, 14, 'pass');
+  // A refusal the agent receives as a normal answer is still recorded as a refusal.
+  const refusal = err ?? ctx.softBlock ?? null;
   const total = performance.now() - ctx.started;
   const counts: Record<string, number> = {};
   for (const d of ctx.dlp) counts[`${d.direction}:${d.tag}:${d.action}`] = (counts[`${d.direction}:${d.tag}:${d.action}`] ?? 0) + 1;
@@ -226,7 +229,7 @@ export async function finish(ctx: Ctx, err: Halt | null, okBody: unknown): Promi
     data_classes_in: tags('in'),
     data_classes_out: tags('out'),
     dlp_actions: counts,
-    policy_decision: !err && ctx.wouldBlock.length ? 'would_block' : ctx.decision,
+    policy_decision: !refusal && ctx.wouldBlock.length ? 'would_block' : ctx.decision,
     shadow_rule_ids: ctx.wouldBlock.length ? [...new Set(ctx.wouldBlock.flatMap((w) => w.rules))] : undefined,
     would_block: ctx.wouldBlock.length ? ctx.wouldBlock : undefined,
     policy_rule_ids: [...new Set(ctx.rules)],
@@ -239,8 +242,8 @@ export async function finish(ctx: Ctx, err: Halt | null, okBody: unknown): Promi
     cost_usd: ctx.costUsd,
     latency_ms_gateway: Math.round((total - ctx.upstreamMs) * 10) / 10,
     latency_ms_upstream: ctx.upstreamMs,
-    outcome: err ? err.ledgerOutcome : 'success',
-    error_code: err?.code ?? null,
+    outcome: refusal ? refusal.ledgerOutcome : 'success',
+    error_code: refusal?.code ?? null,
     steps: ctx.steps,
     ...ctx.extra,
   };
