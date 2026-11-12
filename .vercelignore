@@ -1,0 +1,14 @@
+.git/
+.vercel/
+node_modules/
+**/node_modules/
+.env
+.env.*
+!.env.example
+data/
+dist/
+apps/web/dist/
+models/
+**/__pycache__/
+**/.venv/
+*.log

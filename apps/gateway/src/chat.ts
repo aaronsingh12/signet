@@ -12,6 +12,7 @@ import { taint, trackPending } from './taint';
 import { blockedAnswer, reviewProposedCalls } from './toolreview';
 import { detokenise, tokenise } from './vault';
 import { maybeEvaluate } from './evaluate';
+import { reviewContent, SafetyUnavailable, type SafetyVerdict } from './content-safety';
 
 // Model calls to an approved LLM (BP 5.2 steps 6-13 for llm_call).
 
@@ -73,6 +74,7 @@ async function run(ctx: Ctx, headers: IncomingHttpHeaders, body: Record<string, 
   }
   if (inspection.blocked && !wouldBlock(ctx, 8, [inspection.blocked.rule], `${inspection.blocked.tag} may not be sent to the model`)) halt(ctx, 8, 403, 'data_blocked', `${inspection.blocked.tag} data may not be sent to the model`, 'deny', [inspection.blocked.rule]);
   upstreamBody.messages = inspection.messages;
+  await checkContentSafety(ctx, canonicalize(inspection.messages), 8);
   // DET-INJ scores the new text while the model call is in flight; its verdict is applied before the
   // answer is released (see after step 12). Tool results inside the conversation can taint the session.
   const fresh = newTextOf(messages);
@@ -193,8 +195,26 @@ async function run(ctx: Ctx, headers: IncomingHttpHeaders, body: Record<string, 
     if (unknown.length) ctx.reasons.push(`model proposed tools outside the seal: ${unknown.join(', ')} (the tool proxy will refuse them)`);
   }
   ctx.responseHash = sha256(canonicalize(resp.choices ?? []));
+  for (const choice of resp.choices ?? []) {
+    await checkContentSafety(ctx, canonicalize([...inspection.messages, choice.message]), 13);
+  }
   const outActions = ctx.dlp.filter((d) => d.direction === 'out' && d.action !== 'allow').length;
   step(ctx, 13, 'pass', outActions ? `${outActions} value(s) redacted or masked` : 'clean');
 
   return resp;
+}
+
+async function checkContentSafety(ctx: Ctx, conversation: string, stage: 8 | 13): Promise<void> {
+  let verdict: SafetyVerdict;
+  try {
+    verdict = await reviewContent(conversation);
+  } catch (error) {
+    if (!(error instanceof SafetyUnavailable)) throw error;
+    console.error('Signet content safety unavailable', { request_id: ctx.requestId, stage, error: error.message });
+    halt(ctx, stage, 503, 'safety_unavailable', 'Signet could not complete its safety check. Your chat was not delivered. Please try again later.', 'deny', ['SIGNET-CONTENT-SAFETY']);
+  }
+  ctx.extra[stage === 8 ? 'input_safety' : 'output_safety'] = verdict;
+  if (verdict.category !== 'allow') {
+    halt(ctx, stage, 403, 'unsafe_content', `Chat blocked by Signet: ${stage === 8 ? 'this request' : 'the AI response'} violates the ${verdict.category.replaceAll('_', ' ')} safety policy. Please ask for safe, lawful information.`, 'deny', ['SIGNET-CONTENT-SAFETY'], 'blocked', { blocked_by: 'signet', category: verdict.category, stage: stage === 8 ? 'input' : 'output' });
+  }
 }
