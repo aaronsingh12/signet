@@ -15,6 +15,7 @@ const STATE: Record<string, { pill: string; label: string }> = {
   credentials_not_provisioned: { pill: 'require_approval', label: 'Credentials not provisioned' },
   not_connected: { pill: 'require_approval', label: 'Not connected' },
   connected: { pill: 'allow', label: 'Connected' },
+  connected_idle: { pill: 'allow', label: 'Connected (idle)' },
   connection_error: { pill: 'deny', label: 'Connection error' },
   suspended: { pill: 'quarantine', label: 'Suspended' },
   revoked: { pill: 'kill', label: 'Revoked' },
@@ -66,7 +67,7 @@ export function ConnectionTab({ data, onChange }: { data: any; onChange: () => v
                 ['Live tokens', c.identity.live_tokens],
                 ['Bootstrap generated', c.identity.bootstrap_credentials.issued > 0 ? 'Yes' : 'No'],
                 ['Bootstrap token exchanged', c.identity.bootstrap_credentials.exchanged > 0 ? 'Yes' : 'No'],
-                ['Gateway enforcement active', c.gateway_enforcement_active ? 'Recent identity accepted by Gateway' : 'No recent accepted identity'],
+                ['Gateway enforcement active', c.gateway_enforcement_active ? 'Verified gateway connection' : 'No current verified connection'],
                 ['Latest Gateway decision', c.last_gateway_decision ? `${c.last_gateway_decision.outcome ?? 'unknown'}${c.last_gateway_decision.error_code ? ` · ${c.last_gateway_decision.error_code}` : ''}` : 'No calls recorded'],
               ]}
             />

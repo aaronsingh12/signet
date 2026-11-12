@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { AgentInsights } from '../components/AgentInsights';
+import { ScanHistory } from '../components/ScanHistory';
 import { OnboardingGuide } from '../components/OnboardingGuide';
 import { Card, Empty, ErrorNote, KV, LEVEL_LABEL, Modal, Mono, PageHeader, Pill, Tabs, TierChip } from '../components/ui';
 import { ApiError, api, useApi } from '../lib/api';
@@ -20,6 +21,10 @@ export function Agent360() {
   const [tab, setTab] = useState(params.get('tab') ?? 'overview');
   useEffect(() => { setTab(params.get('tab') ?? 'overview'); }, [params]);
   const [ladder, setLadder] = useState<Ladder | null>(null);
+  useEffect(() => {
+    const timer = setInterval(() => void reload(), 15_000);
+    return () => clearInterval(timer);
+  }, [reload]);
   if (error) return <ErrorNote error={error} />;
   if (!data) return <p className="py-10 text-center text-sm text-ink-3" role="status">Loading agent…</p>;
   const { agent, certificate: cert, enforcement } = data;
@@ -60,12 +65,13 @@ export function Agent360() {
         }
       />
       {killed && <div className="mb-4 rounded-md border border-bad/30 bg-bad-50 px-4 py-2.5 text-sm text-bad">This agent is permanently stopped. It must go through a new approval process before it can return.</div>}
-      {data.lifecycle?.lifecycle.status === 'in_progress' && data.lifecycle.lifecycle.kind === 'initial' && <div className="note mb-4 flex flex-wrap items-center justify-between gap-3"><span>{agent.name} isn't finished yet. It's at the {data.lifecycle.lifecycle.stage === 'deploy' ? 'connect and shadow' : data.lifecycle.lifecycle.stage} step.</span><Link className="btn-primary" data-testid="continue-setup" to={`/agents/${agent.id}/setup`}>Continue setup</Link></div>}
+      {data.lifecycle?.lifecycle.status === 'in_progress' && data.lifecycle.lifecycle.kind === 'initial' && data.lifecycle.lifecycle.stage !== 'monitor' && <div className="note mb-4 flex flex-wrap items-center justify-between gap-3"><span>{agent.name} isn't finished yet. It's at the {data.lifecycle.lifecycle.stage === 'deploy' ? 'connect and shadow' : data.lifecycle.lifecycle.stage} step.</span><Link className="btn-primary" data-testid="continue-setup" to={`/agents/${agent.id}/setup`}>Continue setup</Link></div>}
       <Tabs
         active={tab}
         onChange={setTab}
         tabs={[
           { id: 'overview', label: 'Summary' },
+          ...(can('ledger.read') ? [{ id: 'scans', label: 'Scan history' }] : []),
           { id: 'manifest', label: 'What it can do' },
           { id: 'ledger', label: 'Activity' },
           { id: 'connection', label: 'Connection' },
@@ -73,7 +79,7 @@ export function Agent360() {
         ]}
       />
       {tab === 'overview' && (
-        <><AgentInsights agentId={agent.id} /><details className="mt-7"><summary className="cursor-pointer text-xs font-medium text-ink-3">Advanced details & safety history</summary><div className="mt-4 grid gap-4 xl:grid-cols-3">
+        <><AgentInsights agentId={agent.id} />{can('ledger.read') && <ScanHistory key={agent.id} agentId={agent.id} />}<details className="mt-7"><summary className="cursor-pointer text-xs font-medium text-ink-3">Advanced details & safety history</summary><div className="mt-4 grid gap-4 xl:grid-cols-3">
           <Card title="Accountability" className="xl:col-span-1">
             <KV
               rows={[
@@ -142,6 +148,7 @@ export function Agent360() {
         </Card>
       )}
       {tab === 'ledger' && <AgentLedger agentId={agent.id} />}
+      {tab === 'scans' && can('ledger.read') && <ScanHistory key={agent.id} agentId={agent.id} />}
       {tab === 'lifecycle' && <LifecycleTab data={data} onChange={() => void reload()} />}
       {tab === 'connection' && <ConnectionTab data={data} onChange={() => void reload()} />}
       {ladder && <LadderModal agent={agent} instances={data.instances} action={ladder} onClose={() => setLadder(null)} onDone={() => void reload()} />}

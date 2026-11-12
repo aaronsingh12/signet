@@ -57,10 +57,10 @@ export function LifecycleTab({ data, onChange }: { data: any; onChange: () => vo
       <Card pad={false}>
         <ol className="flex overflow-x-auto">
           {STAGES.map((s, i) => {
-            const done = i < at || lc.status === 'complete' && i <= at;
-            const current = i === at && lc.status === 'in_progress';
+            const current = i === at && (lc.status === 'in_progress' || lc.stage === 'monitor' && lc.status === 'complete');
+            const done = !current && (i < at || lc.status === 'complete' && i <= at);
             return (
-              <li key={s} className={`flex min-w-[110px] flex-1 items-center gap-2 border-r border-line px-3 py-2.5 text-sm last:border-r-0 ${current ? 'bg-royal-50 font-semibold text-royal' : done ? 'text-ok' : 'text-ink-3'}`}>
+              <li key={s} data-testid={`lifecycle-stage-${s}`} aria-current={current ? 'step' : undefined} className={`flex min-w-[110px] flex-1 items-center gap-2 border-r border-line px-3 py-2.5 text-sm last:border-r-0 ${current ? 'bg-royal-50 font-semibold text-royal' : done ? 'text-ok' : 'text-ink-3'}`}>
                 <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] ${current ? 'bg-royal text-white' : done ? 'bg-ok text-white' : 'bg-slate-200'}`}>{done ? '✓' : i + 1}</span>
                 <span className="capitalize">{s}</span>
               </li>
@@ -78,6 +78,7 @@ export function LifecycleTab({ data, onChange }: { data: any; onChange: () => vo
       {lc.status === 'in_progress' && lc.stage === 'approve' && <ApproveStage v={v} />}
       {lc.status === 'in_progress' && lc.stage === 'deploy' && <DeployStage v={v} onChange={onChange} />}
       {(lc.stage === 'monitor' || lc.status === 'complete') && <MonitorStage data={data} onChange={onChange} />}
+      {lc.stage === 'monitor' && v.deploy && v.deploy.mode !== 'enforce' && <><p className="text-sm text-ink-2">Live traffic is being monitored. The policy rollout remains in {v.deploy.mode}; its promotion checks still apply. Mandatory chat safety blocks remain active.</p><DeployStage v={v} onChange={onChange} /></>}
       {v.classification && lc.stage !== 'classify' && <ClassificationSummary c={v.classification} />}
       <Card title="Stage history" pad={false}>
         {v.stages.length ? (

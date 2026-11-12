@@ -136,7 +136,7 @@ export const GUIDE_TOPICS: GuideTopic[] = [
     id: 'status', group: 'Fix a problem', title: 'Stuck or unexpected status', summary: 'Badges and waiting states explained.', keywords: 'credentials not provisioned not connected pending approval no activity zero gateway needs attention waiting confirm rejected risk team held hold',
     blocks: [
       { heading: 'Credentials not provisioned', text: 'It is approved, but no credential has been issued for it to call Signet\'s gateway. Create one on the Connection tab if the agent will use the gateway. This does not stop REST monitoring, which uses the provider\'s API key.' },
-      { heading: 'Not connected', text: 'A credential exists, but Signet has not recently seen the agent use it. Check the agent is running with the values you were given, then send a test.' },
+      { heading: 'Not connected', text: 'Signet has not verified a call with a current identity, or the identity can no longer be renewed. Send a test using the current connection details. A verified connection with renewable credentials stays Connected (idle) when there is no recent traffic.' },
       { heading: 'Activity shows 0', text: 'Look for a red error above the numbers first, since a failed sync also leaves them at 0. Select "Sync provider activity" after fixing it. The chart covers only the last 24 hours, so older activity will not appear there.' },
       { heading: '"Your risk team has been asked to confirm"', text: 'High and critical ratings must be confirmed by a risk officer or the governance board. You can only wait or contact them. The page moves on once they confirm.' },
       { heading: 'Waiting for approval', text: 'Each required person has been notified. They decide in Needs you. Contact whoever has not signed.' },

@@ -15,6 +15,7 @@ import { activeCertificate, getAgent, signSeal, teamOf, validateSeal, type Agent
 import { markRotationDue } from './secrets';
 import { getTemplate, manifestFrom } from './templates';
 import { tenant } from './tenant';
+import { GATEWAY_AUTH_ERRORS } from './gateway-auth';
 
 // The 8-stage onboarding lifecycle (BP 6): Propose, Classify, Assess, Test, Approve, Deploy, Monitor,
 // Retire. Every stage transition is written to the lifecycle ledger, and each stage has an exit gate.
@@ -633,7 +634,7 @@ function deployPlanFor(tier: Tier): DeployPlan {
 
 export async function rollouts(): Promise<Record<string, Rollout>> {
   const out: Record<string, Rollout> = {};
-  for (const r of (await db.prepare("SELECT data FROM lifecycle WHERE stage = 'deploy' AND status = 'in_progress'").all()) as { data: string }[]) {
+  for (const r of (await db.prepare("SELECT data FROM lifecycle WHERE stage IN ('deploy', 'monitor') AND status = 'in_progress'").all()) as { data: string }[]) {
     const d = JSON.parse(r.data) as LcData;
     if (d.cert_id && d.deploy) out[d.cert_id] = { mode: d.deploy.mode, canary_pct: d.deploy.canary_pct };
   }
@@ -649,7 +650,8 @@ async function deployStats(certId: string, since: string) {
 
 export async function advanceDeploy(lcId: string, p: Principal, input: { to: 'canary' | 'enforce'; acknowledge_would_blocks?: boolean; dev_override?: boolean; reason?: string }) {
   const lc = (await get(lcId));
-  assertStage(lc, 'deploy');
+  if (lc.stage !== 'deploy' && lc.stage !== 'monitor') throw new PolicyError('BP-6-S6', `rollout cannot advance from ${lc.stage}`, 409);
+  assertStage(lc, lc.stage);
   const agent = (await getAgent(lc.agent_id));
   if (agent.owner !== p.id && !p.roles.includes('security_officer')) throw forbidden('BP-6-S6', 'the owner or Security moves a deployment forward');
   const level = (await enforcement.agentLevel(agent.id));
@@ -686,6 +688,27 @@ export async function advanceDeploy(lcId: string, p: Principal, input: { to: 'ca
 }
 
 // --- Stage 7: Monitor ---------------------------------------------------------------------------
+
+/** Start operational monitoring on verified traffic, preserving every shadow/canary promotion gate. */
+export async function monitorConnectedAgent(agentId: string): Promise<void> {
+  await tx(async () => {
+    const row = await db.prepare("SELECT id FROM lifecycle WHERE agent_id = ? AND stage = 'deploy' AND status = 'in_progress' ORDER BY started_at DESC LIMIT 1 FOR UPDATE").get(agentId) as { id: string } | undefined;
+    if (!row) return;
+    const lc = await get(row.id);
+    const active = (await activeCertificate(agentId))?.certificate;
+    if (!active || active.cert_id !== lc.data.cert_id || Date.parse(active.valid_to) <= Date.now()) return;
+    const level = await enforcement.agentLevel(agentId);
+    if (level === 'killed' || level === 'quarantined') return;
+    const evidence = await db.prepare(`SELECT r.record_id, r.ts FROM ledger_record r
+      JOIN agent_instance i ON i.id = jsonb_extract_path_text(r.data::jsonb, 'instance_id') AND i.agent_id = r.agent_id
+      WHERE r.agent_id = ? AND r.cert_id = ? AND r.kind = 'transaction' AND i.revoked_at IS NULL AND i.version = ?
+        AND jsonb_extract_path_text(r.data::jsonb, 'action_type') IN ('llm_call', 'tool_call')
+        AND COALESCE(jsonb_extract_path_text(r.data::jsonb, 'error_code'), '') NOT IN (${GATEWAY_AUTH_ERRORS.map(() => '?').join(', ')})
+      ORDER BY r.seq ASC LIMIT 1`).get(agentId, active.cert_id, active.version, ...GATEWAY_AUTH_ERRORS) as { record_id: string; ts: string } | undefined;
+    if (!evidence) return;
+    await move(lc, 'monitor', 'passed', 'system:gateway', { record_id: evidence.record_id, first_verified_at: evidence.ts, rollout: lc.data.deploy?.mode }, 'in_progress');
+  });
+}
 
 export async function attest(agentId: string, p: Principal, input: { purpose_unchanged: boolean; manifest_minimal: boolean; owner_accountable: boolean; note?: string }) {
   const agent = (await getAgent(agentId));
@@ -811,6 +834,8 @@ approvals.onDecision('quarantine_release', async (req, outcome) => {
 // --- Background: re-attestation reminders, expiry suspension ------------------------------------
 
 export async function sweep() {
+  const deployments = await db.prepare("SELECT DISTINCT agent_id FROM lifecycle WHERE stage = 'deploy' AND status = 'in_progress'").all() as { agent_id: string }[];
+  for (const deployment of deployments) await monitorConnectedAgent(deployment.agent_id);
   for (const c of (await db.prepare("SELECT c.id, c.agent_id, c.valid_to, a.owner, a.handle FROM certificate c JOIN agent a ON a.id = c.agent_id WHERE c.status = 'active'").all()) as { id: string; agent_id: string; valid_to: string; owner: string; handle: string }[]) {
     const left = (Date.parse(c.valid_to) - Date.now()) / DAY;
     if (left <= 0) {

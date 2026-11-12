@@ -40,6 +40,7 @@ import * as externalConnections from './external-connections';
 import { suggestOpenApi } from './external-openapi';
 import * as counters from './counters';
 import * as quickConnect from './quick-connect';
+import { scanHistory } from './scan-history';
 
 const INTERNAL_TOKEN = devSecret('SIGNET_INTERNAL_TOKEN');
 const PORT = Number(process.env.PORT ?? env('SIGNET_CONTROL_PORT', '4100'));
@@ -267,6 +268,10 @@ api.get('/agents/:id/removal-preview', requires('agents.delete'), route(async (r
 api.delete('/agents/:id', requires('agents.delete'), route(async (req, res) => {
   if (typeof req.body?.confirm_handle !== 'string') throw invalid('confirm_handle must be the exact agent handle');
   return (await removeAgent(req.params.id!, req.body.confirm_handle, principalOf(res)));
+}));
+api.get('/agents/:id/scans', requires('ledger.read'), route(async (req) => {
+  const out = await scanHistory(req.params.id!, Number(cursor.decode(req.query.cursor)) || null, limitOf(req.query.limit, 100, 25));
+  return { items: out.items, next_cursor: out.next_cursor === null ? null : cursor.encode(out.next_cursor) };
 }));
 api.get('/agents/:id', requires('agents.read'), route(async (req) => {
   const agent = (await registry.getAgent(req.params.id!));
@@ -508,7 +513,13 @@ int.post('/agent-erasure-acks', route((req) => {
   hub.acknowledgeAgentErasure(req.body.request_id, req.body.node_id);
   return { ok: true };
 }));
-int.post('/ledger', route(async (req) => (Array.isArray(req.body?.records) ? { records: (await ledger.appendMany(req.body.records)).map((r) => ({ record_id: r.record_id, seq: r.seq })) } : { record: (await ledger.append(req.body)) })));
+int.post('/ledger', route(async (req) => {
+  const records = Array.isArray(req.body?.records) ? await ledger.appendMany(req.body.records) : [await ledger.append(req.body)];
+  for (const agentId of new Set(records.filter((record) => record.kind === 'transaction').map((record) => record.agent_id))) {
+    if (agentId) await workflow.monitorConnectedAgent(agentId);
+  }
+  return Array.isArray(req.body?.records) ? { records: records.map((r) => ({ record_id: r.record_id, seq: r.seq })) } : { record: records[0] };
+}));
 // Shared limit counters for gateways (rate per minute, daily usage, out-of-manifest attempts).
 int.post('/limits/take', route(async (req) => (await counters.takeRequest(String(req.body?.agent_id)))));
 int.post('/limits/usage', route(async (req) => ((await counters.addUsage(String(req.body?.agent_id), Number(req.body?.tokens) || 0, Number(req.body?.usd) || 0)), { ok: true })));

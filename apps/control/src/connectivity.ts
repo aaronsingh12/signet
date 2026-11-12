@@ -8,6 +8,7 @@ import * as ledger from './ledger';
 import { activeCertificate, getAgent } from './registry';
 import { tenant } from './tenant';
 import * as workflow from './workflow';
+import { GATEWAY_AUTH_ERRORS } from './gateway-auth';
 
 // Agent connectivity (BP 4, 5): an agent is connected only when its own calls reach a gateway with a
 // valid workload identity. Registration or approval alone never counts. Everything here is derived
@@ -19,19 +20,19 @@ export type ConnectionState =
   | 'credentials_not_provisioned'
   | 'not_connected'
   | 'connected'
+  | 'connected_idle'
   | 'connection_error'
   | 'suspended'
   | 'revoked';
 
 const CONNECTED_WINDOW_MS = 15 * 60_000; // an accepted call within 15 minutes means "connected"
-const AUTH_ERRORS = ['invalid_token', 'token_expired', 'token_revoked', 'no_active_seal', 'agent_killed', 'agent_quarantined', 'seal_mismatch', 'seal_expired', 'wrong_environment'];
 
-interface Tx { ts: string; outcome: string | null; error_code: string | null; action_type: string | null; target: string | null; instance_id: string | null; node_id: string | null }
+interface Tx { ts: string; cert_id: string | null; outcome: string | null; error_code: string | null; action_type: string | null; target: string | null; instance_id: string | null; node_id: string | null }
 
 async function recent(agentId: string, limit = 200): Promise<Tx[]> {
   return (await db
     .prepare(
-      `SELECT ts, jsonb_extract_path_text(data::jsonb, 'outcome') AS outcome, jsonb_extract_path_text(data::jsonb, 'error_code') AS error_code, jsonb_extract_path_text(data::jsonb, 'action_type') AS action_type,
+      `SELECT ts, cert_id, jsonb_extract_path_text(data::jsonb, 'outcome') AS outcome, jsonb_extract_path_text(data::jsonb, 'error_code') AS error_code, jsonb_extract_path_text(data::jsonb, 'action_type') AS action_type,
               jsonb_extract_path_text(data::jsonb, 'target') AS target, jsonb_extract_path_text(data::jsonb, 'instance_id') AS instance_id, jsonb_extract_path_text(data::jsonb, 'node_id') AS node_id
        FROM ledger_record WHERE agent_id = ? AND kind = 'transaction' AND jsonb_extract_path_text(data::jsonb, 'action_type') IN ('llm_call', 'tool_call') ORDER BY seq DESC LIMIT ?`,
     )
@@ -46,12 +47,14 @@ export async function status(agentRef: string) {
   const thirdParty = agent.kind === 'third_party';
   const bootstraps = (await db.prepare('SELECT COUNT(*) AS n, SUM(CASE WHEN used_at IS NOT NULL THEN 1 ELSE 0 END) AS used, MAX(expires_at) AS last_expiry FROM bootstrap_credential WHERE agent_id = ?').get(agent.id)) as { n: number; used: number | null; last_expiry: string | null };
   const clients = (await clientsOf(agent.id)) as { revoked_at: string | null; last_used_at: string | null }[];
-  const instances = (await db.prepare('SELECT id, version, env, auth_kind, first_seen, last_seen, state, revoked_at FROM agent_instance WHERE agent_id = ? ORDER BY last_seen DESC').all(agent.id)) as { id: string; revoked_at: string | null; last_seen: string }[];
+  const instances = (await db.prepare('SELECT id, version, env, auth_kind, first_seen, last_seen, state, revoked_at FROM agent_instance WHERE agent_id = ? ORDER BY last_seen DESC').all(agent.id)) as { id: string; version: string; revoked_at: string | null; last_seen: string }[];
   const liveTokens = ((await db.prepare('SELECT COUNT(*) AS n FROM issued_token t WHERE t.agent_id = ? AND t.exp > ? AND t.jti NOT IN (SELECT jti FROM revoked_jti)').get(agent.id, Math.floor(Date.now() / 1000))) as { n: number }).n;
   const txs = (await recent(agent.id));
   const lastOk = txs.find((t) => t.outcome === 'success' || t.outcome === 'pending');
-  const lastAccepted = txs.find((t) => t.error_code === null || !AUTH_ERRORS.includes(t.error_code)); // reached policy, whatever the policy decided
-  const lastAuthFail = txs.find((t) => t.error_code !== null && AUTH_ERRORS.includes(t.error_code));
+  const lastAccepted = txs.find((t) => t.cert_id === cert?.cert_id && instances.some((i) => i.id === t.instance_id && !i.revoked_at && i.version === cert?.version) && (t.error_code === null || !GATEWAY_AUTH_ERRORS.includes(t.error_code)));
+  const lastAuthFail = txs.find((t) => t.error_code !== null && GATEWAY_AUTH_ERRORS.includes(t.error_code));
+  const deployment = await db.prepare('SELECT id FROM deployment_credential WHERE agent_id = ? AND cert_id = ? AND revoked_at IS NULL AND expires_at > ? LIMIT 1').get(agent.id, cert?.cert_id ?? '', nowIso());
+  const renewableIdentity = liveTokens > 0 || !!deployment || clients.some((c) => !c.revoked_at && c.last_used_at !== null);
   const errors = txs.filter((t) => t.outcome !== 'success' && t.outcome !== 'pending').slice(0, 10);
   const diagnostics = (await db.prepare('SELECT instance_id, client, report, bypass_risk, reported_at FROM agent_diagnostic WHERE agent_id = ? ORDER BY reported_at DESC LIMIT 5').all(agent.id)).map((d) => {
     const r = d as { report: string; bypass_risk: number };
@@ -67,18 +70,21 @@ export async function status(agentRef: string) {
   } else if (level === 'quarantined') {
     state = 'suspended';
     reason = 'the agent is quarantined; its tokens are revoked until a release is approved';
-  } else if (!cert) {
+  } else if (!cert || Date.parse(cert.valid_to) <= Date.now()) {
     state = 'pending_approval';
-    reason = lc ? `the lifecycle is at ${lc.stage}; no seal has been signed yet` : 'no seal has been signed';
+    reason = cert ? 'the seal has expired; renew approval to reconnect' : lc ? `the lifecycle is at ${lc.stage}; no seal has been signed yet` : 'no seal has been signed';
   } else if (!clients.some((c) => !c.revoked_at) && !bootstraps.n && !instances.length) {
     state = 'credentials_not_provisioned';
     reason = thirdParty ? 'approved, but no client credentials have been created for the vendor platform' : 'approved, but no bootstrap credential has been issued to a deployment';
-  } else if (lastAuthFail && recentMs(lastAuthFail) < CONNECTED_WINDOW_MS && Date.parse(lastAuthFail.ts) > Date.parse(lastAccepted?.ts ?? '1970')) {
+  } else if (lastAuthFail && Date.parse(lastAuthFail.ts) > Date.parse(lastAccepted?.ts ?? '1970')) {
     state = 'connection_error';
     reason = `the latest call was refused at authentication (${lastAuthFail.error_code})`;
   } else if (lastAccepted && recentMs(lastAccepted) < CONNECTED_WINDOW_MS) {
     state = 'connected';
     reason = `the gateway accepted a ${lastAccepted.action_type?.replace('_', ' ')} from this agent ${Math.round(recentMs(lastAccepted) / 1000)} s ago`;
+  } else if (lastAccepted && renewableIdentity) {
+    state = 'connected_idle';
+    reason = 'Gateway connection verified; no chat traffic in the last 15 minutes. The workload identity is still valid or renewable.';
   } else {
     state = 'not_connected';
     reason = lastAccepted ? 'no accepted call in the last 15 minutes' : thirdParty ? 'credentials exist, but the vendor platform has not called a Signet tool yet' : 'credentials were issued, but the agent has not called the gateway yet';
@@ -93,7 +99,7 @@ export async function status(agentRef: string) {
     coverage: thirdParty ? { model_calls: 'not_intercepted', tool_calls: 'governed' } : { model_calls: 'governed', tool_calls: 'governed' },
     last_success_at: lastOk?.ts ?? null,
     last_accepted_at: lastAccepted?.ts ?? null,
-    gateway_enforcement_active: !!lastAccepted && recentMs(lastAccepted) < CONNECTED_WINDOW_MS,
+    gateway_enforcement_active: state === 'connected' || state === 'connected_idle',
     last_gateway_decision: txs[0] ? { at: txs[0].ts, outcome: txs[0].outcome, error_code: txs[0].error_code } : null,
     last_auth_failure: lastAuthFail ? { at: lastAuthFail.ts, code: lastAuthFail.error_code } : null,
     identity: {
