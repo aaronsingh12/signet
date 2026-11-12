@@ -34,7 +34,7 @@ test('a blocked answer gives the reason and leaves no tool to run', () => {
   const r = answer('delete_everything', '{}');
   blockedAnswer(r, 'not in the seal');
   assert.deepEqual(proposedCalls(r), []);
-  assert.equal(r.choices![0]!.message.content, 'This action was blocked by company policy. Reason: not in the seal.');
+  assert.equal(r.choices![0]!.message.content, 'Chat blocked by Signet. This action was blocked by company policy. Reason: not in the seal.');
   assert.equal(r.choices![0]!.finish_reason, 'stop');
 });
 

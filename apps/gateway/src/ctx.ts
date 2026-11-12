@@ -97,8 +97,8 @@ export function halt(ctx: Ctx, n: number, status: number, code: string, message:
   throw new Halt(status, code, message, outcome, ledgerOutcome, extra);
 }
 
-// In shadow mode only kill, circuit-breaker and secrets-exfiltration blocks are enforced (RB-INV-18);
-// every other refusal is recorded as would_block and the request continues.
+// Rollout-managed refusals become would_block in shadow (RB-INV-18). Kill, circuit-breaker,
+// secrets-exfiltration and mandatory content-safety refusals bypass this helper and stay enforced.
 export function wouldBlock(ctx: Ctx, n: number, rules: string[], reason: string): boolean {
   if (!ctx.shadow) return false;
   ctx.wouldBlock.push({ step: n, rules, reason });

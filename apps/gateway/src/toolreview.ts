@@ -33,7 +33,7 @@ function parseArgs(text: string): Record<string, unknown> | null {
 export function blockedAnswer(resp: ChatResponse, reason: string): void {
   for (const choice of resp.choices ?? []) {
     choice.finish_reason = 'stop';
-    choice.message = { role: 'assistant', content: `This action was blocked by company policy. Reason: ${reason}.` };
+    choice.message = { role: 'assistant', content: `Chat blocked by Signet. This action was blocked by company policy. Reason: ${reason}.` };
   }
 }
 
