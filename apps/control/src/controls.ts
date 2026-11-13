@@ -150,7 +150,15 @@ const CONTROLS: ControlDef[] = [
       return !r.length ? { status: 'not_tested', detail: 'no agent traffic in 14 days' } : learning ? { status: 'partially_effective', detail: `${learning} of ${r.length} agent(s) still building a baseline; DET-ANOM ${det.mode}` } : { status: 'effective', detail: `${r.length} agent(s) with baselines; DET-ANOM ${det.mode}` };
     },
   },
-  { id: 'SGC-MON-005', domain: 'MON', severity: 'medium', type: 'automated', objective: 'Groundedness sampled (Tier 2 evaluator, Phase 3)', test: 'Weekly 1% sample' },
+  {
+    id: 'SGC-MON-005', domain: 'MON', severity: 'medium', type: 'automated', objective: 'Groundedness sampled (DET-GROUND, Tier 2 evaluator, DA 3)', test: 'DET-GROUND is on and judged a sample of answers in the last 7 days',
+    check: async () => {
+      const det = (await all<{ mode: string }>("SELECT mode FROM detector WHERE id = 'DET-GROUND'"))[0];
+      if (!det || det.mode === 'off') return { status: 'ineffective', detail: 'DET-GROUND is off' };
+      const r = (await all<{ judged: number; ungrounded: number }>("SELECT COUNT(*) FILTER (WHERE status = 'judged') AS judged, COUNT(*) FILTER (WHERE verdict = 'ungrounded') AS ungrounded FROM ground_eval WHERE created_at >= ?", since(7 * DAY)))[0]!;
+      return Number(r.judged) ? { status: 'effective', detail: `${r.judged} answer(s) judged in 7 days, ${r.ungrounded} ungrounded; DET-GROUND ${det.mode}` } : { status: 'not_tested', detail: 'no sampled answers with sources in 7 days' };
+    },
+  },
   { id: 'SGC-RESP-001', domain: 'RESP', severity: 'high', type: 'automated', objective: 'Kill capability tested (Kill Drills, Phase 3)', test: 'Drill within schedule' },
   {
     id: 'SGC-RESP-002', domain: 'RESP', severity: 'high', type: 'automated', objective: 'Incident raised on level 4+ events',

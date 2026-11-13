@@ -28,3 +28,12 @@ test('runaway kill: rule plus signal, never the score alone', () => {
   assert.equal(runaway(anomalyResult({ ...live, high_for_ms: 9 * 60_000 }), { in_minute: 500, tokens: 0, usd: 0 }, limits), null, 'High for under 10 minutes: no kill');
   assert.equal(runaway(anomalyResult({ ...live, band: 'elevated' }), { in_minute: 500, tokens: 0, usd: 0 }, limits), null);
 });
+
+test('DET-GROUND sampling: reproducible by request ID, about the tier rate, and only with sources', async () => {
+  const { groundingInput, sampled, sampleRate } = await import('../src/grounding');
+  assert.equal(sampled('req_1', 0.5), sampled('req_1', 0.5));
+  const hits = Array.from({ length: 4000 }, (_, i) => sampled(`req_${i}`, sampleRate('T1'))).filter(Boolean).length;
+  assert.ok(hits > 120 && hits < 280, `about 5% of T1 answers (${hits} of 4000)`);
+  assert.equal(groundingInput([{ role: 'user', content: 'hi' }], 'hello'), null, 'no sources: nothing to judge');
+  assert.deepEqual(groundingInput([{ role: 'system', content: 'Refund policy: 30 days from delivery.' }, { role: 'user', content: 'Refund window?' }], '30 days')!.sources, ['Refund policy: 30 days from delivery.']);
+});

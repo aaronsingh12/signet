@@ -15,6 +15,7 @@ const SEED = [
   { id: 'DET-INJ', version: 'deberta-v3-base-injection-v2-fp32', notes: 'protectai/deberta-v3-base-prompt-injection-v2 (Apache-2.0), fp32 ONNX; int8 dynamic quantisation was rejected (scored a planted instruction 0.10 vs 1.00)' },
   { id: 'DET-JB', version: 'not-deployed', notes: 'model not selected yet (E39)' },
   { id: 'DET-ANOM', version: 'baseline-zscore-v1', notes: 'statistics, no neural network: per-agent baselines of volume, cost and errors by hour of day plus tool mix from the last 14 days of the ledger (DA 3)' },
+  { id: 'DET-GROUND', version: 'tenant-llm-judge-v1', notes: 'Tier 2, offline: the approved cloud model of the tenant judges a sample of answers (1%, 5% for T1) against their sources; findings only, never changes a decision (DA 3)' },
   { id: 'DET-PII', version: 'presidio-analyzer-2', notes: 'Microsoft Presidio (MIT) for names and addresses in free text; gateway calls SIGNET_PRESIDIO_URL. Pattern DLP still covers structured identifiers.' },
   // DET-SAFE was blocking unsafe content before it was registered here, so it starts active (recorded as
   // grandfathered in the ledger) rather than silently dropping to shadow. It uses the cloud LLM as a

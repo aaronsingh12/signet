@@ -17,6 +17,7 @@ const jobs: ReadonlyArray<{ name: string; interval: number; timeout: number }> =
   { name: 'platform-usage', interval: 6 * 3_600_000, timeout: 120000 },
   { name: 'counters', interval: 60_000, timeout: 120000 },
   { name: 'ownerless', interval: 600_000, timeout: 120000 },
+  { name: 'grounding', interval: 60_000, timeout: 600000 },
   { name: 'aibom', interval: 24 * 3_600_000, timeout: 600000 },
   { name: 'baselines', interval: 24 * 3_600_000, timeout: 600000 },
 ];

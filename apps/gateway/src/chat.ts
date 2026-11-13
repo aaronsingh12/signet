@@ -14,6 +14,7 @@ import { blockedAnswer, reviewProposedCalls } from './toolreview';
 import { detokenise, tokenise } from './vault';
 import { maybeEvaluate } from './evaluate';
 import { contentSafety, withholdIfHighRisk } from './content-safety';
+import { maybeSample } from './grounding';
 
 // Model calls to an approved LLM (BP 5.2 steps 6-13 for llm_call).
 
@@ -189,6 +190,8 @@ async function run(ctx: Ctx, headers: IncomingHttpHeaders, body: Record<string, 
     }
   }
 
+  // The answer as the model wrote it (still tokenised), for DET-GROUND sampling below.
+  const modelAnswer = typeof resp.choices?.[0]?.message?.content === 'string' ? resp.choices[0].message.content : '';
   // 13. DLP outbound: restore tokens for this caller, redact secrets, mask cards.
   const allowedActions = new Set(Object.keys(policy.actions).map((k) => k.split('.').pop()));
   for (const choice of resp.choices ?? []) {
@@ -208,6 +211,8 @@ async function run(ctx: Ctx, headers: IncomingHttpHeaders, body: Record<string, 
   }
   const outActions = ctx.dlp.filter((d) => d.direction === 'out' && d.action !== 'allow').length;
   step(ctx, 13, 'pass', outActions ? `${outActions} value(s) redacted or masked` : 'clean');
+  // DET-GROUND (Tier 2, offline): a sample of answers with sources goes to the judge; findings only.
+  if (!ctx.softBlock && maybeSample(claims.agent_id, ctx.requestId, cert.tier, inspection.messages as never, modelAnswer)) ctx.reasons.push('sampled for groundedness review (DET-GROUND)');
 
   return resp;
 }

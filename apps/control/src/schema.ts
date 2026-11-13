@@ -340,6 +340,13 @@ CREATE TABLE IF NOT EXISTS vulnerability_finding (
 );
 -- DET-ANOM baselines (DA 3): per-agent statistics from the last 14 days of the ledger, rebuilt nightly.
 CREATE TABLE IF NOT EXISTS agent_baseline (agent_id TEXT PRIMARY KEY, data TEXT NOT NULL, computed_at TEXT NOT NULL);
+-- DET-GROUND samples (DA 3 Tier 2): payload holds DLP-tokenised sources and answer only until judged (24 h at most).
+CREATE TABLE IF NOT EXISTS ground_eval (
+  id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, request_id TEXT NOT NULL, tier TEXT NOT NULL, payload TEXT NOT NULL, status TEXT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0, score REAL, verdict TEXT, rationale TEXT, unsupported TEXT, judge_model TEXT, created_at TEXT NOT NULL, judged_at TEXT
+);
+CREATE INDEX IF NOT EXISTS ground_eval_agent ON ground_eval(agent_id, created_at);
+CREATE INDEX IF NOT EXISTS ground_eval_status ON ground_eval(status, created_at);
 -- SAML request IDs: each response must answer a request Signet sent, and only once.
 CREATE TABLE IF NOT EXISTS saml_request (id TEXT PRIMARY KEY, value TEXT NOT NULL, expires_ms BIGINT NOT NULL);
 -- When the owner was deactivated (BP 6 Stage 7); cleared when a new owner is named.

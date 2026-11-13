@@ -4,6 +4,7 @@ import { devOverridesAllowed, devSecret, env, newId, toJwk, verifyJws, type Cert
 import { db, nowIso } from './db';
 import * as detectors from './detectors';
 import * as anomaly from './anomaly';
+import * as grounding from './grounding';
 import * as discovery from './discovery';
 import * as enforcement from './enforcement';
 import { PolicyError, invalid } from './errors';
@@ -515,6 +516,7 @@ api.get('/secrets', requires('secrets.manage'), route(async () => ({ items: (awa
 api.post('/scim/token', requires('tenant.admin'), route(async (_req, res) => { res.setHeader('cache-control', 'no-store'); return scim.issueToken(principalOf(res)); }));
 api.get('/scim/status', requires('tenant.read'), route(async () => (await scim.status())));
 // AI Bill of Materials (BP 6 Stage 3): optional uploaded SBOM (CycloneDX or SPDX JSON) is merged in.
+api.get('/agents/:id/groundedness', requires('agents.read'), route(async (req) => (await grounding.forAgent(req.params.id!))));
 api.get('/agents/:id/aibom', requires('agents.read'), route(async (req) => (await aibom.latest(req.params.id!))));
 api.post('/agents/:id/aibom', requires('agents.write'), express.json({ limit: '10mb' }), route(async (req, res) => [201, (await aibom.generate(req.params.id!, { sbom: req.body?.sbom }, principalOf(res)))]));
 api.post('/agents/:id/owner', requires('agents.read'), route(async (req, res) => (await scim.reassignOwner(req.params.id!, req.body ?? {}, principalOf(res)))));
@@ -632,6 +634,8 @@ int.post('/limits/usage', route(async (req) => {
   await anomaly.countOutcome(agentId, Number(req.body?.usd) || 0, false);
   return { ok: true };
 }));
+// DET-GROUND: a sampled answer with its sources, judged offline (DA 3 Tier 2).
+int.post('/ground/sample', route(async (req) => [202, await grounding.sample(req.body ?? {})]));
 // A refused or failed request, for the DET-ANOM error-rate feature.
 int.post('/limits/outcome', route(async (req) => ((await anomaly.countOutcome(String(req.body?.agent_id), 0, req.body?.error === true)), { ok: true })));
 int.post('/limits/out-of-manifest', route(async (req) => ({ attempts: await counters.recordOutOfManifest(String(req.body?.agent_id)) })));
@@ -670,6 +674,7 @@ int.post('/maintenance/connectors', route(async () => { await servicenow.work();
 int.post('/maintenance/connections', route(async () => { await externalConnections.work(); return { ok: true }; }));
 int.post('/maintenance/edge', route(async () => { await edge.sweep(); return { ok: true }; }));
 int.post('/maintenance/platform-usage', route(async () => { await platforms.sweepUsage(); return { ok: true }; }));
+int.post('/maintenance/grounding', route(async () => (await grounding.work())));
 int.post('/maintenance/baselines', route(async () => (await anomaly.nightly())));
 int.post('/maintenance/aibom', route(async () => (await aibom.nightly(SYSTEM_PRINCIPAL))));
 int.post('/maintenance/ownerless', route(async () => ({ quarantined: await quarantineOwnerless() })));
@@ -706,6 +711,7 @@ every(10 * 60_000, 'lifecycle sweep', async () => (await workflow.sweep()))();
 every(24 * 3_600_000, 'AIBOM vulnerability rescan', async () => (await aibom.nightly(SYSTEM_PRINCIPAL)));
 // DET-ANOM baselines from the last 14 days of the ledger (DA 3).
 every(24 * 3_600_000, 'behaviour baselines', async () => (await anomaly.nightly()));
+every(60_000, 'groundedness judging', async () => (await grounding.work()));
 every(10 * 60_000, 'ownerless agents', quarantineOwnerless)();
 every(10 * 60_000, 'control evaluation', async () => (await controls.evaluate()))();
 every(3_000, 'connector worker', async () => (await servicenow.work()));
