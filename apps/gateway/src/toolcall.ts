@@ -5,7 +5,8 @@ import { detectInjection, notDeployed } from './detectors';
 import { evaluate } from './engine';
 import { appendRecord } from './ledgerclient';
 import * as limits from './limits';
-import { cleanJson, inspectArgs, stringsOf } from './policy';
+import { argStrings, cleanJson, inspectArgs, stringsOf } from './policy';
+import { detectPii } from './pii';
 import * as state from './state';
 import { settle, taint, taintOf, trackPending } from './taint';
 
@@ -65,8 +66,12 @@ async function run(ctx: Ctx, headers: IncomingHttpHeaders, req: ToolRequest): Pr
     halt(ctx, 7, 403, 'hijack_detected', `privileged action after injected content in this session; agent ${act === 'kill' ? 'killed' : 'quarantined'}`, act, ['RB-KILL-01']);
   }
 
-  // 8. DLP on the arguments: a tool receives only the data classes in its scope.
-  const di = inspectArgs(req.args, action, policy);
+  // 8. DLP on the arguments: a tool receives only the data classes in its scope. DET-PII (Presidio) adds
+  //    names and addresses in free text when it is active; in shadow it is recorded only.
+  const pii = await detectPii(argStrings(req.args));
+  if (pii.result.status === 'shadow' && pii.result.found) ctx.reasons.push(`DET-PII (shadow) found ${pii.result.found} name(s) or address(es) in the arguments; not applied`);
+  ctx.extra.pii_args = pii.result;
+  const di = inspectArgs(req.args, action, policy, pii.result.status === 'ok' ? pii.findings : undefined);
   ctx.dlp.push(...di.events);
   if (di.exfiltration) {
     await ladder(ctx, 'kill', 'RB-KILL-02', `${di.exfiltration.tag} sent to ${key}, outside the tool's data scope`, { tag: di.exfiltration.tag });

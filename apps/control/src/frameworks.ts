@@ -54,7 +54,7 @@ export const FRAMEWORKS: FrameworkDef[] = [
   { id: 'gdpr', name: 'GDPR (Regulation (EU) 2016/679)', version: '2016', licence: 'EU legal text, reuse permitted with attribution', ships: 'summaries', category: 'privacy', source_url: 'https://eur-lex.europa.eu/eli/reg/2016/679/oj', default_enabled: true, applies: 'personal_data' },
   { id: 'nist-csf', name: 'NIST Cybersecurity Framework 2.0', version: '2.0', licence: 'US government work, public domain', ships: 'full_text', category: 'security', source_url: 'https://doi.org/10.6028/NIST.CSWP.29', default_enabled: true, applies: 'always' },
   { id: 'nist-800-53', name: 'NIST SP 800-53 Rev. 5 (AI-relevant controls)', version: 'Rev. 5', licence: 'US government work, public domain; OSCAL catalogue on NIST GitHub', ships: 'full_text', category: 'security', source_url: 'https://github.com/usnistgov/oscal-content', default_enabled: true, applies: 'always', notes: 'Ships the controls relevant to AI agents. Import the full OSCAL catalogue to see every control; extra controls are kept out of the score.' },
-  { id: 'fedramp-moderate', name: 'FedRAMP Rev. 5 Moderate (AI-relevant controls)', version: 'Rev. 5', licence: 'US government work, public domain; OSCAL profiles in GSA fedramp-automation', ships: 'full_text', category: 'security', source_url: 'https://github.com/GSA/fedramp-automation', default_enabled: false, applies: 'tenant', notes: 'Only for US federal work. Import the official OSCAL profile to confirm baseline membership.' },
+  { id: 'fedramp-moderate', name: 'FedRAMP Rev. 5 Moderate (AI-relevant controls)', version: 'Rev. 5', licence: 'US government work, public domain; baseline from FedRAMP legacy workbook (OSCAL profiles discontinued)', ships: 'full_text', category: 'security', source_url: 'https://github.com/FedRAMP/docs-legacy/blob/main/overrides/assets/LEGACY%20FedRAMP_Security_Controls_Baseline.xlsx', default_enabled: false, applies: 'tenant', notes: 'Only for US federal work. Membership checked against the FedRAMP legacy Rev. 5 baseline workbook (June 2026). FedRAMP is replacing it with the Consolidated Rules for 2026 (fedramp.gov/2026); import the full workbook with the spreadsheet importer if you need every control.' },
   { id: 'dora', name: 'DORA (Regulation (EU) 2022/2554)', version: '2022', licence: 'EU legal text, reuse permitted with attribution', ships: 'summaries', category: 'resilience', source_url: 'https://eur-lex.europa.eu/eli/reg/2022/2554/oj', default_enabled: false, applies: 'tenant', notes: 'EU financial entities.' },
   { id: 'nis2', name: 'NIS2 (Directive (EU) 2022/2555)', version: '2022', licence: 'EU legal text, reuse permitted with attribution', ships: 'summaries', category: 'resilience', source_url: 'https://eur-lex.europa.eu/eli/dir/2022/2555/oj', default_enabled: false, applies: 'tenant', notes: 'EU essential and important entities.' },
   { id: 'sg-model-ai-gov', name: 'Singapore Model AI Governance Framework', version: '2nd edition (2020)', licence: 'Singapore government publication; Signet summaries', ships: 'summaries', category: 'regional', source_url: 'https://www.pdpc.gov.sg/help-and-resources/2020/01/model-ai-governance-framework', default_enabled: false, applies: 'tenant' },
@@ -121,7 +121,11 @@ export const SP800_53_AI_SUBSET: [string, string, ...string[]][] = [
   ['SI-12', 'Information Management and Retention', 'SGC-MON-001'],
   ['SR-3', 'Supply Chain Controls and Processes', 'SGC-SUPPLY-001', 'SGC-MODEL-001'],
 ];
-// Controls in the subset that are not in the FedRAMP Moderate baseline (High only).
+// Controls in the subset that are not in the FedRAMP Moderate baseline: AU-10 and SC-24 are High only;
+// IA-9 is in no FedRAMP baseline. Checked on 2026-11-13 against FedRAMP's legacy baseline workbook
+// (FedRAMP/docs-legacy, LEGACY FedRAMP_Security_Controls_Baseline.xlsx, sha256 aff2fa5e...): all 24
+// built-in Moderate controls are in its Moderate Baseline sheet. FedRAMP no longer publishes OSCAL
+// profiles (the GSA fedramp-automation repository is gone); it is moving to the Consolidated Rules 2026.
 const NOT_IN_MODERATE = ['AU-10', 'IA-9', 'SC-24'];
 
 export const REQUIREMENTS: RequirementDef[] = [
