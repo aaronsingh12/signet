@@ -7,12 +7,12 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { dropTestDatabase } from './database';
 import type { Principal } from '../src/rbac';
+import type { CreateInput } from '../src/platforms';
 
 // Platform connectors against one local stand-in for the platform APIs Signet calls (Vercel, AWS STS,
 // Bedrock Agents and Lambda, Azure login and Resource Manager, Google token, Vertex AI and Cloud Run).
 process.env.SIGNET_DATA_DIR = mkdtempSync(join(tmpdir(), 'signet-plat-'));
 process.env.SIGNET_DB_SCHEMA = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
-process.env.SIGNET_GATEWAY_PUBLIC_URL = 'https://signet.example.test';
 
 const VERCEL_TOKEN = 'vercel-test-token-1234567890';
 const calls: { method: string; host: string; path: string; body: unknown; auth: string | undefined }[] = [];
@@ -147,6 +147,8 @@ async function sealedAgent() {
 }
 
 test('Vercel: finds AI projects, then connects one to Signet without a code change', async () => {
+  const { saveConnectionAddresses } = await import('../src/connection-settings');
+  await saveConnectionAddresses({ control_url: 'https://control.signet.example.test', gateway_url: 'https://signet.example.test' }, admin);
   await assert.rejects(platforms.create({ platform: 'vercel', token: 'wrong-token-1234567890' }, admin), /403|Not authorized/);
   const conn = await platforms.create({ platform: 'vercel', token: VERCEL_TOKEN }, admin);
   assert.equal(conn.status, 'connected');
@@ -301,4 +303,33 @@ test('usage outside Signet from AWS CloudWatch and Azure Monitor; scheduled swee
   assert.deepEqual([Number(vertex.input_tokens), Number(vertex.output_tokens), Number(vertex.requests)], [3000, 700, 25]);
   await platforms.sweepUsage();
   assert.ok(((await platforms.list()).every((c) => c.status === 'connected')), 'the sweep ran on every connection without errors');
+});
+
+test('all seven platform sources attach to the safety proposal without creating another agent or enabling runtime access', async () => {
+  const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const inputs: CreateInput[] = [
+    { platform: 'vercel', token: VERCEL_TOKEN },
+    { platform: 'aws', access_key_id: 'AKIATEST', secret_access_key: 'aws-test-secret', regions: 'us-east-1' },
+    { platform: 'azure', tenant_id: 't1', client_id: 'c1', client_secret: 'azure-secret', subscription_id: 'sub1' },
+    { platform: 'gcp', service_account_json: JSON.stringify({ client_email: 'signet@p1.iam.gserviceaccount.com', private_key: privateKey.export({ type: 'pkcs8', format: 'pem' }), project_id: 'p1' }), regions: 'us-central1' },
+    { platform: 'copilot', tenant_id: 't1', client_id: 'c1', client_secret: 'copilot-secret-1', environment_url: 'https://hospital.crm.dynamics.com' },
+    { platform: 'openai', admin_key: 'sk-admin-openai-test-123' },
+    { platform: 'anthropic', admin_key: 'sk-ant-admin-test-123' },
+  ];
+  for (const input of inputs) {
+    const connection = await platforms.create(input, admin);
+    const source = (await platforms.workloads(connection.id))[0]!;
+    const vendorHosted = source.platform_ai !== null && source.kind !== 'api_key';
+    const proposal = await registerAgent({ handle: `source-intake-${input.platform}`, name: source.name, purpose: 'Platform agent completing its guided safety intake', sponsor: admin.id, autonomy_level: 'L1', kind: vendorHosted ? 'third_party' : 'self_hosted', vendor: vendorHosted ? source.platform_ai! : undefined }, admin);
+    const before = await db.prepare('SELECT COUNT(*) AS count FROM agent').get();
+    assert.deepEqual(await platforms.attachAgent(connection.id, source.id, proposal.id, admin), { agent_id: proposal.id });
+    assert.deepEqual(await platforms.attachAgent(connection.id, source.id, proposal.id, admin), { agent_id: proposal.id }, 'retrying the same proposal is idempotent');
+    assert.deepEqual(await db.prepare('SELECT COUNT(*) AS count FROM agent').get(), before, 'source attachment never registers a duplicate');
+    assert.equal((await platforms.workloads(connection.id)).find((item) => item.id === source.id)!.registered_agent_id, proposal.id);
+    const link = await db.prepare('SELECT state, credential_id FROM platform_link WHERE connection_id = ? AND workload_id = ?').get(connection.id, source.id);
+    assert.deepEqual(link, { state: 'registered', credential_id: null });
+    const other = await registerAgent({ handle: `other-intake-${input.platform}`, name: 'Other agent', purpose: 'Another proposal must not take over a selected source', sponsor: admin.id, autonomy_level: 'L1', kind: vendorHosted ? 'third_party' : 'self_hosted', vendor: vendorHosted ? source.platform_ai! : undefined }, admin);
+    await assert.rejects(platforms.attachAgent(connection.id, source.id, other.id, admin), /already attached/);
+    await assert.rejects(platforms.attachAgent(connection.id, 'missing-source', proposal.id, admin), /not found/);
+  }
 });

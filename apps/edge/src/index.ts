@@ -1,7 +1,9 @@
-import { configFromEnv } from './config';
+import { configFromEnv, configFromFile } from './config';
+import { parseArgs } from 'node:util';
 import { run } from './runner';
 
-const config = configFromEnv(process.env);
+const { values } = parseArgs({ options: { config: { type: 'string' } } });
+const config = values.config ? configFromFile(values.config) : configFromEnv(process.env);
 const controller = new AbortController();
 process.once('SIGINT', () => controller.abort());
 process.once('SIGTERM', () => controller.abort());

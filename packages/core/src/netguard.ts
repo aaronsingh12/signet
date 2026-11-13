@@ -22,6 +22,13 @@ export function classifyAddress(ip: string): AddressClass {
     const low = parseInt(mappedHex[2]!, 16);
     a = `${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`;
   }
+  // RFC 6052: DNS64's well-known /96 prefix may translate only globally reachable IPv4 addresses.
+  const translated = a.match(/^64:ff9b::(?:([0-9a-f]{1,4}):)?([0-9a-f]{1,4})$/);
+  if (translated) {
+    const high = parseInt(translated[1] ?? '0', 16);
+    const low = parseInt(translated[2]!, 16);
+    return classifyAddress(`${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`) === 'public' ? 'public' : 'reserved';
+  }
   if (isIP(a) === 4) {
     const [o1, o2, o3] = v4(a) as [number, number, number];
     if (o1 === 0) return 'unspecified';

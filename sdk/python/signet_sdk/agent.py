@@ -67,6 +67,11 @@ class SignetAgent:
     def from_env(cls) -> "SignetAgent":
         return cls(SignetConfig.from_env())
 
+    @classmethod
+    def from_file(cls, path: str) -> "SignetAgent":
+        """Connect using the private configuration file downloaded from Signet's UI."""
+        return cls(SignetConfig.from_file(path))
+
     # --- identity ---
     def connect(self) -> dict:
         """Exchange credentials now (instead of on first call) and report runtime diagnostics."""

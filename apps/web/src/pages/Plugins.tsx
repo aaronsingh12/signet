@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom';
 import { Card, ErrorNote, PageHeader } from '../components/ui';
 import { ApiError, api, useApi } from '../lib/api';
 import { useCan } from '../lib/auth';
-import { PlatformConnectors } from '../components/PlatformConnectors';
 
 interface VercelConnection {
   configured: boolean;
@@ -33,7 +32,7 @@ export function Plugins() {
                 <h2 className="text-base font-semibold">Vercel</h2>
                 <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${vercel?.connected ? 'bg-ok-50 text-ok' : 'bg-slate-100 text-ink-2'}`}>{vercel?.connected ? 'Connected' : 'Not connected'}</span>
               </div>
-              <p className="mt-1 text-sm text-ink-2">Sign in with Vercel to identify your account. To connect projects to Signet, use the access-token connector below.</p>
+              <p className="mt-1 text-sm text-ink-2">Sign in with Vercel to identify your account. To connect projects to Signet, <Link className="text-royal hover:underline" to="/agents/new">propose an agent</Link> and choose Show more on the connection step.</p>
               {canManage && <ErrorNote error={error} />}
               {!canManage ? (
                 <p className="mt-3 text-xs text-ink-3">A Tenant Admin can connect Vercel for this tenant.</p>
@@ -62,7 +61,6 @@ export function Plugins() {
           </div>
         </Card>
       </div>
-      {canManage && <PlatformConnectors />}
       <Card className="mt-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>

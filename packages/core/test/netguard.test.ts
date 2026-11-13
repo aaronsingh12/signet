@@ -5,6 +5,15 @@ import { createServer } from 'node:http';
 import { test } from 'node:test';
 import { DestinationBlocked, addressAllowed, checkDestination, classifyAddress, guardedLookup, request } from '../src/index';
 
+test('DNS64 can reach public providers but cannot tunnel into private or metadata endpoints', () => {
+  assert.equal(addressAllowed('64:ff9b::2224:850f', { allowPrivate: false }).ok, true);
+  assert.equal(addressAllowed('64:ff9b:0:0:0:0:808:808', { allowPrivate: false }).ok, true);
+  for (const ip of ['64:ff9b::a9fe:a9fe', '64:ff9b::7f00:1', '64:ff9b::a00:1', '64:ff9b::c0a8:101', '64:ff9b::e000:1']) {
+    assert.equal(addressAllowed(ip, { allowPrivate: false }).ok, false);
+    assert.equal(addressAllowed(ip, { allowPrivate: true }).ok, false);
+  }
+});
+
 test('address classes: metadata and link-local are never reachable; private only when allowed', () => {
   assert.equal(classifyAddress('169.254.169.254'), 'link_local');
   assert.equal(classifyAddress('::ffff:169.254.169.254'), 'link_local');

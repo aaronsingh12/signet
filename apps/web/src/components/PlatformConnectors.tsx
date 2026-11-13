@@ -3,36 +3,17 @@ import { Link } from 'react-router-dom';
 import { Card, Empty, ErrorNote, Modal, Pill } from './ui';
 import { ApiError, api, useApi } from '../lib/api';
 import { ago } from '../lib/format';
+import { PLATFORM_NAMES as NAMES, type Platform } from './PlatformAccountForm';
 
 // Platform connectors: connect Vercel, AWS, Azure or Google Cloud once; see the workloads there that use
 // an AI provider or are AI agents themselves; register them as agents; and, where the platform allows,
 // connect one to Signet with no code change (settings changed, old key removed, restarted). An agent
 // shows Connected only after its first call actually reaches the gateway.
 
-type Platform = 'vercel' | 'aws' | 'azure' | 'gcp' | 'copilot' | 'openai' | 'anthropic';
 interface Signal { name: string; provider: string; kind: 'key' | 'base_url' | 'model' | 'platform' }
-interface Workload { id: string; name: string; kind: string; framework: string | null; url: string | null; region: string | null; env_names: string[]; platform_ai: string | null; linkable: boolean; ai_signals: Signal[]; linked_agent_id: string | null; link_state: string | null; registered_agent_id: string | null }
+export interface Workload { id: string; name: string; kind: string; framework: string | null; url: string | null; region: string | null; env_names: string[]; platform_ai: string | null; linkable: boolean; ai_signals: Signal[]; linked_agent_id: string | null; link_state: string | null; registered_agent_id: string | null }
 interface Connection { id: string; platform: Platform; label: string; status: string; status_detail: string | null; last_scan_at: string | null }
 
-const NAMES: Record<Platform, string> = { vercel: 'Vercel', aws: 'AWS', azure: 'Azure', gcp: 'Google Cloud', copilot: 'Copilot Studio', openai: 'OpenAI', anthropic: 'Anthropic' };
-const FIELDS: Record<Platform, { key: string; label: string; secret?: boolean; area?: boolean; optional?: boolean }[]> = {
-  vercel: [{ key: 'token', label: 'Access token (Account settings → Tokens)', secret: true }, { key: 'team_id', label: 'Team ID', optional: true }],
-  aws: [{ key: 'access_key_id', label: 'Access key ID' }, { key: 'secret_access_key', label: 'Secret access key', secret: true }, { key: 'regions', label: 'Regions, comma-separated', optional: true }],
-  azure: [{ key: 'tenant_id', label: 'Tenant ID' }, { key: 'client_id', label: 'App (client) ID' }, { key: 'client_secret', label: 'Client secret', secret: true }, { key: 'subscription_id', label: 'Subscription ID' }],
-  gcp: [{ key: 'service_account_json', label: 'Service account key (JSON)', area: true }, { key: 'regions', label: 'Regions, comma-separated', optional: true }],
-  copilot: [{ key: 'environment_url', label: 'Environment URL (https://<org>.crm.dynamics.com)' }, { key: 'tenant_id', label: 'Tenant ID' }, { key: 'client_id', label: 'App (client) ID' }, { key: 'client_secret', label: 'Client secret', secret: true }],
-  openai: [{ key: 'admin_key', label: 'Organization admin key', secret: true }],
-  anthropic: [{ key: 'admin_key', label: 'Organization admin key', secret: true }],
-};
-const HELP: Record<Platform, string> = {
-  vercel: 'Lists projects and their environment variable names; connects a project by setting its variables and redeploying.',
-  aws: 'Read access lists Bedrock agents and Lambda functions; lambda:UpdateFunctionConfiguration lets Signet connect a function.',
-  azure: 'Reader lists Azure OpenAI, AI Foundry and App Service; Website Contributor lets Signet connect an App Service app.',
-  gcp: 'Viewer lists Vertex AI Agent Engine agents and Cloud Run services (Cloud Run connect is not built yet).',
-  copilot: 'Lists Copilot Studio agents from the Dataverse environment (the app registration needs an application user there).',
-  openai: 'Lists projects and API keys used directly against OpenAI, with their owners and usage; can delete a key.',
-  anthropic: 'Lists API keys used directly against Anthropic, with usage; can set a key inactive.',
-};
 const STATE_LABEL: Record<string, [string, string]> = {
   registered: ['none', 'registered'],
   configuring: ['require_approval', 'configuring'],
@@ -44,50 +25,12 @@ const STATE_LABEL: Record<string, [string, string]> = {
 };
 const STOPPABLE = new Set(['vercel_project', 'lambda', 'app_service', 'api_key']);
 
-export function PlatformConnectors() {
+export function PlatformConnections({ onChange }: { onChange: () => void }) {
   const { data, reload, error } = useApi<{ items: Connection[] }>('/platforms');
-  const [platform, setPlatform] = useState<Platform>('vercel');
-  const [form, setForm] = useState<Record<string, string>>({});
-  const [formError, setFormError] = useState<ApiError | null>(null);
-  const [busy, setBusy] = useState(false);
-  const connect = async () => {
-    setBusy(true);
-    try {
-      await api('/platforms', { method: 'POST', body: { platform, ...form } });
-      setForm({});
-      setFormError(null);
-      void reload();
-    } catch (e) {
-      setFormError(e as ApiError);
-    } finally {
-      setBusy(false);
-    }
-  };
-  const ready = FIELDS[platform].every((f) => f.optional || (form[f.key] ?? '').trim());
-  return (
-    <Card title="Platforms → Signet (discover and connect without code)" className="mt-4">
-      <ErrorNote error={error} />
-      {(data?.items ?? []).map((c) => <PlatformConnection key={c.id} c={c} onChange={() => void reload()} />)}
-      <div className={(data?.items ?? []).length ? 'mt-4 border-t border-line pt-4' : ''}>
-        <div className="mb-2 flex flex-wrap gap-2">
-          {(Object.keys(NAMES) as Platform[]).map((p) => (
-            <button key={p} onClick={() => (setPlatform(p), setForm({}), setFormError(null))} className={`rounded-md px-3 py-1.5 text-sm ${platform === p ? 'bg-royal text-white' : 'bg-canvas text-ink-2 hover:bg-slate-200'}`}>{NAMES[p]}</button>
-          ))}
-        </div>
-        <p className="text-xs text-ink-3">{HELP[platform]} The credential goes to the Secrets Broker; gateways can never read it.</p>
-        <div className="mt-2 grid gap-2 md:grid-cols-2">
-          {FIELDS[platform].map((f) => f.area ? (
-            <textarea key={f.key} className="input mono min-h-24 text-xs md:col-span-2" placeholder={f.label} value={form[f.key] ?? ''} onChange={(e) => setForm({ ...form, [f.key]: e.target.value })} />
-          ) : (
-            <input key={f.key} className="input" type={f.secret ? 'password' : 'text'} placeholder={`${f.label}${f.optional ? ' (optional)' : ''}`} value={form[f.key] ?? ''} onChange={(e) => setForm({ ...form, [f.key]: e.target.value })} />
-          ))}
-          <input className="input" placeholder="Label (optional)" value={form.label ?? ''} onChange={(e) => setForm({ ...form, label: e.target.value })} />
-        </div>
-        <button className="btn-primary mt-2" disabled={busy || !ready} onClick={() => void connect()}>{busy ? 'Checking…' : `Connect ${NAMES[platform]}`}</button>
-        <div className="mt-2"><ErrorNote error={formError} /></div>
-      </div>
-    </Card>
-  );
+  return <Card title="Manage connected platforms" className="mt-4">
+    <ErrorNote error={error} />
+    {(data?.items ?? []).map((c) => <PlatformConnection key={c.id} c={c} onChange={() => { onChange(); void reload(); }} />)}
+  </Card>;
 }
 
 function PlatformConnection({ c, onChange }: { c: Connection; onChange: () => void }) {
@@ -106,6 +49,7 @@ function PlatformConnection({ c, onChange }: { c: Connection; onChange: () => vo
       setNote(`${w.name} registered as ${r.handle}; complete its proposal on the agent's Lifecycle tab`);
       setActionError(null);
       void reload();
+      onChange();
     } catch (e) {
       setActionError(e as ApiError);
     }
@@ -175,7 +119,7 @@ function PlatformConnection({ c, onChange }: { c: Connection; onChange: () => vo
   );
 }
 
-function LinkModal({ connectionId, platform, workload, onClose, onDone }: { connectionId: string; platform: Platform; workload: Workload; onClose: () => void; onDone: () => void }) {
+export function LinkModal({ connectionId, platform, workload, onClose, onDone }: { connectionId: string; platform: Platform; workload: Workload; onClose: () => void; onDone: () => void }) {
   const { data: agents } = useApi<{ items: { id: string; handle: string; name: string; cert_id: string | null; kind: string }[] }>('/agents?limit=100');
   const sealed = (agents?.items ?? []).filter((a) => a.cert_id && a.kind !== 'third_party');
   const firstOf = (kind: Signal['kind'], fallback: string) => workload.ai_signals.find((s) => s.kind === kind)?.name ?? fallback;

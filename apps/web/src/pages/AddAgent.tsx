@@ -4,29 +4,29 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { AgentLlmPanel } from '../components/AgentLlmPanel';
 import { OnboardingGuide } from '../components/OnboardingGuide';
 import { RestConnectionWizard } from '../components/RestConnectionWizard';
-import { ExternalConnectionFields, newConnectionDraft, type ConnectionDraft } from '../components/ExternalConnections';
-import { CONNECTION_METHODS } from '../lib/connections';
+import { newConnectionDraft } from '../components/ExternalConnections';
+import { ConnectionIntake, type IntakeConnection } from '../components/ConnectionIntake';
 import type { ConnectionMethod } from '@signet/core/types';
 import { ErrorNote, TierChip } from '../components/ui';
 import { ApiError, api, useApi } from '../lib/api';
 import { useCan, useMe } from '../lib/auth';
 import { Plugins } from './Plugins';
 
-// Guided onboarding: describe the agent first, then who and what it touches, then what it may do.
-// Nothing technical comes first, and nothing is created until the third step is finished. The
-// lifecycle, classification and approval rules are the backend's, unchanged.
+// Guided onboarding: details, verified source connection, then people/data and permissions.
+// Agent registration follows the intake; source verification never grants runtime approval.
 
-export const FLOW_STEPS = ['About', 'People & data', 'What it can do', 'Safety check', 'Approval', 'Connect'];
+export const FLOW_STEPS = ['About', 'People & data', 'What it can do', 'Safety check', 'Approval', 'Deploy'];
 
 // The one header for every way of adding an agent. Back goes to the previous screen of the journey.
-export function FlowFrame({ step, back = '/agents', narrow, children }: { step: number; back?: string | (() => void); narrow?: boolean; children: ReactNode }) {
+export function FlowFrame({ step, back = '/agents', narrow, children, progress }: { step: number; back?: string | (() => void); narrow?: boolean; children: ReactNode; progress?: readonly string[] }) {
   const nav = useNavigate();
+  const phase = progress ? step : step < 3 ? 0 : step < 5 ? 1 : 2;
   return (
     <div className="flow-page">
       <header className="flow-head">
         <div className="flex items-center gap-3"><button type="button" className="btn-ghost" data-testid="flow-back" onClick={() => (typeof back === 'string' ? nav(back) : back())}><ArrowLeft size={15} />Back</button><strong>Add an agent</strong></div>
-        <ol className="flow-steps" aria-label="Progress">
-          {FLOW_STEPS.map((label, i) => <li key={label} aria-current={i === step ? 'step' : undefined} className={i < step ? 'done' : i === step ? 'now' : ''}><i>{i < step ? <Check size={13} /> : i + 1}</i><span>{label}</span></li>)}
+        <ol className="flow-steps flow-phases" aria-label={`Progress: ${progress?.[step] ?? FLOW_STEPS[step]}`}>
+          {(progress ?? ['Describe', 'Review', 'Deploy']).map((label, i) => <li key={label} aria-current={i === phase ? 'step' : undefined} className={i < phase ? 'done' : i === phase ? 'now' : ''}><i>{i < phase ? <Check size={13} /> : i + 1}</i><span>{label}</span></li>)}
         </ol>
         <div className="flex items-center gap-4"><OnboardingGuide /><Link to="/agents" className="flow-exit">Exit</Link></div>
       </header>
@@ -44,27 +44,9 @@ export function Choice({ on, multi, title, hint, onClick, testId }: { on: boolea
   );
 }
 
-// Step zero: three plain goals in place of connection methods.
+// Start with the agent details; specialized discovery flows remain available from the form.
 export function AddAgentStart() {
-  const nav = useNavigate();
-  const [params] = useSearchParams();
-  const [goal, setGoal] = useState('one');
-  // Connectors link here with a suggested name; those go straight to the form.
-  useEffect(() => { if (params.get('name')) nav(`/agents/new/one?${params}`, { replace: true }); }, [params, nav]);
-  const next = () => nav(goal === 'one' ? '/agents/new/one' : goal === 'quick' ? '/agents/quick' : goal === 'find' ? '/agents/new/find' : '/agents/new/platform');
-  return (
-    <FlowFrame step={0} back="/agents" narrow>
-        <h1 className="flow-title">What would you like to do?</h1>
-        <p className="flow-lead">There's no wrong answer. You can always add more later.</p>
-        <div className="mt-7 space-y-3" role="radiogroup">
-          <Choice on={goal === 'one'} testId="goal-one" onClick={() => setGoal('one')} title="Add one agent I know about" hint="A chatbot, assistant or automation that you or your team built or bought." />
-          <Choice on={goal === 'find'} testId="goal-find" onClick={() => setGoal('find')} title="Find the agents my company already has" hint="Connect a cloud or AI account (AWS, Azure, Google, Vercel, OpenAI…) and pick from what Signet finds." />
-          <Choice on={goal === 'platform'} testId="goal-platform" onClick={() => setGoal('platform')} title="Connect a platform that runs many agents" hint="Use a web address and API key to see and monitor every agent on it." />
-          <Choice on={goal === 'quick'} testId="goal-quick" onClick={() => setGoal('quick')} title="Quick connect" hint="For an agent that only calls the model. One form to a working key." />
-        </div>
-        <div className="flow-actions"><Link className="btn-ghost btn-large" to="/agents">Back</Link><button className="btn-primary btn-large" data-testid="goal-continue" onClick={next}>Continue</button></div>
-    </FlowFrame>
-  );
+  return <AddAgentFlow />;
 }
 
 export function AddPlatform() {
@@ -118,9 +100,7 @@ export function AddAgentFlow() {
   const me = useMe();
   const [params] = useSearchParams();
   const [d, setD] = useState<Draft>(() => { const draft = loadDraft(); const name = params.get('name'); const runtime = params.get('runtime'); return { ...draft, ...(name ? { name } : {}), ...(runtime ? { runtime } : {}) }; });
-  const [direction, setDirection] = useState('inbound');
-  // Kept out of the saved draft because it can hold a credential.
-  const [connectionDraft, setConnectionDraft] = useState<ConnectionDraft>(newConnectionDraft('oauth'));
+  const [connection, setConnection] = useState<IntakeConnection | null>(null);
   const { data: templates } = useApi<{ items: TemplateOption[] }>('/templates');
   const useTemplate = (t: TemplateOption) => set({ template: t.id, autonomy: t.autonomy, users: t.users_affected, decisions: t.decisions_about_individuals, data: t.data_touched, plannedTools: t.suggested_actions.map((a) => `${a.name} (${a.impact})`).join(', ') });
   const [step, setStep] = useState(0);
@@ -133,15 +113,17 @@ export function AddAgentFlow() {
   const [addingLlm, setAddingLlm] = useState(false);
   // The draft holds no secrets: app keys go straight to the Secrets Broker.
   useEffect(() => { try { localStorage.setItem(DRAFT_KEY, JSON.stringify(d)); } catch { /* the form still works */ } }, [d]);
-  const set = (patch: Partial<Draft>) => setD({ ...d, ...patch });
+  const set = (patch: Partial<Draft>) => { setD({ ...d, ...patch }); if (patch.vendorHosted !== undefined && patch.vendorHosted !== d.vendorHosted) setConnection(null); };
 
   const ready = [
     d.name.trim().length > 0 && d.purpose.trim().length >= 10 && (!d.vendorHosted || d.vendor.trim().length > 0),
+    connection !== null,
     d.users.length > 0 && d.decisions !== null && !!d.undo && (!d.decisions || d.domains.length > 0),
     d.usesApps === false ? !d.vendorHosted : d.usesApps === true && (d.actions.length > 0 || !d.vendorHosted),
   ];
   const missing = [
     d.name.trim() ? (d.purpose.trim().length < 10 ? 'Describe what it does in a little more detail' : d.vendorHosted && !d.vendor.trim() ? 'Name the vendor' : '') : 'Give it a name',
+    'Choose a connection method and verify its API',
     !d.users.length ? 'Choose who it affects' : d.decisions === null ? 'Say whether it makes decisions about people' : d.decisions && !d.domains.length ? 'Choose the kind of decisions' : !d.undo ? 'Say whether mistakes can be undone' : '',
     d.usesApps === null ? 'Say whether it uses other apps' : d.vendorHosted && !d.actions.length ? 'A vendor-hosted agent needs at least one company app listed' : '',
   ];
@@ -150,6 +132,7 @@ export function AddAgentFlow() {
   const finish = async () => {
     setBusy(true);
     try {
+      if (!connection) throw new ApiError(422, 'CONNECTION', 'Verify the connection before submitting safety questions');
       const actions = d.usesApps ? d.actions : [];
       let id = agentId;
       let lifecycleId: string | undefined;
@@ -172,13 +155,11 @@ export function AddAgentFlow() {
           id = a.id; lifecycleId = a.lifecycle_id;
         }
         setAgentId(id);
-        if (direction === 'outbound' && d.method === 'oauth') {
-          await api('/connections', { method: 'POST', body: { agent_id: id, ...connectionDraft, config: { ...connectionDraft.config, method: d.method } } });
-          setConnectionDraft({ ...connectionDraft, credential: '' });
-        }
       } else {
         lifecycleId = (await api<any>(`/agents/${id}`)).lifecycle?.lifecycle.id;
       }
+      if (connection.connection_id) await api(`/connections/${connection.connection_id}/agent`, { method: 'POST', body: { agent_id: id } });
+      if (connection.platform) await api(`/platforms/${connection.platform.connection_id}/workloads/${encodeURIComponent(connection.platform.workload_id)}/agent`, { method: 'POST', body: { agent_id: id } });
       const tools = [...new Set(actions.map((a) => a.server))].map((server) => ({ server, data_scopes: d.data.filter((t) => !RESTRICTED.includes(t)), actions: actions.filter((a) => a.server === server).map((a) => ({ name: a.name, impact: a.impact })) }));
       const model = catalogue?.catalogue.find((c) => c.model === d.model) ?? catalogue?.catalogue[0];
       await api(`/lifecycles/${lifecycleId}/manifest`, {
@@ -206,22 +187,22 @@ export function AddAgentFlow() {
   const go = (to: number) => { setError(null); setStep(to); window.scrollTo(0, 0); };
   const actionsRow = (
     <div className="flow-actions">
-      {step > 0 ? <button className="btn-ghost btn-large" onClick={() => go(step - 1)}>Back</button> : <Link className="btn-ghost btn-large" to="/agents/new">Back</Link>}
+      {step > 0 ? <button className="btn-ghost btn-large" onClick={() => go(step - 1)}>Back</button> : <Link className="btn-ghost btn-large" to="/agents">Back</Link>}
       <div className="flex items-center gap-3">
         {!ready[step] && missing[step] && <span className="text-sm text-ink-3" data-testid="still-needed">{missing[step]}</span>}
-        <button className="btn-primary btn-large" data-testid="flow-continue" disabled={!ready[step] || busy || (step === 2 && !catalogue)} onClick={() => (step === 2 ? void finish() : go(step + 1))}>{step === 2 ? (busy ? 'Working out the risk…' : 'See the risk result') : 'Continue'}</button>
+        <button className="btn-primary btn-large" data-testid="flow-continue" disabled={!ready[step] || busy || (step === 3 && !catalogue)} onClick={() => (step === 3 ? void finish() : go(step + 1))}>{step === 3 ? (busy ? 'Working out the risk…' : 'Review and deploy') : step === 1 ? 'Continue to safety questions' : 'Continue'}</button>
       </div>
     </div>
   );
   const nameRequired = d.vendorHosted;
 
   return (
-    <FlowFrame step={step} back={step > 0 ? () => go(step - 1) : '/agents/new'}>
+    <FlowFrame step={step} progress={['Details', 'Connection', 'People & data', 'Permissions']} back={step > 0 ? () => go(step - 1) : '/agents'}>
       <div className="flow-grid">
         <div className="min-w-0">
           {step === 0 && <>
-            <h1 className="flow-title">Tell us about your agent</h1>
-            <p className="flow-lead">Just the basics. Technical details come later, only if needed.</p>
+            <h1 className="flow-title">Name your AI agent</h1>
+            <p className="flow-lead">Start with its details. Next, choose how to connect it.</p>
             <label className="flow-label" htmlFor="flow-name">What do you call it?</label>
             <input id="flow-name" data-testid="flow-name" className="input" value={d.name} onChange={(e) => set({ name: e.target.value })} placeholder="Refund Helper" />
             <label className="flow-label" htmlFor="flow-purpose">What does it do, and for whom?</label>
@@ -229,6 +210,7 @@ export function AddAgentFlow() {
             <label className="flow-label" htmlFor="flow-sponsor">Who else is accountable for it? <span className="font-normal text-ink-3">(optional; you're the owner)</span></label>
             <input id="flow-sponsor" className="input" value={d.sponsor} onChange={(e) => set({ sponsor: e.target.value })} placeholder="Business sponsor's email" />
             <details className="mt-5 rounded-lg border border-line p-3"><summary className="cursor-pointer text-sm font-medium">Start from a template (optional)</summary><div className="mt-3 grid gap-2 md:grid-cols-3">{(templates?.items ?? []).map((t) => <button key={t.id} type="button" className={`chip text-left ${d.template === t.id ? 'on' : ''}`} onClick={() => useTemplate(t)}><b className="text-sm">{t.name}</b> <TierChip tier={t.tier_hint} /></button>)}</div></details>
+            <details className="mt-4" data-testid="other-connect-options"><summary className="cursor-pointer text-xs text-ink-3">Import agents or use another setup</summary><div className="mt-2 flex flex-wrap gap-4 text-sm"><Link data-testid="goal-find" className="text-royal" to="/agents/new/find">Find cloud agents</Link><Link data-testid="goal-platform" className="text-royal" to="/agents/new/platform">Connect a platform</Link><Link data-testid="goal-quick" className="text-royal" to="/agents/quick">Quick connect</Link></div></details>
             <div className="flow-label">Who runs it?</div>
             <div className="grid gap-3 sm:grid-cols-2" role="radiogroup">
               <Choice on={!d.vendorHosted} title="We run it ourselves" hint="Our own code, or a tool like n8n" onClick={() => set({ vendorHosted: false })} />
@@ -239,7 +221,10 @@ export function AddAgentFlow() {
             <details className="mt-5 rounded-lg border border-line p-3"><summary className="cursor-pointer text-sm font-medium">More details (optional)</summary><div className="mt-3 grid gap-3 sm:grid-cols-2">{!d.vendorHosted && <><input aria-label="Runtime" className="input" value={d.runtime} onChange={(e) => set({ runtime: e.target.value })} placeholder="Runtime, e.g. runpod" /><input aria-label="Framework" className="input" value={d.framework} onChange={(e) => set({ framework: e.target.value })} placeholder="Framework, e.g. langchain" /><input aria-label="Built against" className="input" value={d.modelProvider} onChange={(e) => set({ modelProvider: e.target.value })} placeholder="Built against (model provider)" /></>}<input aria-label="Build team" className="input" value={d.team} onChange={(e) => set({ team: e.target.value })} placeholder="Build team emails, comma-separated" /><input aria-label="Business value" className="input" value={d.value} onChange={(e) => set({ value: e.target.value })} placeholder="Business value" /><input aria-label="Environment" data-testid="flow-environment" className="input" value={d.environment} onChange={(e) => set({ environment: e.target.value })} placeholder="Environment, e.g. dev" /></div></details>
           </>}
 
-          {step === 1 && <>
+          <div hidden={step !== 1}>
+            <ConnectionIntake vendorHosted={d.vendorHosted} initialModel={d.model} onInvalidate={() => setConnection(null)} onVerified={(value) => { set({ method: value.method, model: value.model ?? (d.model || catalogue?.catalogue[0]?.model || ''), ...(value.platform ? { vendorHosted: value.platform.vendor !== null, vendor: value.platform.vendor ?? '', runtime: value.platform.platform } : {}) }); setConnection(value); void reloadCatalogue(); }} />
+          </div>
+          {step === 2 && <>
             <h1 className="flow-title">Who and what does it touch?</h1>
             <p className="flow-lead">This decides how much review it needs.</p>
             <div className="flow-label">Who will it affect?</div>
@@ -259,7 +244,7 @@ export function AddAgentFlow() {
             {d.decisions && <><div className="flow-label">What kind of decisions?</div><div className="flex flex-wrap gap-2">{DOMAINS.map(([v, l]) => <button key={v} type="button" className={`chip ${d.domains.includes(v) ? 'on' : ''}`} onClick={() => set({ domains: toggle(d.domains, v) })}>{l}</button>)}</div></>}
           </>}
 
-          {step === 2 && <>
+          {step === 3 && <>
             <h1 className="flow-title">What should it be able to do?</h1>
             <p className="flow-lead">Anything not listed here will be blocked.</p>
             <div className="flow-label">Besides talking, does it take actions in other apps?</div>
@@ -289,21 +274,19 @@ export function AddAgentFlow() {
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" role="radiogroup">{FREEDOM.map(([v, l, h]) => <Choice key={v} testId={`flow-freedom-${v}`} on={d.autonomy === v} title={l} hint={h} onClick={() => set({ autonomy: v })} />)}</div>
             <label className="flow-label" htmlFor="flow-planned">Other planned tools <span className="font-normal text-ink-3">(optional, comma-separated)</span></label>
             <input id="flow-planned" className="input" value={d.plannedTools} onChange={(e) => set({ plannedTools: e.target.value })} placeholder="lookup_order (read), issue_refund (privileged)" />
-            {!d.vendorHosted && <><label className="flow-label" htmlFor="flow-llm">Which LLM does it use?</label>
+            {!d.vendorHosted && connection?.model === null && <><label className="flow-label" htmlFor="flow-llm">Which LLM does it use?</label>
               <select id="flow-llm" data-testid="flow-llm" className="input" value={d.model || catalogue?.catalogue[0]?.model || ''} onChange={(e) => set({ model: e.target.value })}>{(catalogue?.catalogue ?? []).map((c) => <option key={c.model} value={c.model}>{c.model}{c.upstream ? " (agent's own LLM)" : ' (Signet default)'}</option>)}</select>
               {can('tenant.admin') ? <button type="button" className="mt-2 text-sm font-medium text-royal" data-testid="flow-add-llm" onClick={() => setAddingLlm(true)}>+ Add your agent's LLM</button> : <p className="mt-2 text-xs text-ink-3">Using its own LLM? Ask a tenant admin to add it.</p>}</>}
-            <details className="mt-5 rounded-lg border border-line p-3" data-testid="flow-connection-details"><summary className="cursor-pointer text-sm font-medium">Connection method: {CONNECTION_METHODS.find((m) => m.id === d.method)?.label}</summary>
-              <div className="mt-3 grid gap-3 md:grid-cols-2" role="radiogroup">{CONNECTION_METHODS.map((m) => <Choice key={m.id} testId={`connect-method-${m.id}`} on={d.method === m.id} title={m.label} hint={m.description} onClick={() => { if (!(d.vendorHosted && (m.id === 'bootstrap' || m.id === 'hybrid'))) { set({ method: m.id }); if (m.id === 'oauth') setConnectionDraft(newConnectionDraft('oauth')); } }} />)}</div>
-              {d.method === 'oauth' && <div className="mt-3"><label className="label">Direction<select data-testid="wizard-direction" className="input" value={direction} onChange={(e) => { setDirection(e.target.value); setConnectionDraft(newConnectionDraft('oauth')); }}><option value="inbound">External agent calls Signet</option><option value="outbound">Signet connects to external platform</option></select></label>{direction === 'outbound' && <ExternalConnectionFields draft={{ ...connectionDraft, config: { ...connectionDraft.config, method: 'oauth', auth: 'oauth' } }} onChange={setConnectionDraft} />}</div>}
-            </details>
+            <p className="mt-5 text-sm text-ok">Source connection verified{connection?.model ? ` · ${connection.model}` : ''}. <button type="button" className="text-royal underline" data-testid="flow-edit-connection" onClick={() => go(1)}>Edit connection</button></p>
           </>}
           {error && <div className="mt-5"><ErrorNote error={error} /></div>}
           {actionsRow}
         </div>
         <aside className="flow-why">
           {step === 0 && <><h3>Why we ask</h3><p>Every agent needs a clear job and a named person responsible. If something goes wrong, Signet knows who to contact.</p></>}
-          {step === 1 && <><h3>Nothing is final yet</h3><p>Signet uses these answers to work out the risk level for you. You can go back and correct them before you see the result.</p></>}
-          {step === 2 && <><h3>You can skip apps for now</h3><p>No setup is needed to get this far. If you add apps later, the agent's safety check will ask for them before approval.</p></>}
+          {step === 1 && <><h3>Connect first</h3><p>Enter your provider's credentials here. Signet verifies the API before asking safety questions. Runtime access is enabled after approval.</p></>}
+          {step === 2 && <><h3>Connection ready</h3><p>Now tell us who the agent affects and what data it can use. These answers decide the safety review.</p></>}
+          {step === 3 && <><h3>Review, then deploy</h3><p>Your existing risk checks, assessments and approval requirements still apply. Deployment settings follow approval.</p></>}
         </aside>
       </div>
       {addingLlm && <AgentLlmPanel onClose={() => setAddingLlm(false)} onSaved={(model) => { set({ model }); setAddingLlm(false); void reloadCatalogue(); }} />}

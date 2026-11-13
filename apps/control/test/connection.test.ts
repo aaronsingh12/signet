@@ -56,11 +56,12 @@ test('OAuth and bootstrap identities reach a private API through a real outbound
   const owner: Principal = { id: 'owner@example.test', name: 'Owner', kind: 'human', roles: ['agent_owner'], permissions: permissionsFor(['agent_owner']), groups: [], mfa: true, auth: 'bearer', auth_time: null };
   const security: Principal = { ...owner, id: 'security@example.test', roles: ['security_officer'], permissions: permissionsFor(['security_officer']) };
   let calls = 0;
+  let privateToken = 'local-only-test-token';
   let slowStarted = false;
   let slowClosed = false;
   const privateApi = createServer((request, response) => {
     calls++;
-    assert.equal(request.headers.authorization, 'Bearer local-only-test-token');
+    assert.equal(request.headers.authorization, `Bearer ${privateToken}`);
     if (request.url === '/records/slow') {
       slowStarted = true;
       response.once('close', () => { slowClosed = true; });
@@ -113,6 +114,16 @@ test('OAuth and bootstrap identities reach a private API through a real outbound
   const login = await fetch(`${controlUrl}/api/v1/auth/local-login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'connect-admin', password: 'isolated-test-password' }) });
   assert.equal(login.status, 200, await login.text());
   const cookie = login.headers.get('set-cookie')!.split(';')[0]!;
+  const settings = await fetch(`${controlUrl}/api/v1/connect/settings`, { method: 'PUT', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ control_url: controlUrl, gateway_url: gatewayUrl }) });
+  assert.equal(settings.status, 200, await settings.clone().text());
+  const info = await (await fetch(`${controlUrl}/api/v1/connect/info`, { headers: { cookie } })).json() as { control_url: string; gateway_url: string; gateway_url_source: string };
+  assert.equal(info.control_url, controlUrl);
+  assert.equal(info.gateway_url, gatewayUrl);
+  assert.equal(info.gateway_url_source, 'database');
+  const { connectionAddresses } = await import('../src/connection-settings');
+  assert.equal((await connectionAddresses()).gateway_url, gatewayUrl, 'a separate control instance reads the saved addresses without restarting');
+  assert.equal((await fetch(`${controlUrl}/api/v1/connect/settings`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ control_url: controlUrl, gateway_url: gatewayUrl }) })).status, 401);
+  assert.equal((await fetch(`${controlUrl}/api/v1/connect/settings`, { method: 'PUT', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ control_url: 'https://user:password@example.com', gateway_url: gatewayUrl }) })).status, 400);
   const exchange = await fetch(`${controlUrl}/api/v1/identity/token`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', authorization: `Basic ${Buffer.from(`${client.client_id}:${client.client_secret}`).toString('base64')}` }, body: 'grant_type=client_credentials' });
   assert.equal(exchange.status, 200);
   const identity = await exchange.json() as { access_token: string; expires_in: number };
@@ -122,9 +133,28 @@ test('OAuth and bootstrap identities reach a private API through a real outbound
   assert.equal(result.status, 200, await result.clone().text());
   assert.deepEqual(await result.json(), { id: '42', source: 'private-api' });
   assert.equal(calls, 1);
+  const savedCredential = await fetch(`${controlUrl}/api/v1/edge-runners/${runner.id}/tools/private-records/credential`, { method: 'PUT', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ credential: privateToken }) });
+  assert.equal(savedCredential.status, 200, await savedCredential.clone().text());
+  const isolatedRunner = await edge.createRunner('Unrelated runner', owner);
+  assert.equal((await fetch(`${controlUrl}/api/v1/edge/runners/${isolatedRunner.id}/tools/private-records/credential`, { headers: { authorization: `Bearer ${isolatedRunner.runner_secret}` } })).status, 403, 'runner credentials cannot open another runner\'s tools');
+  const pairedFile = join(directory, 'signet-runner.json');
+  writeFileSync(pairedFile, JSON.stringify({ version: 1, control_url: controlUrl, runner_id: runner.id, runner_secret: runner.runner_secret, private_destinations: 'allow', tools: [{ alias: definition.alias, url: definition.url, actions: definition.actions, credential_source: 'broker' }] }));
+  await stop(worker);
+  const pairedWorker = spawn(process.execPath, ['--import', 'tsx', resolve('apps/edge/src/index.ts'), '--config', pairedFile], { env: { ...env, SIGNET_EDGE_RUNNER_ID: '', SIGNET_EDGE_RUNNER_SECRET: '', SIGNET_EDGE_TOOLS_FILE: '', SIGNET_TEST_PRIVATE_TOKEN: '' }, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+  children.push(pairedWorker);
+  pairedWorker.stderr?.on('data', (chunk: Buffer) => { logs = (logs + chunk.toString()).slice(-12_000); });
+  await until(async () => { assert.equal(pairedWorker.exitCode, null, logs); return (await edge.listRunners()).some((item) => item.id === runner.id && item.status === 'online'); }, 'file-configured runner');
+  const fromFile = await call(identity.access_token, 'read');
+  assert.equal(fromFile.status, 200, await fromFile.clone().text());
+  privateToken = 'rotated-private-api-token';
+  const rotated = await fetch(`${controlUrl}/api/v1/edge-runners/${runner.id}/tools/private-records/credential`, { method: 'PUT', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ credential: privateToken }) });
+  assert.equal(rotated.status, 200, await rotated.clone().text());
+  assert.equal((await call(identity.access_token, 'read')).status, 200, 'the paired runner uses a rotated database credential without restarting or changing environment variables');
+  const meta = await (await fetch(`${controlUrl}/api/v1/tools`, { headers: { cookie } })).text();
+  assert.ok(!meta.includes(privateToken), 'ordinary tool metadata never exposes plaintext credentials');
   const denied = await call(identity.access_token, 'not-approved');
   assert.equal(denied.status, 403);
-  assert.equal(calls, 1, 'unapproved actions must never reach the private service');
+  assert.equal(calls, 3, 'unapproved actions must never reach the private service');
   const bootstrapExchange = (): Promise<Response> => fetch(`${controlUrl}/api/v1/identity/token`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ bootstrap_credential: bootstrap.bootstrap_credential }) });
   const first = await bootstrapExchange();
   assert.equal(first.status, 200);
@@ -152,15 +182,26 @@ test('OAuth and bootstrap identities reach a private API through a real outbound
   assert.equal(viaKey.status, 200, await viaKey.clone().text());
   const viaHeader = await fetch(`${gatewayUrl}/v1/tools/http/private-records/read`, { method: 'POST', headers: { 'api-key': deployment.deployment_credential, 'content-type': 'application/json' }, body: JSON.stringify({ id: '42' }) });
   assert.equal(viaHeader.status, 200, await viaHeader.clone().text());
+  const sidecarFile = join(directory, 'signet-agent.json');
+  writeFileSync(sidecarFile, JSON.stringify({ version: 1, control_url: controlUrl, gateway_url: gatewayUrl, identity: { kind: 'gateway', credential: deployment.deployment_credential }, token_cache: null }));
+  const sidecarPort = await unusedPort();
+  const sidecar = spawn(process.execPath, ['--import', 'tsx', resolve('apps/sidecar/src/index.ts'), '--config', sidecarFile], { env: { ...env, SIGNET_GATEWAY_URL: '', SIGNET_CONTROL_URL: '', SIGNET_SIDECAR_PORT: String(sidecarPort), SIGNET_SIDECAR_BIND: '127.0.0.1' }, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+  children.push(sidecar);
+  sidecar.stderr?.on('data', (chunk: Buffer) => { logs = (logs + chunk.toString()).slice(-12_000); });
+  await until(async () => {
+    assert.equal(sidecar.exitCode, null, logs);
+    try { return (await fetch(`http://127.0.0.1:${sidecarPort}/signet/status`, { signal: AbortSignal.timeout(1000) })).ok; }
+    catch (error) { if (error instanceof TypeError || (error instanceof Error && error.name === 'TimeoutError')) return false; throw error; }
+  }, 'sidecar with a UI connection file');
+  const sidecarCall = await fetch(`http://127.0.0.1:${sidecarPort}/v1/tools/http/private-records/read`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: '42' }) });
+  assert.equal(sidecarCall.status, 200, await sidecarCall.clone().text());
+  assert.deepEqual(await sidecarCall.json(), { id: '42', source: 'private-api' }, 'a connection file carries the gateway identity through the real sidecar without environment credentials');
   const forged = await call(`sdc_${'x'.repeat(43)}`, 'read');
   assert.equal(forged.status, 401);
   assert.equal(((await forged.json()) as { error: { code: string } }).error.code, 'invalid_api_key');
-  assert.equal(worker.exitCode, null, 'revoking one agent instance must not stop the runner');
+  assert.equal(pairedWorker.exitCode, null, 'revoking one agent instance must not stop the runner');
   const external = await import('../src/external-connections');
   const manager: Principal = { ...owner, roles: ['platform_admin', 'agent_owner'], permissions: permissionsFor(['platform_admin', 'agent_owner']) };
-  const previousGateway = process.env.SIGNET_GATEWAY_URL;
-  process.env.SIGNET_GATEWAY_URL = gatewayUrl;
-  context.after(() => { if (previousGateway === undefined) delete process.env.SIGNET_GATEWAY_URL; else process.env.SIGNET_GATEWAY_URL = previousGateway; });
   const connection = await external.create(agent.id, { credential: client.client_secret, config: { name: 'Managed private connector', tracking_pointer: '', execution_pagination: null, method: 'hybrid', private_connector: { runner_id: runner.id, tool_alias: 'private-records', environment: 'dev' }, base_url: definition.url, auth: 'connector', header: '', client_id: client.client_id, token_url: '', scopes: '', token_auth: 'client_secret_basic', timeout_ms: 30000, sync_interval_seconds: 300, remote_management: false, endpoints: { test: definition.actions.test }, agents_mapping: null, executions_mapping: null } }, manager);
   const tested = await external.testConnection(connection.id, manager);
   assert.equal(tested.health.gateway_enforcement, true);

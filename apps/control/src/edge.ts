@@ -7,7 +7,8 @@ import { usableCertificate } from './identity';
 import * as ledger from './ledger';
 import type { Principal } from './rbac';
 import { tenant } from './tenant';
-import { getTool } from './tools';
+import { getTool, registerTool, type ToolInput } from './tools';
+import { getSecretMeta, putSecret, revealForGateway, rotateSecret } from './secrets';
 
 
 interface Runner {
@@ -54,6 +55,49 @@ export async function authenticateRunner(id: string, bearer: string): Promise<vo
   const row = (await db.prepare('SELECT secret_hash, revoked_at FROM edge_runner WHERE tenant_id = ? AND id = ?').get(tenant.id, id)) as { secret_hash: string; revoked_at: string | null } | undefined;
   const digest = sha256(bearer.replace(/^Bearer\s+/i, ''));
   if (!row || row.revoked_at || !timingSafeEqual(Buffer.from(row.secret_hash), Buffer.from(digest))) throw new PolicyError('EDGE_AUTH', 'runner credentials are invalid or revoked', 401);
+}
+
+function credentialHeader(value: string): string {
+  if (typeof value !== 'string' || !/^[a-zA-Z0-9-]+$/.test(value) || ['host', 'content-length', 'connection', 'transfer-encoding'].includes(value.toLowerCase())) throw invalid('auth_header must be a valid credential header such as authorization or x-api-key');
+  return value.toLowerCase();
+}
+
+/** Save the private API configuration and its encrypted credential atomically from onboarding. */
+export async function registerRunnerTool(runnerId: string, input: { alias: string; url: string; actions: ToolInput['actions']; auth_header: string; credential: string }, actor: Principal) {
+  await requireRunner(runnerId);
+  if (!input || typeof input.credential !== 'string') throw invalid('credential must be a string; use an empty string for an unauthenticated private API');
+  const header = credentialHeader(input.auth_header);
+  return tx(async () => {
+    const secret = input.credential ? await putSecret({ name: `runner-${newId('sec').toLowerCase()}`, kind: 'tool', value: input.credential }, actor) : null;
+    return registerTool({ alias: input.alias, kind: 'http', url: input.url, actions: input.actions, auth_header: header, secret: secret?.id ?? null, runner_id: runnerId }, actor);
+  });
+}
+
+/** Change the stored private API credential; the next runner request reads the new version. */
+export async function saveRunnerToolCredential(runnerId: string, alias: string, credential: string, actor: Principal): Promise<{ saved: true }> {
+  await requireRunner(runnerId);
+  const tool = await getTool(alias);
+  if (!tool || tool.runner_id !== runnerId) throw invalid(`tool ${alias} is not assigned to runner ${runnerId}`);
+  await tx(async () => {
+    if (tool.secret_id) {
+      if ((await getSecretMeta(tool.secret_id)).kind !== 'tool') throw invalid(`tool ${alias} does not reference a tool credential`);
+      await rotateSecret(tool.secret_id, credential, actor);
+    } else {
+      const secret = await putSecret({ name: `runner-${newId('sec').toLowerCase()}`, kind: 'tool', value: credential }, actor);
+      await db.prepare('UPDATE tool SET secret_id = ? WHERE tenant_id = ? AND alias = ? AND runner_id = ?').run(secret.id, tenant.id, alias, runnerId);
+    }
+  });
+  return { saved: true };
+}
+
+/** An authenticated runner may open only credentials for its own assigned HTTP tools. */
+export async function runnerToolCredential(runnerId: string, alias: string): Promise<{ credential: string | null }> {
+  await requireRunner(runnerId);
+  const tool = await getTool(alias);
+  if (!tool || tool.runner_id !== runnerId || tool.kind !== 'http') throw new PolicyError('EDGE_TOOL', `tool ${alias} is not assigned to runner ${runnerId}`, 403);
+  if (!tool.secret_id) return { credential: null };
+  if ((await getSecretMeta(tool.secret_id)).kind !== 'tool') throw new PolicyError('EDGE_TOOL', `tool ${alias} does not reference a tool credential`, 403);
+  return { credential: (await revealForGateway(tool.secret_id)).value };
 }
 
 export async function revokeRunner(id: string, actor: Principal): Promise<{ revoked: true }> {

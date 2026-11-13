@@ -9,6 +9,7 @@ import { activeCertificate, getAgent } from './registry';
 import { tenant } from './tenant';
 import * as workflow from './workflow';
 import { GATEWAY_AUTH_ERRORS } from './gateway-auth';
+import { gatewayAddress } from './connection-settings';
 
 // Agent connectivity (BP 4, 5): an agent is connected only when its own calls reach a gateway with a
 // valid workload identity. Registration or approval alone never counts. Everything here is derived
@@ -116,8 +117,7 @@ export async function status(agentRef: string) {
 /** Reachability checks do not impersonate an agent or manufacture an accepted Gateway call. */
 export async function testGateway(agentRef: string) {
   await getAgent(agentRef);
-  const gateway = process.env.SIGNET_GATEWAY_URL?.replace(/\/+$/, '');
-  if (!gateway) throw invalid('Configure SIGNET_GATEWAY_URL on the control plane before testing Gateway reachability');
+  const gateway = await gatewayAddress();
   const response = await request(`${gateway}/healthz`, { method: 'GET', timeoutMs: 5000, signal: AbortSignal.timeout(5000), maxBytes: 16000 }).catch((error: Error) => { throw new PolicyError('GATEWAY_UNAVAILABLE', `Signet Gateway health request failed: ${error.message}`, 502); });
   if (!response.ok) throw new PolicyError('GATEWAY_UNAVAILABLE', `Signet Gateway health check returned HTTP ${response.status}`, 502);
   return { gateway_reachable: true, connection: await status(agentRef), note: 'Gateway service is reachable. Only this agent’s actual workload requests can establish accepted or refused call evidence.' };

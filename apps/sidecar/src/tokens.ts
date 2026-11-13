@@ -10,6 +10,7 @@ export interface IdentityConfig {
   bootstrapCredential?: string;
   clientId?: string;
   clientSecret?: string;
+  deploymentCredential?: string;
 }
 
 export interface Claims {
@@ -82,6 +83,7 @@ export class TokenManager {
         }
       }
       const c = this.config;
+      if (c.deploymentCredential) return this.set(await this.post('/api/v1/identity/deployment-token', { deployment_credential: c.deploymentCredential }));
       if (c.clientId && c.clientSecret) return this.set(await this.post('/api/v1/identity/token', { grant_type: 'client_credentials', client_id: c.clientId, client_secret: c.clientSecret }));
       if (c.bootstrapCredential && !this.bootstrapUsed) {
         this.bootstrapUsed = true; // single use, whatever the outcome

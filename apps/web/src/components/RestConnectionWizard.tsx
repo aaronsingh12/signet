@@ -15,6 +15,7 @@ interface Props {
   connectionId: string | null;
   onSaved: () => void;
   onCancel: () => void;
+  onVerified?: (connection: ExternalConnectionView) => void;
 }
 
 /** Preview remote agents first, then onboard only the identities chosen by the user. */
@@ -62,6 +63,7 @@ export function RestConnectionWizard(props: Props) {
       testedId = saved.id;
       const tested = await api<ExternalConnectionView>(`/connections/${saved.id}/test`, { method: 'POST' });
       setHealth(tested.health); setRevision((value) => value + 1);
+      if (tested.health.endpoint_verified && ['valid', 'not_required'].includes(tested.health.authentication)) props.onVerified?.(tested);
       if (saved.config.endpoints.discover && saved.config.agents_mapping) {
         const result = await api<RestResult>(`/connections/${saved.id}/preview-agents`, { method: 'POST' });
         setAgents(result.agents);
@@ -84,14 +86,15 @@ export function RestConnectionWizard(props: Props) {
     } catch (error) { setError(error as ApiError); }
     finally { setBusy(false); }
   };
-  return <Card title="Connect your REST API">
-    <p className="mb-4 text-sm text-ink-2">Enter your API address and credentials. Review API settings once to map your provider's endpoints and agent fields, then test and choose agents to onboard.</p>
+  return <Card title={draft.config.method === 'oauth' ? 'Connect with OAuth 2.0' : draft.config.method === 'hybrid' ? 'Connect your private network / on-prem API' : 'Connect your REST API'}>
+    <p className="mb-4 text-sm text-ink-2">{draft.config.method === 'oauth' ? 'Enter your API base URL, token URL, Client ID and Client Secret, then test the connection.' : draft.config.method === 'hybrid' ? 'Connect through an enrolled runner using an approved agent’s Signet credentials and private tool binding.' : "Enter your API address and credentials. Review API settings once to map your provider's endpoints and agent fields, then test and choose agents to onboard."}</p>
     <form aria-busy={busy} data-testid="rest-connect-form" className="space-y-4" onSubmit={(event) => { event.preventDefault(); void connect(); }}><fieldset disabled={busy || !can('connectors.manage')} className="space-y-4">
-      <fieldset disabled={busy || !can('connectors.manage')} className="grid gap-3 md:grid-cols-2">
+      {draft.config.method === 'rest' && <><fieldset disabled={busy || !can('connectors.manage')} className="grid gap-3 md:grid-cols-2">
         <label className="label">Base URL<input data-testid="rest-url" className="input" required type="url" placeholder="https://your-platform.com" value={baseUrl} onChange={(event) => { setBaseUrl(event.target.value); setAgents(null); setError(null); setNotice(null); }} /></label>
         {draft.config.auth !== 'none' && <label className="label">API key / secret<input data-testid="rest-secret" className="input" type="password" autoComplete="new-password" required={!connectionId} value={credential} placeholder={connectionId ? 'Leave blank to keep your saved key' : 'Paste your platform API key'} onChange={(event) => { setCredential(event.target.value); setAgents(null); setError(null); setNotice(null); }} /></label>}
       </fieldset>
-      <details className="rounded-lg border border-line p-3"><summary>API settings and endpoint mapping</summary><div className="mt-3"><ExternalConnectionFields draft={{ config: { ...draft.config, base_url: baseUrl }, credential }} onChange={(next) => { setDraft(next); setBaseUrl(next.config.base_url); setCredential(next.credential); setHealth(null); setAgents(null); setNotice(null); }} /></div></details>
+      <details className="rounded-lg border border-line p-3"><summary>API settings and endpoint mapping</summary><div className="mt-3"><ExternalConnectionFields draft={{ config: { ...draft.config, base_url: baseUrl }, credential }} onChange={(next) => { setDraft(next); setBaseUrl(next.config.base_url); setCredential(next.credential); setHealth(null); setAgents(null); setNotice(null); }} /></div></details></>}
+      {draft.config.method !== 'rest' && <ExternalConnectionFields draft={{ config: { ...draft.config, base_url: baseUrl }, credential }} onChange={(next) => { setDraft(next); setBaseUrl(next.config.base_url); setCredential(next.credential); setHealth(null); setAgents(null); setNotice(null); }} />}
       <div className="flex flex-wrap gap-3"><button type="button" data-testid="rest-save" className="btn-ghost" disabled={busy || !can('connectors.manage')} onClick={() => void save()}>Save connection / mappings</button><button data-testid="rest-connect" disabled={busy || !can('connectors.manage')} className="btn-primary">{busy ? 'Please wait...' : agents === null ? 'Test connection & find agents' : 'Test & refresh agents'}</button><button type="button" data-testid="rest-close" disabled={busy} className="btn-ghost" onClick={() => { if (connectionId) props.onSaved(); else props.onCancel(); }}>Close</button></div>
     </fieldset></form>
     <div role="status" aria-live="polite" className="mt-4 space-y-2 text-sm">{busy ? <p>Updating connection. Please wait...</p> : health ? <><div className="flex flex-wrap gap-2"><span className="rounded-full border border-line px-3 py-1">{health.reachable === true ? 'Reachable' : health.reachable === false ? 'Unreachable' : 'Reachability unverified'}</span><span className={`rounded-full border border-line px-3 py-1 ${health.authentication === 'invalid' ? 'text-bad' : health.authentication === 'unverified' ? 'text-warn' : 'text-ok'}`}>{health.authentication === 'valid' ? 'Authentication verified' : health.authentication === 'invalid' ? 'Authentication failed' : health.authentication === 'not_required' ? 'Authentication not required' : 'Authentication unverified'}</span><span className="rounded-full border border-line px-3 py-1">{health.endpoint_verified ? 'Test endpoint verified' : 'Test endpoint unverified'}</span></div><p className="text-xs text-ink-3">Last tested: {health.last_tested_at ? new Date(health.last_tested_at).toLocaleString() : 'Never'}</p></> : <p className="text-ink-3">Save and test your API configuration.</p>}</div>

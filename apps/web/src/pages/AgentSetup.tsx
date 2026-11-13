@@ -209,7 +209,7 @@ function Connect({ data, onChange }: { data: any; onChange: () => void }) {
       setBusy(false);
     }
   };
-  if (agent.kind === 'third_party' || agent.connection_method !== 'rest') return <Wide title={`Connect ${agent.name}`} lead="Follow the steps for the connection method you chose."><ConnectionTab data={data} onChange={onChange} /><div className="mt-6"><DeployStage v={v} onChange={onChange} /></div></Wide>;
+  if (agent.kind === 'third_party' || agent.connection_method !== 'rest') return <Wide title={`Deploy ${agent.name}`} lead="Approval is complete. Use your chosen connection method to activate the runtime and verify its first request."><ConnectionTab data={data} onChange={onChange} /><div className="mt-6"><DeployStage v={v} onChange={onChange} /></div></Wide>;
   const base = `${(info?.gateway_url ?? location.origin).replace(/\/+$/, '')}/v1`;
   const create = () => run(async () => { setKey((await api<{ deployment_credential: string }>(`/agents/${agent.id}/deployment-credentials`, { method: 'POST', body: { environment } })).deployment_credential); });
   const send = () => run(async () => { setTest(await api('/connect/test', { method: 'POST', body: { credential: key } })); });
@@ -217,7 +217,7 @@ function Connect({ data, onChange }: { data: any; onChange: () => void }) {
     <div className="flow-grid">
       <div className="min-w-0">
         <div className="text-sm font-semibold text-ok">✓ Approved</div>
-        <h1 className="flow-title mt-1">Connect {agent.name}</h1>
+        <h1 className="flow-title mt-1">Deploy {agent.name}</h1>
         <p className="flow-lead">Change two settings where your agent runs. Its code stays the same.</p>
         <section className="card mt-6 space-y-4 p-5">
           <div><div className="flow-label !mt-0">1. Web address (base URL)</div><CopyCode text={base} testId="connect-base" /></div>
@@ -226,7 +226,7 @@ function Connect({ data, onChange }: { data: any; onChange: () => void }) {
         {key && <section className="card mt-4 p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><b>Does it work?</b><div className="text-sm text-ink-3">Sends one real request through Signet</div></div><button className="btn-ghost" data-testid="connect-test" disabled={busy} onClick={() => void send()}>{busy ? 'Testing…' : 'Send test'}</button></div>{test && (test.ok ? <p className="note ok mt-3" data-testid="connect-result"><b>Working.</b> The AI replied "{test.reply}".</p> : <p className="note bad mt-3" data-testid="connect-result"><b>{test.message}</b> {test.hint}</p>)}</section>}
         {error && <div className="mt-4"><ErrorNote error={error} /></div>}
         <section className="mt-8"><h2 className="text-lg font-semibold">It starts in shadow mode</h2><p className="mt-1 text-sm text-ink-2">Signet records would-blocks without stopping normal requests. Kill rules and secret-exfiltration blocks are already enforced. When the shadow period ends, review the results and move to enforce.</p><div className="mt-4"><DeployStage v={v} onChange={onChange} /></div></section>
-        <div className="flow-actions"><span /><Link className="btn-primary btn-large" data-testid="connect-finish" to={`/agents/${agent.id}`}>Finish</Link></div>
+        <div className="flow-actions"><span /><Link className="btn-primary btn-large" data-testid="connect-finish" to={`/agents/${agent.id}`}>Open monitoring</Link></div>
       </div>
       <aside className="flow-why"><h3>Different setup?</h3><p>Python, Docker, n8n or a sidecar: full instructions are on the agent's Connection tab.</p><Link className="btn-ghost mt-3" to={`/agents/${agent.id}?tab=connection`}>See other setups</Link></aside>
     </div>

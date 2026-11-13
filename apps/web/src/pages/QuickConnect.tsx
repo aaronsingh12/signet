@@ -40,8 +40,9 @@ export function QuickConnect() {
   if (result?.state === 'connected') return <Connected r={result} />;
   return (
     <FlowFrame step={result ? 3 : 0} back="/agents/new">
-      <div className="flex flex-wrap items-start justify-between gap-3"><h1 className="flow-title">Quick connect</h1><Link className="btn" to="/agents/new/one">Full registration</Link></div>
-      <p className="flow-lead mb-6">For an agent that only calls the model. Answer a few questions and get a key. Signet works out the risk level; riskier agents go through the full review.</p>
+      <h1 className="flow-title">Tell us about your chatbot</h1>
+      <p className="flow-lead mb-3">Signet uses these details to choose the right safety review. After approval, you'll get your connection settings.</p>
+      <p className="mb-6 text-sm text-ink-3">Does it also use tools or take actions? <Link data-testid="quick-guided-setup" className="text-royal hover:underline" to="/agents/new/one">Use guided setup</Link></p>
       <div className="max-w-3xl space-y-4">
         {!result && (
           <Card title="About your agent">
@@ -102,8 +103,8 @@ function Connected({ r }: { r: Extract<Result, { state: 'connected' }> }) {
   };
   return (
     <FlowFrame step={5} back="/agents">
-      <h1 className="flow-title">Your agent is connected</h1>
-      <p className="flow-lead mb-6">Point your agent at these two values. Everything else in its code stays the same.</p>
+      <h1 className="flow-title">Your connection settings are ready</h1>
+      <p className="flow-lead mb-6">Use these in your chatbot's server-side AI settings, then send a test to verify the connection.</p>
       <div className="max-w-3xl space-y-4">
         <Card title="Connection details">
           <div className="space-y-3 text-sm">
