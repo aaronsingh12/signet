@@ -99,12 +99,24 @@ export interface ArgInspection {
   approval: { tag: DataTag; rule: string } | null;
 }
 
-export function inspectArgs(args: unknown, action: CompiledAction | undefined, policy: CompiledPolicy): ArgInspection {
+/** Every string value inside tool arguments, exactly as inspectArgs sees it (for DET-PII). */
+export function argStrings(args: unknown): string[] {
+  const out = new Set<string>();
+  const walk = (v: unknown) => {
+    if (typeof v === 'string') { if (v.trim()) out.add(v); } else if (Array.isArray(v)) v.forEach(walk);
+    else if (v && typeof v === 'object') Object.values(v).forEach(walk);
+  };
+  walk(args);
+  return [...out];
+}
+
+// `extra`: findings from an active DET-PII per string, added where no pattern finding overlaps them.
+export function inspectArgs(args: unknown, action: CompiledAction | undefined, policy: CompiledPolicy, extra?: Map<string, Finding[]>): ArgInspection {
   const events: DlpEvent[] = [];
   const out: ArgInspection = { events, blocked: null, exfiltration: null, approval: null };
   const walk = (v: unknown) => {
     if (typeof v === 'string') {
-      for (const f of scan(v)) {
+      for (const f of withExtra(scan(v), extra?.get(v))) {
         const d = toolArgDecision(f.tag, action, policy);
         events.push({ direction: 'in', tag: f.tag, recogniser: f.recogniser, action: d.action });
         if (d.action === 'block') {

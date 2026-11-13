@@ -274,6 +274,97 @@ const CONTROLS: ControlDef[] = [
       return missing.length ? { status: missing.length === act.length ? 'ineffective' : 'partially_effective', detail: `active without a passing benchmark: ${missing.join(', ')}` } : { status: 'effective', detail: `${act.length} active detector(s) passed their benchmark` };
     },
   },
+  // --- Controls added to cover the remaining framework requirements (framework mapping pass) ----------
+  {
+    id: 'SGC-DATA-003', domain: 'DATA', severity: 'high', type: 'automated', objective: 'Data is encrypted in transit (NIST SP 800-53 SC-8)',
+    test: 'The console address, the database connection and the cloud LLM connection all use TLS (local addresses excepted)',
+    check: async () => {
+      const local = (u: URL) => ['localhost', '127.0.0.1', '::1'].includes(u.hostname);
+      const bad: string[] = [];
+      const checked: string[] = [];
+      const db = process.env.DATABASE_URL;
+      if (db) {
+        const u = new URL(db);
+        const mode = u.searchParams.get('sslmode') ?? '';
+        checked.push('database');
+        if (!local(u) && !['require', 'verify-ca', 'verify-full'].includes(mode)) bad.push(`database connection without sslmode=require (${mode || 'not set'})`);
+      }
+      for (const [name, v] of [['console address', process.env.SIGNET_PUBLIC_URL], ['cloud LLM', process.env.SIGNET_LLM_BASE_URL]] as const) {
+        if (!v) continue;
+        checked.push(name);
+        const u = new URL(v);
+        if (u.protocol !== 'https:' && !local(u)) bad.push(`${name} uses ${u.protocol.replace(':', '')}`);
+      }
+      if (!checked.length) return { status: 'not_tested', detail: 'no connection settings to check' };
+      return bad.length ? { status: 'ineffective', detail: bad.join('; ') } : { status: 'effective', detail: `TLS on ${checked.join(', ')}` };
+    },
+  },
+  {
+    id: 'SGC-DATA-004', domain: 'DATA', severity: 'high', type: 'automated', objective: 'Secrets and evidence are protected at rest (NIST SP 800-53 SC-28)',
+    test: 'Secrets are envelope-encrypted with a working key service (Vault/OpenBao or KMS outside development) and every secret is sealed by it',
+    check: async () => {
+      const { checkProvider } = await import('./keyring');
+      const k = await checkProvider();
+      if (!k.ok) return { status: 'ineffective', detail: `key service ${k.provider} is not working: ${k.detail}` };
+      const rows = await all<{ sealed: string }>('SELECT sealed FROM secret');
+      const other = rows.filter((r) => !r.sealed.startsWith(`env1.${k.provider}.`)).length;
+      if (k.provider === 'local') return { status: 'partially_effective', detail: `${rows.length} secret(s) encrypted with the local key; use Vault/OpenBao or a cloud KMS in production` };
+      return other ? { status: 'partially_effective', detail: `${other} of ${rows.length} secret(s) are not yet sealed by ${k.provider} (re-seal them)` } : { status: 'effective', detail: `${rows.length} secret(s) sealed by ${k.provider}` };
+    },
+  },
+  {
+    id: 'SGC-DATA-005', domain: 'DATA', severity: 'high', type: 'automated', objective: 'Lawful basis recorded for agents that handle personal data (GDPR Art. 6)',
+    test: 'Every agent whose intake declares personal data has a lawful basis recorded',
+    check: async () => {
+      const rows = await all<{ intake: string }>("SELECT jsonb_extract_path_text(data::jsonb, 'intake') AS intake FROM lifecycle WHERE status IN ('complete', 'in_progress')");
+      const personal = rows.map((r) => JSON.parse(r.intake ?? '{}') as { data_touched?: string[]; lawful_basis?: string }).filter((i) => (i.data_touched ?? []).some((t) => ['personal', 'special_category', 'financial_account', 'payment_card'].includes(t)));
+      return ratio(personal.filter((i) => !i.lawful_basis).length, personal.length, 'agents handling personal data with a lawful basis');
+    },
+  },
+  {
+    id: 'SGC-DATA-006', domain: 'DATA', severity: 'high', type: 'automated', objective: 'Where personal data goes is known before it leaves (GDPR Art. 44)',
+    test: 'The approved cloud LLM has a verified region and provider terms, and personal data reaches it only tokenised (SGC-DATA-002)',
+    check: async () => {
+      const unverified = tenant.settings.catalogue.filter((m) => !m.region || m.region === 'unverified').map((m) => m.model);
+      return unverified.length ? { status: 'partially_effective', detail: `region not verified for ${unverified.join(', ')}; personal data is tokenised before it is sent` } : { status: 'effective', detail: `${tenant.settings.catalogue.length} model(s) with a verified region` };
+    },
+  },
+  {
+    id: 'SGC-HUMAN-005', domain: 'HUMAN', severity: 'high', type: 'automated', objective: 'People affected by an agent\'s decisions can ask for a human review or appeal',
+    test: 'Every agent that makes decisions about individuals has an appeal route recorded',
+    check: async () => {
+      const rows = await all<{ intake: string }>("SELECT jsonb_extract_path_text(data::jsonb, 'intake') AS intake FROM lifecycle WHERE status IN ('complete', 'in_progress')");
+      const deciding = rows.map((r) => JSON.parse(r.intake ?? '{}') as { decisions_about_individuals?: boolean; appeal_route?: string }).filter((i) => i.decisions_about_individuals);
+      return ratio(deciding.filter((i) => !i.appeal_route?.trim()).length, deciding.length, 'agents deciding about people with an appeal route');
+    },
+  },
+  {
+    id: 'SGC-SEC-003', domain: 'SEC', severity: 'critical', type: 'automated', objective: 'Unsafe content (weapons, CBRN, violence, hate, sexual abuse, self-harm) is blocked (DET-SAFE)',
+    test: 'DET-SAFE is active, and the safety check was available for at least 95% of model calls in the last 7 days',
+    check: async () => {
+      const det = (await all<{ mode: string }>("SELECT mode FROM detector WHERE id = 'DET-SAFE'"))[0];
+      if (!det || det.mode === 'off') return { status: 'ineffective', detail: 'DET-SAFE is off' };
+      const r = (await all<{ n: number; down: number }>(`SELECT COUNT(*) AS n, COUNT(*) FILTER (WHERE data LIKE '%DET-SAFE unavailable%') AS down FROM ledger_record WHERE kind = 'transaction' AND ts >= ? AND jsonb_extract_path_text(data::jsonb, 'action_type') = 'llm_call'`, since(7 * DAY)))[0]!;
+      const n = Number(r.n);
+      const down = Number(r.down);
+      if (!n) return { status: det.mode === 'active' ? 'not_tested' : 'partially_effective', detail: `DET-SAFE ${det.mode}; no model calls in 7 days` };
+      const up = 1 - down / n;
+      return det.mode !== 'active' ? { status: 'partially_effective', detail: `DET-SAFE is in ${det.mode}: unsafe content is recorded, not blocked` } : up >= 0.95 ? { status: 'effective', detail: `checked ${Math.round(up * 1000) / 10}% of ${n} model calls` } : { status: 'partially_effective', detail: `safety check unavailable on ${down} of ${n} model calls (T1/T2 held, T3/T4 rules only)` };
+    },
+  },
+  {
+    id: 'SGC-SEC-004', domain: 'SEC', severity: 'high', type: 'automated', objective: 'Prompt injection and jailbreak attempts are detected on prompts and tool content (DET-INJ, DET-JB)',
+    test: 'DET-INJ and DET-JB are deployed and pinned; effective when active, partial while they prove themselves in shadow',
+    check: async () => {
+      const r = await all<{ id: string; mode: string; version: string; model_sha256: string | null }>("SELECT id, mode, version, model_sha256 FROM detector WHERE id IN ('DET-INJ', 'DET-JB') ORDER BY id");
+      const missing = r.filter((d) => d.mode === 'off' || d.version === 'not-deployed' || !d.model_sha256).map((d) => d.id);
+      if (missing.length) return { status: 'ineffective', detail: `not deployed or off: ${missing.join(', ')}` };
+      const shadow = r.filter((d) => d.mode !== 'active').map((d) => d.id);
+      return shadow.length ? { status: 'partially_effective', detail: `${shadow.join(', ')} in shadow (scored and logged; promotion needs the release gate)` } : { status: 'effective', detail: 'DET-INJ and DET-JB active' };
+    },
+  },
+  { id: 'SGC-GOV-003', domain: 'GOV', severity: 'medium', type: 'manual', objective: 'AI governance team, skills and outside input are documented', test: 'Yearly attestation: who takes part in AI risk decisions (including people with different backgrounds and domain experts), their skills, how a safety-first culture is encouraged, and how feedback from outside the team is gathered' },
+  { id: 'SGC-FAIR-002', domain: 'FAIR', severity: 'medium', type: 'manual', objective: 'Bias audit summary published where the law asks for it (NYC Local Law 144)', test: 'For hiring and promotion tools used in New York City: an independent bias audit within the last year, with its summary published on the employer\'s website' },
   { id: 'SGC-SELF-006', domain: 'SELF', severity: 'medium', type: 'manual', objective: 'Detector drift reviewed monthly (DA 7)', test: 'Monthly human-labelled sample completed; findings tracked' },
   {
     id: 'SGC-SELF-007', domain: 'SELF', severity: 'high', type: 'automated', objective: 'Decisions are reproducible (DA 7)', test: 'Replay of a random daily sample reproduces 100% of outcomes',

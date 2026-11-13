@@ -66,8 +66,8 @@ test('seed loads the pack, replaces old ISO 42001 content with a locked entry, k
   const scores = await controls.scores();
   const rmf = scores.find((s) => s.framework_id === 'nist-ai-rmf')!;
   assert.equal(rmf.requirements.length, 72);
-  assert.ok(rmf.coverage! > 50 && rmf.coverage! < 100, 'some subcategories have no Signet Control yet');
-  assert.ok(rmf.requirements.some((r) => r.status === 'no_control'));
+  assert.equal(rmf.coverage, 100, 'every subcategory is linked to a Signet Control');
+  assert.ok(!rmf.requirements.some((r) => r.status === 'no_control'));
   const lib = await controls.library();
   const tool = lib.controls.find((c) => c.id === 'SGC-TOOL-004') as unknown as { mappings: { relationship: string }[] };
   assert.ok(tool.mappings.length > 5 && tool.mappings.every((m) => ['equivalent', 'subset_of', 'superset_of', 'intersects'].includes(m.relationship)));

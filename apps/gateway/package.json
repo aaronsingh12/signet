@@ -11,6 +11,7 @@
     "@huggingface/transformers": "^3.7.6",
     "@open-policy-agent/opa-wasm": "^1.10.0",
     "@signet/core": "*",
-    "express": "4.22.3"
+    "express": "4.22.3",
+    "sharp": "^0.35.5"
   }
 }

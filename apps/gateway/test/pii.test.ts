@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { after, before, test } from 'node:test';
 import type { CatalogueModel, CompiledPolicy } from '@signet/core';
 import { detectPii } from '../src/pii';
-import { inspectPrompt } from '../src/policy';
+import { argStrings, inspectArgs, inspectPrompt } from '../src/policy';
 import * as state from '../src/state';
 
 // DET-PII (DA 3): Presidio finds names and addresses; it only masks more text, never less, and follows
@@ -65,4 +65,18 @@ test('failure or missing settings: unavailable, so pattern DLP still runs and T1
   delete process.env.SIGNET_PRESIDIO_URL;
   assert.match((await detectPii([text])).result.reason ?? '', /SIGNET_PRESIDIO_URL/);
   process.env.SIGNET_PRESIDIO_URL = url;
+});
+
+test('tool arguments: an active DET-PII adds names and addresses; out of scope they are blocked, never a kill', async () => {
+  mode('active');
+  const args = { note: 'Call Priya Menon about the parcel', ref: 'C-1' };
+  const pii = await detectPii(argStrings(args));
+  assert.equal(pii.result.found, 1);
+  const crm = { data_scopes: ['personal'] } as never;
+  const shipping = { data_scopes: [] } as never;
+  assert.equal(inspectArgs(args, crm, policy, pii.findings).blocked, null, 'the CRM tool may receive personal data');
+  const out = inspectArgs(args, shipping, policy, pii.findings);
+  assert.equal(out.blocked?.tag, 'personal');
+  assert.equal(out.exfiltration, null, 'a name is blocked, not an exfiltration kill');
+  assert.equal(inspectArgs(args, shipping, policy).blocked, null, 'without DET-PII the name is not seen');
 });

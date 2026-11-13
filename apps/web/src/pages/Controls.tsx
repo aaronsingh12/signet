@@ -3,6 +3,7 @@ import { Card, Empty, ErrorNote, Mono, PageHeader, Pill, Stat } from '../compone
 import { ApiError, api, useApi } from '../lib/api';
 import { useCan, useMe } from '../lib/auth';
 import { FrameworkSheetImport } from '../components/FrameworkSheetImport';
+import { AuditPacks } from '../components/AuditPacks';
 import { ago } from '../lib/format';
 
 // Control Library & Compliance (BP 9): Signet Controls are the hub; framework requirements map to
@@ -142,6 +143,8 @@ export function Controls() {
           <Empty>No controls match.</Empty>
         )}
       </Card>
+
+      {can('evidence.export') && <AuditPacks frameworks={items} />}
 
       <div className="grid gap-4 md:grid-cols-2">
         <Card title="Switched off for this organisation">
