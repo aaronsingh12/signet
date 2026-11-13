@@ -6,6 +6,7 @@ export * from './datamatrix';
 export * from './decision';
 export * from './devauth';
 export * from './dlp';
+export * from './dlp-packs';
 export * from './env';
 export * from './http';
 export * from './http-tool';
