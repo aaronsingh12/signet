@@ -1,4 +1,4 @@
-import { BENCHMARK_SETS, PII_ENTITIES, SAFETY_CATEGORIES, SAFETY_POLICY, beats, meetsTargets, metrics, newId, runAnomBenchmark, setHash, type BenchDetector, type Metrics } from '@signet/core';
+import { BENCHMARK_SETS, GRANITE_SAFE, PII_ENTITIES, SAFETY_CATEGORIES, SAFETY_POLICY, beats, meetsTargets, metrics, newId, runAnomBenchmark, setHash, type BenchDetector, type Metrics } from '@signet/core';
 import { db, nowIso } from './db';
 import { PolicyError, forbidden, invalid, notFound } from './errors';
 import * as grounding from './grounding';
@@ -11,7 +11,7 @@ import { askTenantModel } from './tenant-model';
 //   shadow      14 days beside live traffic, scoring only (detectors.setMode)
 //   champion    a new version is promoted only if it beats the version that was last active, on the same set
 //   approval    Security and AI Assurance sign off (security_officer and risk_officer, two different people)
-// Every step is written to the ledger. DET-INJ is benchmarked by scripts/bench-inj.mts where the model
+// Every step is written to the ledger. DET-INJ and DET-JB are benchmarked by scripts/bench-model.mts where the model
 // runs; DET-ANOM, DET-SAFE, DET-PII and DET-GROUND can be run from the control plane.
 
 export const APPROVAL_DAYS = 30;
@@ -51,12 +51,49 @@ async function predictPii(url: string, text: string): Promise<boolean | null> {
   }
 }
 
-export async function run(detectorId: string, p: Principal): Promise<BenchmarkRow> {
-  const d = (await db.prepare('SELECT id, version, model_sha256 FROM detector WHERE id = ?').get(detectorId)) as { id: string; version: string; model_sha256: string | null } | undefined;
+/** The version a release action is about: the current one, or the challenger running beside it. */
+export async function targetOf(detectorId: string, which?: string): Promise<{ version: string; sha256: string | null }> {
+  const d = (await db.prepare('SELECT version, model_sha256, challenger_version, challenger_sha256 FROM detector WHERE id = ?').get(detectorId)) as { version: string; model_sha256: string | null; challenger_version: string | null; challenger_sha256: string | null } | undefined;
   if (!d) throw notFound(`detector ${detectorId}`);
-  if (!d.model_sha256) throw new PolicyError('SGC-SELF-001', `${detectorId} has no pinned hash to benchmark`, 409);
+  if (which === 'challenger') {
+    if (!d.challenger_version) throw notFound(`challenger for ${detectorId}`);
+    return { version: d.challenger_version, sha256: d.challenger_sha256 };
+  }
+  return { version: d.version, sha256: d.model_sha256 };
+}
+
+// Granite Guardian (a DET-SAFE version): P(Yes) for the risk "harm", from the model server's log-probabilities.
+export async function graniteScore(text: string): Promise<number | null> {
+  const base = (process.env.SIGNET_SAFETY_MODEL_URL ?? 'http://localhost:11434').replace(/\/+$/, '');
+  try {
+    const r = await fetch(`${base}/v1/chat/completions`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(120_000),
+      body: JSON.stringify({ model: GRANITE_SAFE.model, temperature: 0, max_tokens: 2, logprobs: true, top_logprobs: 5, messages: [{ role: 'system', content: GRANITE_SAFE.risk }, { role: 'user', content: text }] }),
+    });
+    if (!r.ok) return null;
+    const top = ((await r.json()) as { choices?: { logprobs?: { content?: { top_logprobs?: { token: string; logprob: number }[] }[] } }[] }).choices?.[0]?.logprobs?.content?.[0]?.top_logprobs ?? [];
+    const p = (t: string) => top.filter((x) => x.token.trim().toLowerCase() === t).reduce((a, x) => a + Math.exp(x.logprob), 0);
+    const yes = p('yes');
+    const no = p('no');
+    return yes + no > 0 ? Math.round((yes / (yes + no)) * 1000) / 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function run(detectorId: string, p: Principal, which?: string): Promise<BenchmarkRow> {
+  const d = await targetOf(detectorId, which);
+  if (!d.sha256) throw new PolicyError('SGC-SELF-001', `${detectorId} ${d.version} has no pinned hash to benchmark`, 409);
   let m: Metrics;
-  if (detectorId === 'DET-ANOM') m = runAnomBenchmark(BENCHMARK_SETS['DET-ANOM'].cases);
+  if (detectorId === 'DET-SAFE' && d.version === GRANITE_SAFE.version) {
+    const rows: { label: 0 | 1; lang: string; predicted: boolean | null }[] = [];
+    // One at a time: a local model server handles one request well, many badly.
+    for (const c of BENCHMARK_SETS['DET-SAFE'].cases) {
+      const s = await graniteScore(c.text);
+      rows.push({ label: c.label, lang: c.lang, predicted: s === null ? null : s >= GRANITE_SAFE.threshold });
+    }
+    m = metrics(rows);
+  } else if (detectorId === 'DET-ANOM') m = runAnomBenchmark(BENCHMARK_SETS['DET-ANOM'].cases);
   else if (detectorId === 'DET-SAFE') {
     const cases = BENCHMARK_SETS['DET-SAFE'].cases;
     m = metrics(await Promise.all(cases.map(async (c) => ({ label: c.label, lang: c.lang, predicted: await predictSafe(c.text) }))));
@@ -68,8 +105,8 @@ export async function run(detectorId: string, p: Principal): Promise<BenchmarkRo
   } else if (detectorId === 'DET-GROUND') {
     const cases = BENCHMARK_SETS['DET-GROUND'].cases;
     m = metrics(await Promise.all(cases.map(async (c) => { const j = await grounding.judge(c); return { label: c.label, lang: c.lang, predicted: j ? j.score < grounding.GROUND_SPEC.threshold : null }; })));
-  } else throw new PolicyError('SGC-SELF-004', `${detectorId} runs in the gateway; benchmark it with scripts/bench-${detectorId.slice(4).toLowerCase()}.mts where the model is installed`, 409);
-  return record({ detector: detectorId, version: d.version, sha256: d.model_sha256, metrics: m, ran_by: p.id, runner: 'control-plane' });
+  } else throw new PolicyError('SGC-SELF-004', `${detectorId} runs in the gateway; benchmark it with npx tsx scripts/bench-model.mts --detector ${detectorId} --record where the model is installed`, 409);
+  return record({ detector: detectorId, version: d.version, sha256: d.sha256, metrics: m, ran_by: p.id, runner: 'control-plane' });
 }
 
 export async function list(detectorId: string, limit = 20): Promise<BenchmarkRow[]> {
@@ -82,7 +119,7 @@ async function latestFor(detectorId: string, sha256: string, setSha: string): Pr
 }
 
 // --- approvals ------------------------------------------------------------------------------------------
-export async function approve(detectorId: string, p: Principal, body: { as?: string; reason?: string }) {
+export async function approve(detectorId: string, p: Principal, body: { as?: string; reason?: string; target?: string }) {
   if (p.kind !== 'human') throw forbidden('RB-INV-10', 'detector promotion approvals are human-only');
   const as = body.as === 'security' || body.as === 'ai_assurance' ? body.as : null;
   if (!as) throw invalid("as must be 'security' or 'ai_assurance'");
@@ -90,18 +127,19 @@ export async function approve(detectorId: string, p: Principal, body: { as?: str
   const solo = singleOperator(p);
   if (!solo && !p.roles.includes(ROLE_FOR[as])) throw forbidden('DA-6', `${as === 'security' ? 'Security' : 'AI Assurance'} approval needs the ${ROLE_FOR[as]} role`);
   if (!body.reason?.trim()) throw invalid('a reason is required');
-  const d = (await db.prepare('SELECT version, model_sha256 FROM detector WHERE id = ?').get(detectorId)) as { version: string; model_sha256: string | null } | undefined;
-  if (!d?.model_sha256) throw notFound(`pinned detector ${detectorId}`);
+  const t = await targetOf(detectorId, body.target);
+  const d = { version: t.version, model_sha256: t.sha256 };
+  if (!d.model_sha256) throw notFound(`pinned detector ${detectorId}`);
   await db.prepare('INSERT INTO detector_approval (detector_id, version, sha256, role, approver, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (detector_id, sha256, role) DO UPDATE SET approver = excluded.approver, reason = excluded.reason, created_at = excluded.created_at')
     .run(detectorId, d.version, d.model_sha256, as, p.id, body.reason.trim(), nowIso());
   await ledger.append({ kind: 'admin', data: { event: 'detector.promotion_approved', detector: detectorId, version: d.version, sha256: d.model_sha256, as, actor: p.id, reason: body.reason.trim(), ...(solo ? { separation_of_duties: 'waived_single_operator' } : {}) } });
-  return gate(detectorId);
+  return gate(detectorId, t);
 }
 
 /** Everything that must hold before a version may become active. */
-export async function gate(detectorId: string): Promise<{ ok: boolean; checks: { what: string; ok: boolean; detail: string }[] }> {
-  const d = (await db.prepare('SELECT id, version, model_sha256 FROM detector WHERE id = ?').get(detectorId)) as { id: string; version: string; model_sha256: string | null } | undefined;
-  if (!d) throw notFound(`detector ${detectorId}`);
+export async function gate(detectorId: string, target?: { version: string; sha256: string | null }): Promise<{ ok: boolean; version: string; checks: { what: string; ok: boolean; detail: string }[] }> {
+  const t = target ?? (await targetOf(detectorId));
+  const d = { version: t.version, model_sha256: t.sha256 };
   const checks: { what: string; ok: boolean; detail: string }[] = [];
   const set = BENCHMARK_SETS[detectorId as BenchDetector];
   if (!d.model_sha256) checks.push({ what: 'pinned', ok: false, detail: 'no pinned hash' });
@@ -125,7 +163,7 @@ export async function gate(detectorId: string): Promise<{ ok: boolean; checks: {
   checks.push({ what: 'Security approval', ok: !!sec, detail: sec ? `by ${sec.approver}` : `needed from a security_officer within ${APPROVAL_DAYS} days` });
   const samePerson = !!ai && ai.approver === sec?.approver && !singleOperatorMode();
   checks.push({ what: 'AI Assurance approval', ok: !!ai && !samePerson, detail: !ai ? `needed from a risk_officer within ${APPROVAL_DAYS} days` : samePerson ? 'must be a different person from the Security approver' : `by ${ai.approver}${ai.approver === sec?.approver ? ' (single operator: separation of duties waived)' : ''}` });
-  return { ok: checks.every((c) => c.ok), checks };
+  return { ok: checks.every((c) => c.ok), version: d.version, checks };
 }
 
 /** Called when a version becomes active: it is the champion the next version must beat. */

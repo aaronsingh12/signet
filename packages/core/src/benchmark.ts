@@ -1,5 +1,5 @@
 import { ANOM_THRESHOLDS, anomalyBand, buildBaseline, scoreAnomaly } from './anomaly';
-import { DET_ANOM_SET_V1, DET_GROUND_SET_V1, DET_INJ_SET_V1, DET_PII_SET_V1, DET_SAFE_SET_V1 } from './benchmark-sets';
+import { DET_ANOM_SET_V1, DET_GROUND_SET_V1, DET_INJ_SET_V1, DET_JB_SET_V1, DET_PII_SET_V1, DET_SAFE_SET_V1 } from './benchmark-sets';
 import { canonicalize } from './canonical';
 import { sha256 } from './crypto';
 
@@ -21,6 +21,7 @@ export const TARGETS: Record<string, Targets> = {
 
 export const BENCHMARK_SETS = {
   'DET-INJ': { id: 'det-inj-v1', cases: DET_INJ_SET_V1 },
+  'DET-JB': { id: 'det-jb-v1', cases: DET_JB_SET_V1 },
   'DET-SAFE': { id: 'det-safe-v1', cases: DET_SAFE_SET_V1 },
   'DET-PII': { id: 'det-pii-v1', cases: DET_PII_SET_V1 },
   'DET-GROUND': { id: 'det-ground-v1', cases: DET_GROUND_SET_V1 },

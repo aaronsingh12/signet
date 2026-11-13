@@ -20,20 +20,20 @@ after(dropTestDatabase);
 test('every detector version Signet knows from code is pinned at start-up', async () => {
   const rows = (await detectors.list()) as { id: string; model_sha256: string | null }[];
   const pin = (id: string) => rows.find((r) => r.id === id)!.model_sha256;
-  assert.equal(pin('DET-INJ'), core.DET_INJ_MODEL_SHA256);
+  assert.equal(pin('DET-INJ'), core.MODEL_DETECTORS['DET-INJ'].sha256);
+  assert.equal(pin('DET-JB'), core.MODEL_DETECTORS['DET-JB'].sha256);
   assert.equal(pin('DET-SAFE'), core.specHash(core.DETECTOR_SPECS['DET-SAFE']!.spec));
   assert.equal(pin('DET-ANOM'), core.knownPin('DET-ANOM', core.ANOM_VERSION));
   assert.ok(pin('DET-GROUND') && pin('DET-PII'));
-  assert.equal(pin('DET-JB'), null, 'no model, no pin');
   assert.ok((await detectors.pinsOf('DET-SAFE')).has(pin('DET-SAFE')!));
 });
 
 test('replay reproduces recorded decisions and catches a changed outcome or an unreleased hash', async () => {
   const agent = await registry.registerAgent({ handle: 'replay-agent', name: 'replay-agent', purpose: 'Answers order questions', sponsor: 's@x.example', autonomy_level: 'L2' } as never, owner);
   const anomPin = core.knownPin('DET-ANOM', core.ANOM_VERSION)!;
-  const injPin = core.DET_INJ_MODEL_SHA256;
+  const injPin = core.MODEL_DETECTORS['DET-INJ'].sha256;
   const anom = { id: 'DET-ANOM', version: core.ANOM_VERSION, status: 'ok', score: core.zToScore(3.2), band: 'elevated', sha256: anomPin, thresholds: core.ANOM_THRESHOLDS.T2, features: { volume: 3.2, cost: 1.1 } };
-  const inj = { id: 'DET-INJ', version: 'deberta-v3-base-injection-v2-fp32', status: 'ok', score: 0.91, band: 'high', sha256: injPin, thresholds: core.INJ_THRESHOLDS.prompt.T2 };
+  const inj = { id: 'DET-INJ', version: core.MODEL_DETECTORS['DET-INJ'].version, status: 'ok', score: 0.91, band: 'high', sha256: injPin, thresholds: core.INJ_THRESHOLDS.prompt.T2 };
   const write = async (inputs: unknown, detectors: unknown[] = []) => (await ledger.append({ kind: 'transaction', agent_id: agent.id, data: { action_type: 'llm_call', bundle_version: 7, decision_inputs: inputs, detectors } })).record_id;
 
   // Allow + DET-ANOM elevated on T2 -> hold for approval (DA 4 matrix).

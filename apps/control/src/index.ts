@@ -557,8 +557,16 @@ api.post('/replay', requires('ledger.read'), route(async (req, res) => (await re
 api.get('/replay/runs', requires('ledger.read'), route(async () => ({ items: await replay.runs() })));
 api.post('/replay/sample', requires('detectors.manage'), route(async (req, res) => (await replay.sample(Math.min(500, Math.max(1, Number(req.body?.size) || 100)), principalOf(res).id))));
 // Detector release process (DA 6 mechanism 4): benchmarks, the promotion gate, Security / AI Assurance sign-off.
-api.get('/detectors/:id/release', requires('agents.read'), route(async (req) => ({ gate: await benchmarks.gate(req.params.id!), benchmarks: await benchmarks.list(req.params.id!) })));
-api.post('/detectors/:id/benchmarks', requires('detectors.manage'), route(async (req, res) => [201, await benchmarks.run(req.params.id!, principalOf(res))]));
+api.get('/detectors/:id/release', requires('agents.read'), route(async (req) => {
+  const d = (await db.prepare('SELECT challenger_version, challenger_sha256, challenger_since FROM detector WHERE id = ?').get(req.params.id!)) as { challenger_version: string | null; challenger_sha256: string | null; challenger_since: string | null } | undefined;
+  const challenger = d?.challenger_version ? { version: d.challenger_version, sha256: d.challenger_sha256, since: d.challenger_since, gate: await benchmarks.gate(req.params.id!, { version: d.challenger_version, sha256: d.challenger_sha256 }) } : null;
+  return { gate: await benchmarks.gate(req.params.id!), challenger, benchmarks: await benchmarks.list(req.params.id!) };
+}));
+api.post('/detectors/:id/benchmarks', requires('detectors.manage'), route(async (req, res) => [201, await benchmarks.run(req.params.id!, principalOf(res), req.body?.target)]));
+// Champion / challenger (DA 6): a new version runs beside the current one, then replaces it through the gate.
+api.post('/detectors/:id/challenger', requires('detectors.manage'), route(async (req, res) => (await detectors.startChallenger(req.params.id!, String(req.body?.version ?? ''), principalOf(res), String(req.body?.reason ?? '')))));
+api.post('/detectors/:id/challenger/promote', requires('detectors.manage'), route(async (req, res) => (await detectors.promoteChallenger(req.params.id!, principalOf(res), { reason: String(req.body?.reason ?? ''), dev_override: req.body?.dev_override === true }))));
+api.post('/detectors/:id/challenger/stop', requires('detectors.manage'), route(async (req, res) => (await detectors.stopChallenger(req.params.id!, principalOf(res), String(req.body?.reason ?? '')))));
 api.post('/detectors/:id/approvals', requires('agents.read'), route(async (req, res) => (await benchmarks.approve(req.params.id!, principalOf(res), req.body ?? {}))));
 api.get('/detectors', requires('agents.read'), route(async () => ({ items: (await detectors.list()) })));
 api.post('/detectors/:id/mode', requires('detectors.manage'), route(async (req, res) => (await detectors.setMode(req.params.id!, req.body?.mode, principalOf(res), { reason: String(req.body?.reason ?? ''), dev_override: req.body?.dev_override === true }))));

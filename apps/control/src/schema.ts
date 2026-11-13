@@ -358,6 +358,10 @@ CREATE TABLE IF NOT EXISTS detector_benchmark (id TEXT PRIMARY KEY, detector_id 
 CREATE INDEX IF NOT EXISTS detector_benchmark_lookup ON detector_benchmark(detector_id, sha256, created_at);
 CREATE TABLE IF NOT EXISTS detector_approval (detector_id TEXT NOT NULL, version TEXT NOT NULL, sha256 TEXT NOT NULL, role TEXT NOT NULL, approver TEXT NOT NULL, reason TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (detector_id, sha256, role));
 ALTER TABLE detector_pin ADD COLUMN IF NOT EXISTS activated_at TEXT;
+-- Champion/challenger (DA 6): a new version runs beside the current one in shadow before it can replace it.
+ALTER TABLE detector ADD COLUMN IF NOT EXISTS challenger_version TEXT;
+ALTER TABLE detector ADD COLUMN IF NOT EXISTS challenger_sha256 TEXT;
+ALTER TABLE detector ADD COLUMN IF NOT EXISTS challenger_since TEXT;
 -- SAML request IDs: each response must answer a request Signet sent, and only once.
 CREATE TABLE IF NOT EXISTS saml_request (id TEXT PRIMARY KEY, value TEXT NOT NULL, expires_ms BIGINT NOT NULL);
 -- When the owner was deactivated (BP 6 Stage 7); cleared when a new owner is named.

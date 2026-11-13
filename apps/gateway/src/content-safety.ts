@@ -1,5 +1,6 @@
 import { SAFETY_CATEGORIES, SAFETY_POLICY, env, type DetectorResult, type Tier } from '@signet/core';
 import { pinCheck } from './pins';
+import { safetyChallenger } from './challenger';
 import { type Ctx, halt, wouldBlock } from './ctx';
 import * as state from './state';
 import { chatCompletion, UpstreamRejected, UpstreamUnavailable } from './provider';
@@ -59,9 +60,11 @@ export async function contentSafety(ctx: Ctx, conversation: string, stage: 8 | 1
     if (!(error instanceof SafetyUnavailable)) throw error;
     console.error('Signet content safety unavailable', { request_id: ctx.requestId, stage, error: error.message });
     ctx.reasons.push(`DET-SAFE unavailable on the ${where} (${error.message}); rules decide, T1/T2 held (RB-INV-06)`);
+    safetyChallenger(ctx, conversation, where, { status: 'unavailable' });
     return { ...base, status: 'unavailable' };
   }
   ctx.extra[`${where}_safety`] = verdict;
+  safetyChallenger(ctx, conversation, where, { category: verdict.category, status: mode });
   const unsafe = verdict.category !== 'allow';
   if (unsafe && mode === 'shadow') ctx.reasons.push(`DET-SAFE (shadow) would block the ${where}: ${verdict.category}`);
   if (unsafe && mode === 'active' && !wouldBlock(ctx, stage, ['DET-SAFE'], `unsafe content (${verdict.category}) in the ${where}`)) {

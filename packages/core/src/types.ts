@@ -172,6 +172,8 @@ export interface DetectorConfig {
   version: string;
   mode: DetectorMode;
   sha256?: string | null; // pinned hash of the version (DA 3); the gateway checks what it runs against it
+  // A new version running beside the current one, scoring only (DA 6 champion/challenger).
+  challenger?: { version: string; sha256: string } | null;
 }
 
 // Signed policy bundle the control plane pushes to every gateway node.

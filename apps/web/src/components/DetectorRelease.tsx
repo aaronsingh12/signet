@@ -20,10 +20,11 @@ export function DetectorRelease({ id, onChange }: { id: string; onChange: () => 
     setBusy(true);
     try { await fn(); setError(null); await reload(); onChange(); } catch (e) { setError(e as Error); } finally { setBusy(false); }
   };
-  const approve = (as: 'security' | 'ai_assurance') => {
-    const reason = prompt(`Reason for the ${as === 'security' ? 'Security' : 'AI Assurance'} sign-off on promoting ${id} (written to the ledger)`);
-    if (reason) void act(() => api(`/detectors/${id}/approvals`, { method: 'POST', body: { as, reason } }));
+  const approve = (as: 'security' | 'ai_assurance', target?: 'challenger') => {
+    const reason = prompt(`Reason for the ${as === 'security' ? 'Security' : 'AI Assurance'} sign-off on promoting ${target ? 'the challenger of ' : ''}${id} (written to the ledger)`);
+    if (reason) void act(() => api(`/detectors/${id}/approvals`, { method: 'POST', body: { as, reason, target } }));
   };
+  const ask = (what: string) => prompt(`Reason to ${what} (written to the ledger)`);
   if (!data) return <p className="px-4 py-3 text-xs text-ink-3">Loading…</p>;
   return (
     <div className="grid gap-3 bg-canvas px-4 py-3">
@@ -38,10 +39,32 @@ export function DetectorRelease({ id, onChange }: { id: string; onChange: () => 
       </div>
       <div className="flex flex-wrap gap-2">
         {can('detectors.manage') && RUNNABLE.has(id) && <button className="btn-ghost text-xs" disabled={busy} onClick={() => void act(() => api(`/detectors/${id}/benchmarks`, { method: 'POST' }))}>{busy ? 'Running…' : 'Run benchmark'}</button>}
-        {!RUNNABLE.has(id) && <span className="text-xs text-ink-3">This detector runs in the gateway: benchmark it with <Mono>npx tsx scripts/bench-{id.slice(4).toLowerCase()}.mts --record</Mono> where the model is installed.</span>}
+        {!RUNNABLE.has(id) && <span className="text-xs text-ink-3">This detector runs in the gateway: benchmark it with <Mono>npx tsx scripts/bench-model.mts --detector {id} --record</Mono> where the model is installed.</span>}
         {(solo || roles.includes('security_officer')) && <button className="btn-ghost text-xs" disabled={busy} onClick={() => approve('security')}>Approve as Security</button>}
         {(solo || roles.includes('risk_officer')) && <button className="btn-ghost text-xs" disabled={busy} onClick={() => approve('ai_assurance')}>Approve as AI Assurance</button>}
       </div>
+      {data.challenger ? (
+        <div className="rounded-md border border-line bg-white px-3 py-2">
+          <p className="mb-1 text-xs font-semibold text-ink-2">Challenger: <Mono>{data.challenger.version}</Mono> running beside the current version since {ago(data.challenger.since)} (scores only, never changes a decision)</p>
+          <ul className="grid gap-1 text-xs">
+            {data.challenger.gate.checks.map((c: any) => (
+              <li key={c.what} className="flex gap-2"><Pill value={c.ok ? 'allow' : 'deny'} label={c.ok ? 'met' : 'not met'} /><span className="font-medium">{c.what}</span><span className="text-ink-3">{c.detail}</span></li>
+            ))}
+          </ul>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {can('detectors.manage') && RUNNABLE.has(id) && <button className="btn-ghost text-xs" disabled={busy} onClick={() => void act(() => api(`/detectors/${id}/benchmarks`, { method: 'POST', body: { target: 'challenger' } }))}>{busy ? 'Running…' : 'Benchmark the challenger'}</button>}
+            {(solo || roles.includes('security_officer')) && <button className="btn-ghost text-xs" disabled={busy} onClick={() => approve('security', 'challenger')}>Approve challenger as Security</button>}
+            {(solo || roles.includes('risk_officer')) && <button className="btn-ghost text-xs" disabled={busy} onClick={() => approve('ai_assurance', 'challenger')}>Approve challenger as AI Assurance</button>}
+            {can('detectors.manage') && <button className="btn-ghost text-xs" disabled={busy} onClick={() => { const reason = ask('replace the current version with the challenger'); if (reason) void act(() => api(`/detectors/${id}/challenger/promote`, { method: 'POST', body: { reason } })); }}>Promote challenger</button>}
+            {can('detectors.manage') && <button className="text-xs text-ink-3 hover:underline" disabled={busy} onClick={() => { const reason = ask('stop the challenger'); if (reason) void act(() => api(`/detectors/${id}/challenger/stop`, { method: 'POST', body: { reason } })); }}>Stop challenger</button>}
+          </div>
+        </div>
+      ) : id === 'DET-SAFE' && can('detectors.manage') ? (
+        <div>
+          <button className="btn-ghost text-xs" disabled={busy} onClick={() => { const reason = ask('run IBM Granite Guardian 2B beside the current safety check'); if (reason) void act(() => api(`/detectors/${id}/challenger`, { method: 'POST', body: { version: 'granite3-guardian-2b-v1', reason } })); }}>Run Granite Guardian (small safety model) as challenger</button>
+          <p className="mt-1 text-xs text-ink-3">Needs a model server with <Mono>granite3-guardian:2b</Mono> (for example Ollama) at SIGNET_SAFETY_MODEL_URL on the gateway.</p>
+        </div>
+      ) : null}
       {data.benchmarks.length ? (
         <table className="w-full">
           <thead><tr>{['Set', 'Version', 'Result', 'Precision', 'Recall', 'False positives', 'By language', 'Run'].map((h) => <th key={h} className="th">{h}</th>)}</tr></thead>
