@@ -57,7 +57,7 @@ export async function reviewProposedCalls(ctx: Ctx, headers: IncomingHttpHeaders
     for (const key of keys) {
       const action = policy.actions[key]!;
       if (action.impact === 'privileged' || action.impact === 'critical') await settle(sessionKey(ctx), 5_000);
-      const t = taintOf(sessionKey(ctx));
+      const t = await taintOf(sessionKey(ctx));
       if (t?.band === 'high' && (action.impact === 'privileged' || action.impact === 'critical')) {
         const act = cert.tier === 'T1' || cert.tier === 'T2' ? 'kill' : 'quarantine';
         await ladder(ctx, act, 'RB-KILL-01', `privileged ${key} proposed after injection in this session`, { taint_source: t.source });
@@ -70,7 +70,7 @@ export async function reviewProposedCalls(ctx: Ctx, headers: IncomingHttpHeaders
         halt(ctx, REVIEW_STEP, 403, 'data_exfiltration', `${di.exfiltration.tag} data may not be sent to ${key}; the agent has been killed`, 'kill', [di.exfiltration.rule, 'RB-KILL-02']);
       }
       if (di.blocked && !wouldBlock(ctx, REVIEW_STEP, [di.blocked.rule], `${di.blocked.tag} outside the data scope of ${key}`)) halt(ctx, REVIEW_STEP, 403, 'data_blocked', `${di.blocked.tag} data is outside the data scope of ${key}`, 'deny', [di.blocked.rule]);
-      const r = evaluate({ kind: 'tool', policy, action: { key, args }, context: { tainted: !!t, step_up: stepUp, tool_calls_in_session: limits.toolCallsIn(ctx.sessionId), tool_calls_limit: cert.limits.tool_calls_per_session ?? null } });
+      const r = evaluate({ kind: 'tool', policy, action: { key, args }, context: { tainted: !!t, step_up: stepUp, tool_calls_in_session: await limits.toolCallsIn(sessionKey(ctx)), tool_calls_limit: cert.limits.tool_calls_per_session ?? null } });
       const rules = [...r.rule_ids, ...(di.approval ? [di.approval.rule] : [])];
       ctx.rules.push(...rules);
       if (r.decision === 'deny') {
@@ -81,6 +81,6 @@ export async function reviewProposedCalls(ctx: Ctx, headers: IncomingHttpHeaders
       }
       step(ctx, REVIEW_STEP, 'pass', `proposed ${key} reviewed for agent ${claims.agent_id}`);
     }
-    limits.countToolCall(ctx.sessionId);
+    await limits.countToolCall(sessionKey(ctx));
   }
 }

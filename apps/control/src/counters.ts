@@ -43,8 +43,44 @@ export async function recordOutOfManifest(agentId: string): Promise<number> {
   return current.n + previous.n;
 }
 
+// --- Session state shared by every gateway (RB-BL-12 taint, tool calls per session) -------------------
+// Session keys are "<agent_id>:<session_id>", so one agent's session can never touch another agent's.
+const SESSION_TTL_MS = 60 * 60_000;
+const BAND = { elevated: 1, high: 2 } as const;
+
+/** Mark a session tainted; the stronger band wins and the 60-minute window restarts. */
+export async function setTaint(sessionKey: string, band: 'elevated' | 'high'): Promise<'elevated' | 'high'> {
+  const now = Date.now();
+  const row = (await db.prepare(
+    `INSERT INTO shared_counter (key, n, tokens, usd, expires_ms) VALUES (?, ?, 0, 0, ?)
+     ON CONFLICT (key) DO UPDATE SET n = CASE WHEN shared_counter.expires_ms > ? THEN GREATEST(shared_counter.n, excluded.n) ELSE excluded.n END, expires_ms = excluded.expires_ms
+     RETURNING n`,
+  ).get(`taint:${sessionKey}`, BAND[band], now + SESSION_TTL_MS, now)) as { n: number };
+  return Number(row.n) >= 2 ? 'high' : 'elevated';
+}
+
+export async function readTaint(sessionKey: string): Promise<{ band: 'elevated' | 'high'; until: number } | null> {
+  const row = (await db.prepare('SELECT n, expires_ms FROM shared_counter WHERE key = ? AND expires_ms > ?').get(`taint:${sessionKey}`, Date.now())) as { n: number; expires_ms: number } | undefined;
+  return row ? { band: Number(row.n) >= 2 ? 'high' : 'elevated', until: Number(row.expires_ms) } : null;
+}
+
+export async function countToolCall(sessionKey: string): Promise<number> {
+  const now = Date.now();
+  const row = (await db.prepare(
+    `INSERT INTO shared_counter (key, n, tokens, usd, expires_ms) VALUES (?, 1, 0, 0, ?)
+     ON CONFLICT (key) DO UPDATE SET n = CASE WHEN shared_counter.expires_ms > ? THEN shared_counter.n + 1 ELSE 1 END, expires_ms = excluded.expires_ms
+     RETURNING n`,
+  ).get(`tools:${sessionKey}`, now + SESSION_TTL_MS, now)) as { n: number };
+  return Number(row.n);
+}
+
+export async function toolCallsIn(sessionKey: string): Promise<number> {
+  const row = (await db.prepare('SELECT n FROM shared_counter WHERE key = ? AND expires_ms > ?').get(`tools:${sessionKey}`, Date.now())) as { n: number } | undefined;
+  return Number(row?.n ?? 0);
+}
+
 export async function eraseAgent(agentId: string): Promise<void> {
-  await db.prepare("DELETE FROM shared_counter WHERE key LIKE ? OR key LIKE ? OR key LIKE ?").run(`rpm:${agentId}:%`, `day:${agentId}:%`, `oom:${agentId}:%`);
+  await db.prepare("DELETE FROM shared_counter WHERE key LIKE ? OR key LIKE ? OR key LIKE ? OR key LIKE ? OR key LIKE ?").run(`rpm:${agentId}:%`, `day:${agentId}:%`, `oom:${agentId}:%`, `taint:${agentId}:%`, `tools:${agentId}:%`);
 }
 
 // --- Sign-in throttling -------------------------------------------------------------------------

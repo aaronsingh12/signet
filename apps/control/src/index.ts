@@ -1,6 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
 import express, { type NextFunction, type Request, type Response } from 'express';
-import { devSecret, env, newId, toJwk, verifyJws, type CertificateBody } from '@signet/core';
+import { devOverridesAllowed, devSecret, env, newId, toJwk, verifyJws, type CertificateBody } from '@signet/core';
 import { db, nowIso } from './db';
 import * as detectors from './detectors';
 import * as discovery from './discovery';
@@ -162,7 +162,7 @@ api.use('/edge/runners', runners);
 // --- everything below needs a signed-in person or an approved machine client ---
 api.use(oidc.authenticate, signedIn, idempotency);
 
-api.get('/me', route((_req, res) => ({ principal: principalOf(res), tenant: { id: tenant.id, name: tenant.name }, single_operator: singleOperatorMode() })));
+api.get('/me', route((_req, res) => ({ principal: principalOf(res), tenant: { id: tenant.id, name: tenant.name }, single_operator: singleOperatorMode(), dev_overrides: devOverridesAllowed() })));
 // Secrets in these requests must never enter idempotency response storage or browser caches.
 api.use('/connections', (_req, res, next) => { res.setHeader('cache-control', 'no-store'); next(); });
 api.get('/connections', requires('agents.read'), route(async () => ({ items: await externalConnections.list() })));
@@ -553,6 +553,10 @@ int.post('/ledger', route(async (req) => {
 int.post('/limits/take', route(async (req) => (await counters.takeRequest(String(req.body?.agent_id)))));
 int.post('/limits/usage', route(async (req) => ((await counters.addUsage(String(req.body?.agent_id), Number(req.body?.tokens) || 0, Number(req.body?.usd) || 0)), { ok: true })));
 int.post('/limits/out-of-manifest', route(async (req) => ({ attempts: await counters.recordOutOfManifest(String(req.body?.agent_id)) })));
+int.post('/limits/taint', route(async (req) => ({ band: await counters.setTaint(String(req.body?.session), req.body?.band === 'high' ? 'high' : 'elevated') })));
+int.post('/limits/taint/read', route(async (req) => ({ taint: await counters.readTaint(String(req.body?.session)) })));
+int.post('/limits/tool-call', route(async (req) => ({ calls: await counters.countToolCall(String(req.body?.session)) })));
+int.post('/limits/tool-calls/read', route(async (req) => ({ calls: await counters.toolCallsIn(String(req.body?.session)) })));
 int.get('/secrets/:id', route(async (req) => (await secrets.revealForGateway(req.params.id!))));
 int.post('/heartbeat', route(async (req) => {
   (await db.prepare('INSERT INTO gateway_node (id, url, last_seen, bundle_version, llm_status) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET url = excluded.url, last_seen = excluded.last_seen, bundle_version = excluded.bundle_version, llm_status = excluded.llm_status').run(

@@ -22,6 +22,14 @@ export const DATA_DIR = process.env.SIGNET_DATA_DIR ?? join(REPO_ROOT, 'data');
 
 export const env = (name: string, fallback: string) => process.env[name] ?? fallback;
 
+/**
+ * Dev shortcuts (skipping a deployment shadow period or a detector's 14-day trial) are for a laptop only.
+ * They need SIGNET_ENV=dev and are never allowed on a hosted deployment (Vercel, or any production build),
+ * whatever SIGNET_ENV says. The environment name itself (which seals use) is not affected.
+ */
+export const devOverridesAllowed = (): boolean => (process.env.SIGNET_ENV ?? 'dev') === 'dev' && !process.env.VERCEL && process.env.NODE_ENV !== 'production';
+export const DEV_OVERRIDE_DISABLED = 'dev shortcuts are only available on a local development install; hosted Signet enforces the full waiting period';
+
 // Dev-only shared secrets between control plane and gateways, generated on first use.
 // Production supplies these from a secret manager.
 const DEV_SECRETS = ['SIGNET_INTERNAL_TOKEN', 'SIGNET_VAULT_KEY', 'SIGNET_BROKER_KEY'];

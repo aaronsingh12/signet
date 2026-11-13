@@ -15,7 +15,7 @@ export function eraseAgentLimits(agentId: string, sessions: string[]): void {
   minute.delete(agentId);
   daily.delete(agentId);
   outOfManifest.delete(agentId);
-  for (const session of sessions) sessionTools.delete(session);
+  for (const session of sessions) sessionTools.delete(`${agentId}:${session}`);
 }
 
 // Requests per minute (BP 5.2 step 5), reduced by a throttle (ladder level 3), plus today's usage.
@@ -84,9 +84,21 @@ export function takeAnonymousFailure(address: string): boolean {
   return true;
 }
 
-export const toolCallsIn = (sessionId: string) => sessionTools.get(sessionId)?.n ?? 0;
-export function countToolCall(sessionId: string) {
-  sessionTools.set(sessionId, { n: toolCallsIn(sessionId) + 1, at: Date.now() });
+// Tool calls per session (seal limit tool_calls_per_session), shared through the control plane; the
+// key is "<agent_id>:<session>". The higher of the shared and local counts is used.
+const localToolCalls = (sessionKey: string) => sessionTools.get(sessionKey)?.n ?? 0;
+export async function toolCallsIn(sessionKey: string): Promise<number> {
+  try {
+    const shared = (await state.internal<{ calls: number }>('/internal/limits/tool-calls/read', { method: 'POST', body: JSON.stringify({ session: sessionKey }) })).calls;
+    return Math.max(shared, localToolCalls(sessionKey));
+  } catch {
+    return localToolCalls(sessionKey);
+  }
+}
+export async function countToolCall(sessionKey: string): Promise<void> {
+  sessionTools.set(sessionKey, { n: localToolCalls(sessionKey) + 1, at: Date.now() });
+  await state.internal('/internal/limits/tool-call', { method: 'POST', body: JSON.stringify({ session: sessionKey }) })
+    .catch((e: Error) => console.error(`[gateway] could not share the session tool count: ${e.message}`));
 }
 
 setInterval(() => {

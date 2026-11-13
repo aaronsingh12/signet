@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { REPO_ROOT, evaluateTs, type PolicyInput, type PolicyResult } from '@signet/core';
+import { REPO_ROOT, evaluateTs, strictest, type PolicyInput, type PolicyResult } from '@signet/core';
 
 export { evaluateTs, type PolicyInput, type PolicyResult };
 
@@ -25,9 +25,19 @@ export async function initEngine() {
 }
 
 export function evaluate(input: PolicyInput): PolicyResult {
-  if (wasm) {
-    const out = wasm.evaluate(input);
-    if (out[0]?.result) return out[0].result;
+  const ts = evaluateTs(input);
+  if (!wasm) return ts;
+  const opa = wasm.evaluate(input)[0]?.result;
+  if (!opa) return ts;
+  // Both engines must agree (they share policy/conformance.json). If they ever differ on live traffic, the
+  // difference is logged and the stricter answer is used, so a gap in either copy can never loosen a decision.
+  if (opa.decision !== ts.decision || opa.rule_ids.join() !== ts.rule_ids.join()) {
+    mismatches++;
+    console.warn('[gateway] policy engines disagree; using the stricter result', { opa: opa.decision, opa_rules: opa.rule_ids, typescript: ts.decision, ts_rules: ts.rule_ids });
+    return strictest(opa.decision, ts.decision) === opa.decision ? opa : ts;
   }
-  return evaluateTs(input);
+  return opa;
 }
+
+/** Live disagreements between the OPA and TypeScript engines since start (should stay 0). */
+export let mismatches = 0;

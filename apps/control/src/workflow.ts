@@ -1,5 +1,5 @@
 import {
-  RESTRICTED_TAGS, canonicalize, evaluateTs, newId, promptDecision, scan, sha256,
+  DEV_OVERRIDE_DISABLED, RESTRICTED_TAGS, canonicalize, devOverridesAllowed, evaluateTs, newId, promptDecision, scan, sha256,
   type CompiledPolicy, type DataTag, type Rollout, type Tier, DATA_TAGS } from '@signet/core';
 import * as approvals from './approvals';
 import { compilePolicy } from './compile';
@@ -27,7 +27,6 @@ export const STAGES = ['propose', 'classify', 'assess', 'test', 'approve', 'depl
 export type Stage = (typeof STAGES)[number];
 
 const DAY = 86_400_000;
-const isDev = () => (process.env.SIGNET_ENV ?? 'dev') === 'dev';
 
 export interface Intake {
   business_value?: string;
@@ -666,7 +665,7 @@ export async function advanceDeploy(lcId: string, p: Principal, input: { to: 'ca
   if (input.to === 'enforce' && plan.canary && plan.mode !== 'canary') throw new PolicyError('BP-6-S6', `${agent.tier} deployments run a canary before full enforcement`, 409);
   const needDays = plan.mode === 'shadow' ? plan.shadow_days : 1;
   if (ageDays < needDays) {
-    if (!(input.dev_override && isDev() && input.reason?.trim())) throw new PolicyError('BP-6-S6', `${plan.mode} has run ${ageDays.toFixed(2)} of ${needDays} days`, 422, { stats });
+    if (!(input.dev_override && devOverridesAllowed() && input.reason?.trim())) throw new PolicyError('BP-6-S6', `${plan.mode} has run ${ageDays.toFixed(2)} of ${needDays} days${input.dev_override && !devOverridesAllowed() ? `; ${DEV_OVERRIDE_DISABLED}` : ''}`, 422, { stats });
     overrides.push(`${plan.mode} period cut short by ${p.id}: ${input.reason}`);
   }
   if (stats.critical_would_block > 0 && !input.acknowledge_would_blocks) {

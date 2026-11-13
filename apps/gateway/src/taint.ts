@@ -1,16 +1,37 @@
+import * as state from './state';
+
 // Session taint (RB-BL-12): once a tool response or retrieved document scores Elevated or High on
 // DET-INJ, the session stays tainted for up to 60 minutes and every privileged or critical action
 // needs a person. "High" also arms the Hijack kill (RB-KILL-01).
+// The taint is shared through the control plane, so a session tainted on one gateway instance stays
+// tainted on every other one (Vercel runs several and restarts them). The local copy is the fallback,
+// and keeps the source text for the ledger.
 
 const TTL_MS = 60 * 60_000;
 const sessions = new Map<string, { band: 'elevated' | 'high'; until: number; source: string }>();
 
-export function taint(sessionId: string, band: 'elevated' | 'high', source: string) {
-  const prior = taintOf(sessionId);
+export function taint(sessionId: string, band: 'elevated' | 'high', source: string): Promise<void> {
+  const prior = localTaint(sessionId);
   sessions.set(sessionId, { band: prior?.band === 'high' ? 'high' : band, until: Date.now() + TTL_MS, source });
+  return state.internal('/internal/limits/taint', { method: 'POST', body: JSON.stringify({ session: sessionId, band }) })
+    .then(() => undefined)
+    .catch((e: Error) => console.error(`[gateway] could not share session taint: ${e.message}`));
 }
 
-export function taintOf(sessionId: string) {
+/** The session's taint from this node or any other node; the stronger band wins. */
+export async function taintOf(sessionId: string): Promise<{ band: 'elevated' | 'high'; until: number; source: string } | null> {
+  const local = localTaint(sessionId);
+  try {
+    const shared = (await state.internal<{ taint: { band: 'elevated' | 'high'; until: number } | null }>('/internal/limits/taint/read', { method: 'POST', body: JSON.stringify({ session: sessionId }) })).taint;
+    if (!shared) return local;
+    if (!local) return { ...shared, source: 'another gateway node' };
+    return { band: shared.band === 'high' || local.band === 'high' ? 'high' : 'elevated', until: Math.max(shared.until, local.until), source: local.source };
+  } catch {
+    return local;
+  }
+}
+
+function localTaint(sessionId: string) {
   const t = sessions.get(sessionId);
   if (!t) return null;
   if (t.until < Date.now()) {

@@ -106,6 +106,42 @@ export async function prevHashOf(seq: number): Promise<string> {
   return r?.record_hash ?? GENESIS_HASH;
 }
 
+// Continuous chain check (SGC-MON-001) without loading the whole ledger into memory: each run checks
+// only the records added since the last checkpoint, in batches, and re-checks everything once a day so an
+// edit to an old record is still found. The checkpoint itself is compared with the stored record each run.
+const BATCH = 5000;
+export async function verifyIncremental(): Promise<{ ok: boolean; checked: number; head_seq: number; full: boolean; error?: { seq: number; reason: string } }> {
+  const saved = (await db.prepare("SELECT value FROM library_state WHERE key = 'ledger_checkpoint'").get()) as { value: string } | undefined;
+  const cp = saved ? (JSON.parse(saved.value) as { seq: number; head: string; full_at: number }) : null;
+  const full = !cp || Date.now() - cp.full_at > 86_400_000;
+  if (cp && !full) {
+    const at = (await db.prepare('SELECT record_hash FROM ledger_record WHERE seq = ?').get(cp.seq)) as { record_hash: string } | undefined;
+    if (at?.record_hash !== cp.head) return { ok: false, checked: 0, head_seq: cp.seq, full, error: { seq: cp.seq, reason: 'checkpoint record changed since it was verified' } };
+  }
+  const trusted = new Map([[keys.ledger.kid, keys.ledger.publicKey]]);
+  let start = full ? 1 : cp!.seq + 1;
+  let prev = full ? GENESIS_HASH : cp!.head;
+  let checked = 0;
+  let last = full ? 0 : cp!.seq;
+  for (;;) {
+    const batch = await range(start, start + BATCH - 1);
+    if (!batch.length) break;
+    if (batch[0]!.seq !== start) return { ok: false, checked, head_seq: last, full, error: { seq: batch[0]!.seq, reason: `sequence gap: expected ${start}` } };
+    const r = verifyChain(batch, prev, trusted);
+    if (!r.ok) return { ok: false, checked: checked + r.count, head_seq: last, full, error: { seq: r.error!.seq, reason: r.error!.reason } };
+    checked += r.count;
+    prev = r.head;
+    last = batch[batch.length - 1]!.seq;
+    if (batch.length < BATCH) break;
+    start += BATCH;
+  }
+  if (last > 0) {
+    const value = JSON.stringify({ seq: last, head: prev, full_at: full ? Date.now() : cp!.full_at });
+    await db.prepare("INSERT INTO library_state (key, value, updated_at) VALUES ('ledger_checkpoint', ?, ?) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at").run(value, new Date().toISOString());
+  }
+  return { ok: true, checked, head_seq: last, full };
+}
+
 export async function verify(fromSeq = 1, toSeq = Number.MAX_SAFE_INTEGER) {
   return verifyChain((await range(fromSeq, toSeq)), (await prevHashOf(fromSeq)), new Map([[keys.ledger.kid, keys.ledger.publicKey]]));
 }

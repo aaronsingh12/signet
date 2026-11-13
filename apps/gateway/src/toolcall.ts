@@ -58,7 +58,7 @@ async function run(ctx: Ctx, headers: IncomingHttpHeaders, req: ToolRequest): Pr
     const settled = await settle(sessionKey(ctx), 5_000);
     if (!settled) ctx.reasons.push('a DET-INJ verdict for this session was still pending after 5 s');
   }
-  const t = taintOf(sessionKey(ctx));
+  const t = await taintOf(sessionKey(ctx));
   if (t?.band === 'high' && (impact === 'privileged' || impact === 'critical')) {
     const act = cert.tier === 'T1' || cert.tier === 'T2' ? 'kill' : 'quarantine';
     await ladder(ctx, act, 'RB-KILL-01', `privileged ${key} attempted after injection in a tool response`, { taint_source: t.source });
@@ -80,7 +80,7 @@ async function run(ctx: Ctx, headers: IncomingHttpHeaders, req: ToolRequest): Pr
     kind: 'tool',
     policy,
     action: { key, args: req.args },
-    context: { tainted: !!t, step_up: eff.stepUp, tool_calls_in_session: limits.toolCallsIn(ctx.sessionId), tool_calls_limit: cert.limits.tool_calls_per_session ?? null },
+    context: { tainted: !!t, step_up: eff.stepUp, tool_calls_in_session: await limits.toolCallsIn(sessionKey(ctx)), tool_calls_limit: cert.limits.tool_calls_per_session ?? null },
   });
   ctx.detectors = notDeployed();
   let outcome = r.decision as Outcome;
@@ -115,7 +115,7 @@ async function run(ctx: Ctx, headers: IncomingHttpHeaders, req: ToolRequest): Pr
   step(ctx, 11, 'pass', credential ? `brokered credential ${tool!.secret_id} attached` : 'tool needs no credential');
 
   // 12. Forward. A kill cuts the call before or during forwarding.
-  limits.countToolCall(ctx.sessionId);
+  await limits.countToolCall(sessionKey(ctx));
   const ctrl = new AbortController();
   const untrack = state.track(claims.agent_id, claims.ver, claims.ins, ctrl);
   const t0 = performance.now();
@@ -142,7 +142,7 @@ async function run(ctx: Ctx, headers: IncomingHttpHeaders, req: ToolRequest): Pr
     const scoring = detectInjection(text, cert.tier, 'tool').then(async (inj) => {
       let applied: string | null = null;
       if (inj.status === 'ok' && inj.band && inj.band !== 'low') {
-        taint(sessionKey(ctx), inj.band, `${key} response (${requestId})`);
+        await taint(sessionKey(ctx), inj.band, `${key} response (${requestId})`);
         applied = `session tainted ${inj.band} for 60 minutes (RB-BL-12)`;
       }
       await appendRecord({ kind: 'transaction', agent_id: claims.agent_id, cert_id: cert.cert_id, data: { action_type: 'detector_score', request_id: requestId, target: key, session_id: ctx.sessionId, node_id: state.NODE_ID, detector: inj, applied, policy_decision: applied ? 'taint' : inj.status === 'shadow' ? 'would_taint' : 'none' } }).catch(() => {});

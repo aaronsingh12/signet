@@ -1,4 +1,4 @@
-import type { DetectorMode } from '@signet/core';
+import { DEV_OVERRIDE_DISABLED, devOverridesAllowed, type DetectorMode } from '@signet/core';
 import { db, nowIso, tx } from './db';
 import { PolicyError, forbidden, invalid, notFound } from './errors';
 import * as hub from './hub';
@@ -15,10 +15,17 @@ const SEED = [
   { id: 'DET-INJ', version: 'deberta-v3-base-injection-v2-fp32', notes: 'protectai/deberta-v3-base-prompt-injection-v2 (Apache-2.0), fp32 ONNX; int8 dynamic quantisation was rejected (scored a planted instruction 0.10 vs 1.00)' },
   { id: 'DET-JB', version: 'not-deployed', notes: 'model not selected yet (E39)' },
   { id: 'DET-PII', version: 'not-deployed', notes: 'pattern DLP covers structured identifiers; ML recogniser is E39' },
+  // DET-SAFE was blocking unsafe content before it was registered here, so it starts active (recorded as
+  // grandfathered in the ledger) rather than silently dropping to shadow. It uses the cloud LLM as a
+  // classifier until a small safety model (Llama Guard / Granite Guardian / ShieldGemma family) replaces it.
+  { id: 'DET-SAFE', version: 'gpt-oss-120b-safety-prompt-v1', notes: 'cloud LLM used as a safety classifier (interim; DA 3 asks for a small classifier); grandfathered active', mode: 'active' as const },
 ];
 
 for (const d of SEED) {
-  (await db.prepare('INSERT INTO detector (id, version, mode, notes) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING').run(d.id, d.version, d.version === 'not-deployed' ? 'off' : 'shadow', d.notes));
+  const known = await db.prepare('SELECT id FROM detector WHERE id = ?').get(d.id);
+  const mode: string = ('mode' in d && d.mode) || (d.version === 'not-deployed' ? 'off' : 'shadow');
+  (await db.prepare('INSERT INTO detector (id, version, mode, notes) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING').run(d.id, d.version, mode, d.notes));
+  if (!known && mode === 'active') (await ledger.append({ kind: 'admin', data: { event: 'detector.registered', detector: d.id, version: d.version, mode, grandfathered: true, reason: 'was enforcing before it was registered; kept active so protection does not drop', actor: 'system' } }));
   (await db.prepare("UPDATE detector SET shadow_since = COALESCE(shadow_since, ?) WHERE id = ? AND mode = 'shadow'").run(nowIso(), d.id));
 }
 
@@ -37,8 +44,8 @@ export async function setMode(id: string, mode: DetectorMode, p: Principal, opts
     if (d.mode !== 'shadow') throw new PolicyError('RB-MOD-03', `${id} must run in shadow before it is promoted`, 409);
     if (days < SHADOW_DAYS) {
       // Dev installs may skip the wait, but the override is written to the ledger and shown on the detector.
-      if (!(opts.dev_override && (process.env.SIGNET_ENV ?? 'dev') === 'dev')) {
-        throw new PolicyError('RB-MOD-03', `${id} has been in shadow ${days.toFixed(1)} days; promotion needs ${SHADOW_DAYS}`, 409);
+      if (!(opts.dev_override && devOverridesAllowed())) {
+        throw new PolicyError('RB-MOD-03', `${id} has been in shadow ${days.toFixed(1)} days; promotion needs ${SHADOW_DAYS}${opts.dev_override ? `; ${DEV_OVERRIDE_DISABLED}` : ''}`, 409);
       }
       override = true;
     }

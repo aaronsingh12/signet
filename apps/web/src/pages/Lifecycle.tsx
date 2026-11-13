@@ -469,6 +469,7 @@ export function DeployStage({ v, onChange }: { v: any; onChange: () => void }) {
   const [ack, setAck] = useState(false);
   const [override, setOverride] = useState(false);
   const a = useAction(onChange);
+  const shortcuts = !!useMe().dev_overrides;
   if (!d) return null;
   const next = d.mode === 'shadow' && d.canary ? 'canary' : 'enforce';
   const need = d.mode === 'shadow' ? d.shadow_days : 1;
@@ -492,7 +493,8 @@ export function DeployStage({ v, onChange }: { v: any; onChange: () => void }) {
         {d.stats.critical_would_block > 0 && (
           <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} className="mt-1" /> I reviewed the {d.stats.critical_would_block} critical would-block decision(s)</label>
         )}
-        {d.days_in_mode < need && (
+        {d.days_in_mode < need && !shortcuts && <p className="mt-2 text-xs text-ink-3">The {d.mode} period must run its full {need} days on hosted Signet.</p>}
+        {d.days_in_mode < need && shortcuts && (
           <>
             <label className="mt-2 flex items-start gap-2 text-sm"><input type="checkbox" checked={override} onChange={(e) => setOverride(e.target.checked)} className="mt-1" /> Cut the {d.mode} period short (dev only, recorded)</label>
             {override && <input className="input mt-2" placeholder="Reason" value={reason} onChange={(e) => setReason(e.target.value)} />}

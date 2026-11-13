@@ -14,6 +14,7 @@ interface Me {
   principal: Principal;
   tenant: { id: string; name: string };
   single_operator?: boolean; // one administrator; separation of duties waived and recorded
+  dev_overrides?: boolean; // dev shortcuts (skip waiting periods) allowed: local installs only
 }
 
 const Ctx = createContext<Me | null>(null);

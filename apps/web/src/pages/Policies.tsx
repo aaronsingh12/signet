@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Card, ErrorNote, KV, Mono, PageHeader, Pill } from '../components/ui';
 import { ApiError, api, useApi } from '../lib/api';
-import { useCan } from '../lib/auth';
+import { useCan, useMe } from '../lib/auth';
 import { ago } from '../lib/format';
 
 const BASELINE = [
@@ -21,6 +21,7 @@ const BASELINE = [
 
 export function Policies() {
   const can = useCan();
+  const shortcuts = !!useMe().dev_overrides;
   const { data: det, reload } = useApi<any>('/detectors');
   const { data: cat } = useApi<any>('/catalogue');
   const [error, setError] = useState<ApiError | null>(null);
@@ -28,7 +29,7 @@ export function Policies() {
     const reason = prompt(`Reason for moving ${id} to ${mode} (written to the ledger)`);
     if (!reason) return;
     try {
-      await api(`/detectors/${id}/mode`, { method: 'POST', body: { mode, reason, dev_override: mode === 'active' && confirm('The 14-day shadow period is not complete. Use the dev override (recorded in the ledger)?') } });
+      await api(`/detectors/${id}/mode`, { method: 'POST', body: { mode, reason, dev_override: shortcuts && mode === 'active' && confirm('The 14-day shadow period is not complete. Use the dev override (recorded in the ledger)?') } });
       setError(null);
       void reload();
     } catch (e) {

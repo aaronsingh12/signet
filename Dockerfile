@@ -3,6 +3,8 @@
 #   docker build --target gateway -t signet/gateway .
 # CI signs both images with cosign (keyless) and publishes a CycloneDX SBOM (.github/workflows/ci.yml).
 
+FROM openpolicyagent/opa:1.4.2-static AS opa
+
 FROM node:24-slim AS build
 WORKDIR /src
 COPY package.json package-lock.json ./
@@ -10,6 +12,11 @@ COPY packages ./packages
 COPY apps ./apps
 COPY scripts ./scripts
 COPY policy ./policy
+# The gateway evaluates the reviewed Rego policy itself (OPA WebAssembly), not only its TypeScript copy.
+# The build stops if the Rego conformance tests fail.
+COPY --from=opa /opa /usr/local/bin/opa
+RUN opa test policy/ && opa build -t wasm -e signet/decision/result policy/signet.rego -o /tmp/policy-bundle.tar.gz \
+  && mkdir -p policy/dist && tar -xzf /tmp/policy-bundle.tar.gz -C policy/dist /policy.wasm && chmod 644 policy/dist/policy.wasm && rm /tmp/policy-bundle.tar.gz
 RUN npm ci --ignore-scripts && npm run build
 
 FROM node:24-slim AS runtime-base

@@ -1,4 +1,4 @@
-import { combine, sha256, verifyChain } from '@signet/core';
+import { combine, sha256 } from '@signet/core';
 import { db, nowIso, tx } from './db';
 import { PolicyError, invalid, notFound } from './errors';
 import { FRAMEWORKS, PLACEHOLDERS, REQUIREMENTS } from './frameworks';
@@ -122,7 +122,7 @@ const CONTROLS: ControlDef[] = [
   {
     id: 'SGC-MON-001', domain: 'MON', severity: 'critical', type: 'automated', objective: 'Every transaction logged and chained',
     test: 'Hash chain verifies end to end',
-    check: async () => { const r = verifyChain((await ledger.all())); return r.ok ? { status: 'effective', detail: `${r.count} records, chain intact` } : { status: 'ineffective', detail: `chain broken at seq ${r.error?.seq}: ${r.error?.reason}` }; },
+    check: async () => { const r = await ledger.verifyIncremental(); return r.ok ? { status: 'effective', detail: `chain intact up to record ${r.head_seq} (${r.checked} checked this run${r.full ? ', full re-check' : ''})` } : { status: 'ineffective', detail: `chain broken at seq ${r.error?.seq}: ${r.error?.reason}` }; },
   },
   { id: 'SGC-MON-004', domain: 'MON', severity: 'medium', type: 'automated', objective: 'Behaviour baseline monitored (DET-ANOM, later phase)', test: 'Every prod agent has a baseline' },
   { id: 'SGC-MON-005', domain: 'MON', severity: 'medium', type: 'automated', objective: 'Groundedness sampled (Tier 2 evaluator, Phase 3)', test: 'Weekly 1% sample' },

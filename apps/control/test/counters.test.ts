@@ -56,3 +56,23 @@ test('sweep removes expired counters and gateway nodes that stopped sending hear
   const nodes = ((await db.prepare('SELECT id FROM gateway_node').all()) as { id: string }[]).map((n) => n.id);
   assert.ok(nodes.includes('gw-live') && !nodes.includes('gw-old'));
 });
+
+test('session taint and tool counts are shared, the stronger band wins, and each agent keeps its own sessions', async () => {
+  assert.equal(await counters.readTaint('agt_t1:s1'), null);
+  assert.equal(await counters.setTaint('agt_t1:s1', 'high'), 'high');
+  assert.equal(await counters.setTaint('agt_t1:s1', 'elevated'), 'high', 'a weaker verdict never lowers the taint');
+  assert.equal((await counters.readTaint('agt_t1:s1'))?.band, 'high');
+  assert.equal(await counters.readTaint('agt_t2:s1'), null, 'same session id, different agent');
+  // An expired taint does not count, and a new verdict starts fresh.
+  await db.prepare("UPDATE shared_counter SET expires_ms = 0 WHERE key = 'taint:agt_t1:s1'").run();
+  assert.equal(await counters.readTaint('agt_t1:s1'), null);
+  assert.equal(await counters.setTaint('agt_t1:s1', 'elevated'), 'elevated');
+
+  assert.equal(await counters.countToolCall('agt_t1:s1'), 1);
+  assert.equal(await counters.countToolCall('agt_t1:s1'), 2);
+  assert.equal(await counters.toolCallsIn('agt_t1:s1'), 2);
+  assert.equal(await counters.toolCallsIn('agt_t2:s1'), 0);
+  await counters.eraseAgent('agt_t1');
+  assert.equal(await counters.toolCallsIn('agt_t1:s1'), 0);
+  assert.equal(await counters.readTaint('agt_t1:s1'), null);
+});
