@@ -1,6 +1,6 @@
 import type { IncomingHttpHeaders } from 'node:http';
 import { canonicalize, combine, sha256, type Outcome, type ToolAlias } from '@signet/core';
-import { type Ctx, type Done, Halt, finish, halt, humanApproval, ladder, maskArgs, newCtx, preflight, recordOutOfManifest, sessionKey, step, wouldBlock } from './ctx';
+import { type Ctx, type Done, Halt, decisionInputs, finish, halt, humanApproval, ladder, maskArgs, newCtx, preflight, recordOutOfManifest, sessionKey, step, wouldBlock } from './ctx';
 import { detectInjection, notDeployed } from './detectors';
 import { evaluate } from './engine';
 import { appendRecord } from './ledgerclient';
@@ -87,8 +87,10 @@ async function run(ctx: Ctx, headers: IncomingHttpHeaders, req: ToolRequest): Pr
   if (di.approval && outcome !== 'deny') outcome = 'require_approval';
   // DET-INJ scores tool responses (step 13), not arguments. DET-ANOM (tool mix, volume) applies here once it
   // is active; in shadow or while learning it is recorded but does not hold tool calls.
-  const combined = combine(outcome, ctx.anom?.status === 'ok' ? [ctx.anom] : [], cert.tier);
+  const combinedOn = ctx.anom?.status === 'ok' ? [ctx.anom] : [];
+  const combined = combine(outcome, combinedOn, cert.tier);
   ctx.decision = combined.outcome;
+  ctx.extra.decision_inputs = decisionInputs(cert.tier, outcome, 'strict', combinedOn, combined.outcome);
   ctx.rules.push(...r.rule_ids, ...(di.approval ? [di.approval.rule] : []));
   ctx.approverGroups = r.approver_groups;
   if (r.decision === 'deny') {

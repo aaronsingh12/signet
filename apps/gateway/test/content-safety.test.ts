@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { combine } from '@signet/core';
+import { DETECTOR_SPECS, combine, specHash } from '@signet/core';
 import { contentSafety, SafetyUnavailable, withholdIfHighRisk, type SafetyVerdict } from '../src/content-safety';
 import { Halt, newCtx } from '../src/ctx';
 import * as state from '../src/state';
@@ -21,7 +21,7 @@ test('off: not run', async () => {
 test('active: unsafe content is blocked; safe content passes with band low', async () => {
   mode('active');
   await assert.rejects(contentSafety(ctx(), 'x', 8, unsafe), (e: unknown) => e instanceof Halt && e.status === 403 && /weapons/.test(e.message));
-  assert.deepEqual(await contentSafety(ctx(), 'x', 8, safe), { id: 'DET-SAFE', version: 'v1', status: 'ok', score: 0, band: 'low' });
+  assert.deepEqual(await contentSafety(ctx(), 'x', 8, safe), { id: 'DET-SAFE', version: 'v1', sha256: specHash(DETECTOR_SPECS['DET-SAFE']!.spec), status: 'ok', score: 0, band: 'low' });
 });
 
 test('active in a shadow deployment: recorded as would_block, not blocked', async () => {
@@ -48,4 +48,13 @@ test('failure: unavailable, so the rules decide; T1/T2 held, T3/T4 continue (no 
   assert.equal(combine('allow', [r], 'T4').outcome, 'allow');
   assert.throws(() => withholdIfHighRisk(ctx(), 'T1'), (e: unknown) => e instanceof Halt && e.outcome === 'require_approval');
   assert.doesNotThrow(() => withholdIfHighRisk(ctx(), 'T3'));
+});
+
+test('pin mismatch: unsafe content is still blocked (caution only), but the check counts as unavailable', async () => {
+  state.detectors.set('DET-SAFE', { id: 'DET-SAFE', version: 'v1', mode: 'active', sha256: 'c'.repeat(64) });
+  await assert.rejects(contentSafety(ctx(), 'x', 8, unsafe), (e: unknown) => e instanceof Halt && e.status === 403);
+  const c = ctx();
+  assert.equal((await contentSafety(c, 'x', 8, safe))?.status, 'unavailable');
+  assert.ok(c.reasons.some((r) => /pin mismatch/.test(r)));
+  state.detectors.set('DET-SAFE', { id: 'DET-SAFE', version: 'v1', mode: 'active' });
 });

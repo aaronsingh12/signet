@@ -112,6 +112,18 @@ export function wouldBlock(ctx: Ctx, n: number, rules: string[], reason: string)
 }
 
 // Automatic ladder action from a gateway rule (RB-INV-05: always cites the rule).
+// What Replay needs to re-run a decision (DA 6 mechanism 3): the Tier 0 rule result, the tier, which
+// combiner ran, and each detector's version hash, score, band and thresholds.
+export function decisionInputs(tier: string, ruleOutcome: string, combiner: 'strict' | 'outage_audit', detectors: DetectorResult[], combined: string) {
+  return {
+    tier, rule_outcome: ruleOutcome, combiner, combined,
+    detectors: detectors.map((d) => {
+      const x = d as DetectorResult & { features?: Record<string, number> };
+      return { id: x.id, version: x.version, status: x.status, score: x.score, band: x.band, sha256: x.sha256, thresholds: x.thresholds, ...(x.features ? { features: x.features } : {}) };
+    }),
+  };
+}
+
 export async function ladder(ctx: Ctx, action: 'kill' | 'quarantine' | 'throttle', ruleId: string, reason: string, evidence: Record<string, unknown> = {}) {
   const c = ctx.claims!;
   if (action !== 'throttle') state.applyScope(`agent:${c.agent_id}`, { level: action === 'kill' ? 'killed' : 'quarantined' }); // effective on this node at once
@@ -193,7 +205,7 @@ export async function preflight(ctx: Ctx, headers: IncomingHttpHeaders) {
   // 5. Rate, volume and cost limits; a throttle scales them down (ladder level 3).
   const rpm = cert!.limits.rpm * eff.throttleFactor;
   const used = await limits.takeRequest(claims.agent_id, rpm, anomalyEnabled() ? { tier: cert!.tier, tool: ctx.actionType === 'tool_call' ? ctx.target : undefined } : undefined);
-  ctx.anom = anomalyResult(used.anomaly);
+  ctx.anom = anomalyResult(used.anomaly, cert!.tier);
   // Runaway (DA 4 kill condition): over 200% of a seal limit while DET-ANOM has been High for 10 minutes.
   const runawayWhy = runaway(ctx.anom, used, cert!.limits);
   if (runawayWhy) {

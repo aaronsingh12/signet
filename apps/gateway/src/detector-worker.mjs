@@ -2,7 +2,8 @@
 // Stateless: nothing is kept between calls. No network code, no tools, no instruction channel.
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
-import { existsSync } from 'node:fs';
+import { createReadStream, existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 
 const modelDir = process.argv[2];
 const { AutoTokenizer, AutoModelForSequenceClassification, env } = await import('@huggingface/transformers');
@@ -29,7 +30,13 @@ async function scoreText(text) {
 }
 
 await scoreText('warm up'); // first run compiles the graph
-process.stdout.write(`${JSON.stringify({ ready: true, info: `${name} ${quantized ? 'int8' : 'fp32'}` })}\n`);
+// The hash of the weights actually loaded, checked against the pin in the policy bundle (DA 3).
+const file = join(modelDir, 'onnx', quantized ? 'model_quantized.onnx' : 'model.onnx');
+const sha256 = await new Promise((resolve, reject) => {
+  const h = createHash('sha256');
+  createReadStream(file).on('data', (d) => h.update(d)).on('end', () => resolve(h.digest('hex'))).on('error', reject);
+});
+process.stdout.write(`${JSON.stringify({ ready: true, info: `${name} ${quantized ? 'int8' : 'fp32'}`, sha256 })}\n`);
 
 for await (const line of createInterface({ input: process.stdin })) {
   let msg;

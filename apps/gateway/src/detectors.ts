@@ -2,7 +2,8 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { REPO_ROOT, type DetectorResult, type Tier } from '@signet/core';
+import { INJ_THRESHOLDS, REPO_ROOT, type DetectorResult, type Tier } from '@signet/core';
+import { pinCheck, setRunningHash } from './pins';
 import * as state from './state';
 
 // Detector runtime (DA 3, E38). Detectors run in a separate, stateless process: they get text and
@@ -20,15 +21,18 @@ const DA_BUDGET_MS = 15; // DA 3 p95 budget for DET-INJ
 // as unavailable. A smaller fine-tuned model (E39) or a GPU pool (RB-LAT-05) restores the inline path.
 const CAP_MS = Number(process.env.SIGNET_DET_INJ_CAP_MS ?? 3000);
 
-// Rulebook starting thresholds, DET-INJ (Elevated / High).
-const INJ_PROMPT: Record<Tier, [number, number]> = { T1: [0.5, 0.8], T2: [0.6, 0.85], T3: [0.7, 0.9], T4: [0.8, 0.95] };
-const INJ_TOOL: Record<Tier, [number, number]> = { T1: [0.4, 0.7], T2: [0.5, 0.8], T3: [0.6, 0.85], T4: [0.7, 0.9] };
+// Rulebook starting thresholds, DET-INJ (Elevated / High), shared with Replay through @signet/core.
+const INJ_PROMPT = INJ_THRESHOLDS.prompt;
+const INJ_TOOL = INJ_THRESHOLDS.tool;
 
 let child: ChildProcess | null = null;
 let ready = false;
 let seq = 0;
 const waiting = new Map<number, (r: { score?: number; ms?: number; error?: string }) => void>();
 export let modelInfo = 'not loaded';
+let isolationInfo: Record<string, unknown> = { runtime: 'not started' };
+/** How the detector runtime is isolated (DA 6 mechanism 5, SGC-SELF-008), reported in the heartbeat. */
+export const isolation = () => isolationInfo;
 
 export function startRuntime() {
   if (process.env.SIGNET_DET_RUNTIME === 'off') {
@@ -41,6 +45,7 @@ export function startRuntime() {
   }
   const worker = join(dirname(fileURLToPath(import.meta.url)), 'detector-worker.mjs');
   const nm = join(REPO_ROOT, 'node_modules');
+  isolationInfo = { runtime: 'separate process', node_permission_model: true, fs_read: ['model files', 'node_modules', 'worker script'], fs_write: false, child_processes: false, env_vars: ['PATH', 'SYSTEMROOT'], native_addons: 'ONNX runtime only', network: 'no network code; egress is blocked by the deployment (Kubernetes NetworkPolicy)', tools: false, state_between_calls: false };
   child = spawn(process.execPath, ['--permission', `--allow-fs-read=${MODEL_DIR}`, `--allow-fs-read=${nm}`, `--allow-fs-read=${worker}`, '--allow-addons', worker, MODEL_DIR], {
     stdio: ['pipe', 'pipe', 'inherit'],
     env: { PATH: process.env.PATH ?? '', SYSTEMROOT: process.env.SYSTEMROOT ?? '' }, // no secrets in the detector's environment
@@ -52,9 +57,10 @@ export function startRuntime() {
     while ((i = buf.indexOf('\n')) >= 0) {
       const line = buf.slice(0, i);
       buf = buf.slice(i + 1);
-      const msg = JSON.parse(line) as { id?: number; ready?: boolean; info?: string; score?: number; ms?: number; error?: string };
+      const msg = JSON.parse(line) as { id?: number; ready?: boolean; info?: string; sha256?: string; score?: number; ms?: number; error?: string };
       if (msg.ready) {
         ready = true;
+        if (msg.sha256) setRunningHash('DET-INJ', msg.sha256);
         modelInfo = msg.info ?? 'ready';
         console.log(`[gateway] detector runtime ready: ${modelInfo}`);
       } else if (msg.id !== undefined) {
@@ -87,20 +93,23 @@ function score(text: string, budgetMs: number): Promise<{ score?: number; ms?: n
   });
 }
 
-const band = (s: number, [e, h]: [number, number]) => (s >= h ? 'high' : s >= e ? 'elevated' : 'low');
+const band = (s: number, [e, h]: readonly [number, number]) => (s >= h ? 'high' : s >= e ? 'elevated' : 'low');
 
 // DET-INJ on new text only (RB-DET-05). `where` picks the threshold table.
 export async function detectInjection(text: string, tier: Tier, where: 'prompt' | 'tool'): Promise<DetectorResult & { ms?: number; reason?: string; within_da_budget?: boolean }> {
   const cfg = state.detectors.get('DET-INJ');
-  const base = { id: 'DET-INJ', version: cfg?.version ?? 'unknown' };
+  const pin = pinCheck('DET-INJ');
+  const thresholds = (where === 'prompt' ? INJ_PROMPT : INJ_TOOL)[tier];
+  const base = { id: 'DET-INJ', version: cfg?.version ?? 'unknown', ...(pin.sha256 ? { sha256: pin.sha256 } : {}), thresholds };
   if (!cfg || cfg.mode === 'off') return { ...base, status: 'unavailable', reason: 'off' };
+  if (!pin.ok) return { ...base, status: 'unavailable', reason: `pin mismatch: ${pin.reason}` };
   if (!text.trim()) return { ...base, status: cfg.mode === 'active' ? 'ok' : 'shadow', score: 0, band: 'low' };
   // An instruction needs words. Identifiers, numbers and status codes ("C-1", "delivered") cannot
   // carry one, and the classifier is unreliable on them, so they are not scored.
   if ((text.match(/\p{L}{2,}/gu)?.length ?? 0) < 3) return { ...base, status: cfg.mode === 'active' ? 'ok' : 'shadow', score: 0, band: 'low', reason: 'fewer than 3 words' };
   const r = await score(text, CAP_MS);
   if (r.error || r.score === undefined) return { ...base, status: 'unavailable', reason: r.error ?? 'no score', ms: r.ms };
-  return { ...base, status: cfg.mode === 'active' ? 'ok' : 'shadow', score: Math.round(r.score * 1000) / 1000, band: band(r.score, (where === 'prompt' ? INJ_PROMPT : INJ_TOOL)[tier]), ms: r.ms, within_da_budget: (r.ms ?? 0) <= DA_BUDGET_MS };
+  return { ...base, status: cfg.mode === 'active' ? 'ok' : 'shadow', score: Math.round(r.score * 1000) / 1000, band: band(r.score, thresholds), ms: r.ms, within_da_budget: (r.ms ?? 0) <= DA_BUDGET_MS };
 }
 
 // Detectors with no model yet always report unavailable.

@@ -247,13 +247,44 @@ const CONTROLS: ControlDef[] = [
   { id: 'SGC-RESP-003', domain: 'RESP', severity: 'high', type: 'manual', objective: 'Serious incidents reported to authorities on time (GDPR 72 h, NIS2 24 h, DORA, EU AI Act Art. 73)', test: 'Each level 4+ incident has a reporting decision and, where required, a report filed within the legal deadline' },
   {
     id: 'SGC-SELF-001', domain: 'SELF', severity: 'high', type: 'automated', objective: 'Every Signet detector in use is registered and pinned by hash (DA 7)',
-    test: 'Every detector in shadow or active mode has a recorded model hash',
-    check: async () => { const r = (await all<{ id: string; model_sha256: string | null }>("SELECT id, model_sha256 FROM detector WHERE mode != 'off'")); const bad = r.filter((d) => !d.model_sha256).map((d) => d.id); return !r.length ? { status: 'not_tested', detail: 'no detector in use' } : bad.length ? { status: 'partially_effective', detail: `no pinned model hash for ${bad.join(', ')}` } : { status: 'effective', detail: `${r.length} detector(s) pinned by hash` }; },
+    test: 'Every detector in shadow or active mode has a pinned hash, and every live gateway runs exactly the pinned hash',
+    check: async () => {
+      const r = await all<{ id: string; model_sha256: string | null }>("SELECT id, model_sha256 FROM detector WHERE mode != 'off'");
+      if (!r.length) return { status: 'not_tested', detail: 'no detector in use' };
+      const unpinned = r.filter((d) => !d.model_sha256).map((d) => d.id);
+      // Gateways report the hash of what they run; a difference means a node runs an unreleased version.
+      const nodes = await all<{ id: string; detectors: string | null }>('SELECT id, detectors FROM gateway_node WHERE last_seen >= ?', since(10 * 60_000));
+      const drift: string[] = [];
+      for (const n of nodes) {
+        const hashes = ((n.detectors ? JSON.parse(n.detectors) : {}) as { hashes?: Record<string, string> }).hashes ?? {};
+        for (const d of r) if (d.model_sha256 && hashes[d.id] && hashes[d.id] !== d.model_sha256) drift.push(`${d.id} on ${n.id}`);
+      }
+      if (drift.length) return { status: 'ineffective', detail: `running hash differs from the pin: ${drift.join(', ')} (those detectors report unavailable)` };
+      if (unpinned.length) return { status: 'partially_effective', detail: `no pinned hash for ${unpinned.join(', ')}` };
+      return { status: 'effective', detail: `${r.length} detector(s) pinned by hash${nodes.length ? `; ${nodes.length} live gateway(s) run the pinned versions` : ''}` };
+    },
   },
   { id: 'SGC-SELF-004', domain: 'SELF', severity: 'high', type: 'semi_automated', objective: 'Detector versions meet benchmark targets before activation (DA 7)', test: 'Release record shows benchmark results above thresholds (benchmark records not built yet)' },
   { id: 'SGC-SELF-006', domain: 'SELF', severity: 'medium', type: 'manual', objective: 'Detector drift reviewed monthly (DA 7)', test: 'Monthly human-labelled sample completed; findings tracked' },
-  { id: 'SGC-SELF-007', domain: 'SELF', severity: 'high', type: 'automated', objective: 'Decisions are reproducible (DA 7)', test: 'Replay of a random daily sample reproduces 100% of outcomes (Replay tool not built yet)' },
-  { id: 'SGC-SELF-008', domain: 'SELF', severity: 'high', type: 'semi_automated', objective: 'Detectors are isolated: no network, no tools, no memory (DA 7)', test: 'Configuration check of each gateway detector runtime' },
+  {
+    id: 'SGC-SELF-007', domain: 'SELF', severity: 'high', type: 'automated', objective: 'Decisions are reproducible (DA 7)', test: 'Replay of a random daily sample reproduces 100% of outcomes',
+    check: async () => {
+      const r = (await all<{ sampled: number; reproduced: number; mismatched: number; created_at: string }>('SELECT sampled, reproduced, mismatched, created_at FROM replay_run WHERE created_at >= ? ORDER BY created_at DESC LIMIT 1', since(2 * DAY)))[0];
+      if (!r) return { status: 'not_tested', detail: 'no replay sample in the last 2 days' };
+      if (!Number(r.sampled)) return { status: 'not_tested', detail: 'the last sample found no replayable decisions' };
+      return Number(r.mismatched) ? { status: 'ineffective', detail: `${r.mismatched} of ${r.sampled} replayed decisions did not reproduce (${r.created_at.slice(0, 10)})` } : { status: 'effective', detail: `${r.reproduced} of ${r.sampled} sampled decisions reproduced (${r.created_at.slice(0, 10)})` };
+    },
+  },
+  {
+    id: 'SGC-SELF-008', domain: 'SELF', severity: 'high', type: 'semi_automated', objective: 'Detectors are isolated: no network, no tools, no memory (DA 7)', test: 'Each live gateway reports its detector runtime: a separate process under the Node permission model, read-only files, no tools, no state between calls. Network egress is checked on the deployment (NetworkPolicy).',
+    check: async () => {
+      const nodes = await all<{ id: string; detectors: string | null }>('SELECT id, detectors FROM gateway_node WHERE last_seen >= ?', since(10 * 60_000));
+      const running = nodes.map((n) => ({ id: n.id, iso: ((n.detectors ? JSON.parse(n.detectors) : {}) as { isolation?: Record<string, unknown> }).isolation })).filter((n) => n.iso && n.iso.runtime === 'separate process');
+      if (!running.length) return { status: 'not_tested', detail: 'no live gateway runs the model detector runtime' };
+      const bad = running.filter((n) => n.iso!.node_permission_model !== true || n.iso!.fs_write !== false || n.iso!.tools !== false || n.iso!.state_between_calls !== false).map((n) => n.id);
+      return bad.length ? { status: 'ineffective', detail: `detector runtime not isolated on ${bad.join(', ')}` } : { status: 'partially_effective', detail: `${running.length} gateway(s): separate process, permission model, read-only, no tools, stateless; network egress must be confirmed on the deployment` };
+    },
+  },
   { id: 'SGC-SELF-009', domain: 'SELF', severity: 'medium', type: 'manual', objective: 'Detectors red-teamed every release (DA 7)', test: 'Red-team report linked to each detector release' },
   {
     id: 'SGC-SELF-010', domain: 'SELF', severity: 'critical', type: 'automated', objective: 'Fail-safe works when a detector is down (DA 2, 7)',

@@ -1,6 +1,6 @@
 import type { IncomingHttpHeaders } from 'node:http';
 import { canonicalize, combine, combineWithDetectorOutageAudit, sha256, strictest, type Outcome } from '@signet/core';
-import { type Ctx, type Done, Halt, finish, halt, humanApproval, ladder, maskArgs, newCtx, preflight, recordOutOfManifest, sessionKey, step, wouldBlock } from './ctx';
+import { type Ctx, type Done, Halt, decisionInputs, finish, halt, humanApproval, ladder, maskArgs, newCtx, preflight, recordOutOfManifest, sessionKey, step, wouldBlock } from './ctx';
 import { detectInjection, notDeployed } from './detectors';
 import { evaluate } from './engine';
 import * as limits from './limits';
@@ -101,6 +101,7 @@ async function run(ctx: Ctx, headers: IncomingHttpHeaders, body: Record<string, 
     ? combineWithDetectorOutageAudit(r.decision as Outcome, ctx.detectors, cert.tier)
     : combine(r.decision as Outcome, ctx.detectors, cert.tier);
   ctx.decision = combined.outcome;
+  ctx.extra.decision_inputs = decisionInputs(cert.tier, r.decision, cert.detector_unavailability === 'audit' ? 'outage_audit' : 'strict', ctx.detectors, combined.outcome);
   ctx.rules.push(...r.rule_ids);
   ctx.reasons.push(...r.details, ...combined.reasons, ...r.obligations.map((o) => `obligation: ${o}`));
   if (combined.outcome === 'deny' && !wouldBlock(ctx, 9, r.rule_ids, r.details.join('; ') || 'denied by policy')) halt(ctx, 9, 403, 'policy_denied', r.details.join('; ') || 'denied by policy', 'deny', r.rule_ids);

@@ -114,7 +114,7 @@ export async function buildBundle(): Promise<string> {
     erased_agent_hashes: ((await db.prepare("SELECT DISTINCT jsonb_extract_path_text(data::jsonb, 'subject_hash') AS hash FROM ledger_record WHERE tenant_id = ? AND jsonb_extract_path_text(data::jsonb, 'event') = 'record.erased'").all(tenant.id)) as { hash: string }[]).map((row) => row.hash),
     catalogue: tenant.settings.catalogue,
     tools: (await listTools()),
-    detectors: (await db.prepare('SELECT id, version, mode FROM detector').all()) as unknown as DetectorConfig[],
+    detectors: (await db.prepare('SELECT id, version, mode, model_sha256 AS sha256 FROM detector').all()) as unknown as DetectorConfig[],
     rollouts: await rolloutSource(),
     hitl_wait_seconds: tenant.settings.hitl_wait_seconds,
     llm_credential: ((await db.prepare("SELECT id AS secret_id, version FROM secret WHERE tenant_id = ? AND kind = 'llm_provider' ORDER BY created_at LIMIT 1").get(tenant.id)) as { secret_id: string; version: number } | undefined) ?? null,

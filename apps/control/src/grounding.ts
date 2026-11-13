@@ -40,6 +40,9 @@ Values like [EMAIL_1] or <tok:...> are masked personal data; treat them as opaqu
 Score 1.0 if every factual claim in the answer is stated in or follows from the sources, 0.0 if the main claims are not supported or contradict them. Refusals and "I don't know" answers are grounded.
 Reply with JSON only: {"score": <0..1>, "unsupported": ["<claim>", ...], "rationale": "<one or two sentences>"}`;
 
+/** What DET-GROUND runs; its hash is the pin (DA 3). */
+export const GROUND_SPEC = { version: 'tenant-llm-judge-v1', system: SYSTEM, threshold: THRESHOLD, max_attempts: MAX_ATTEMPTS, rates: { T1: 0.05, T2: 0.02, T3: 0.01, T4: 0.01 } };
+
 export async function judge(p: { question: string; sources: string[]; answer: string }): Promise<(Judgement & { model: string }) | null> {
   if (judgeOverride) { const j = await judgeOverride(p); return j ? { ...j, model: 'override' } : null; }
   const user = `${p.sources.map((s, i) => `SOURCE ${i + 1}:\n${s}`).join('\n\n')}\n\nQUESTION:\n${p.question}\n\nANSWER:\n${p.answer}`;

@@ -1,4 +1,5 @@
-import type { DetectorResult, Tier } from '@signet/core';
+import { ANOM_THRESHOLDS, type DetectorResult, type Tier } from '@signet/core';
+import { pinCheck } from './pins';
 import * as state from './state';
 
 // DET-ANOM (DA 3): the control plane scores the agent against its own baseline on the same call that
@@ -25,10 +26,12 @@ export const anomalyEnabled = () => {
   return m === 'shadow' || m === 'active';
 };
 
-export function anomalyResult(live: LiveAnomaly | null | undefined): AnomalyResult | null {
+export function anomalyResult(live: LiveAnomaly | null | undefined, tier: Tier = 'T2'): AnomalyResult | null {
   const cfg = state.detectors.get('DET-ANOM');
   if (!cfg || cfg.mode === 'off') return null;
-  const base = { id: 'DET-ANOM', version: cfg.version };
+  const pin = pinCheck('DET-ANOM');
+  const base = { id: 'DET-ANOM', version: cfg.version, ...(pin.sha256 ? { sha256: pin.sha256 } : {}), thresholds: ANOM_THRESHOLDS[tier] };
+  if (!pin.ok) return { ...base, status: 'unavailable', reason: `pin mismatch: ${pin.reason}` };
   if (!live) return { ...base, status: 'unavailable', reason: 'control plane unreachable' };
   if (live.status !== 'ready') return { ...base, status: 'unavailable', reason: `baseline still learning (${live.baseline_days ?? 0} of 7 days, ${live.baseline_records ?? 0} of 100 records)` };
   return { ...base, status: cfg.mode === 'active' ? 'ok' : 'shadow', score: live.score, band: live.band, feature: live.feature, features: live.features, high_for_ms: live.high_for_ms };

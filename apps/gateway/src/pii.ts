@@ -1,4 +1,5 @@
-import type { DetectorResult, Finding } from '@signet/core';
+import { PII_ENTITIES, type DetectorResult, type Finding } from '@signet/core';
+import { pinCheck } from './pins';
 import * as state from './state';
 
 // DET-PII, personal data in free text (DA 3): Microsoft Presidio (MIT) finds names and addresses that
@@ -14,7 +15,7 @@ import * as state from './state';
 //                             mcr.microsoft.com/presidio-analyzer)
 //   SIGNET_PRESIDIO_MIN_SCORE default 0.6
 
-const ENTITIES: Record<string, Finding['tag']> = { PERSON: 'personal', LOCATION: 'personal' };
+const ENTITIES: Record<string, Finding['tag']> = PII_ENTITIES; // shared with the control plane, which pins its hash
 const CAP_MS = Number(process.env.SIGNET_PRESIDIO_CAP_MS ?? 1500);
 const MAX_CHARS = 20_000;
 
@@ -39,10 +40,12 @@ export async function analyze(url: string, text: string, signal?: AbortSignal): 
 /** Score every text segment of the prompt. Returns the detector result and findings per segment. */
 export async function detectPii(texts: string[]): Promise<{ result: DetectorResult & { reason?: string; found?: number }; findings: Map<string, Finding[]> }> {
   const cfg = state.detectors.get('DET-PII');
-  const base = { id: 'DET-PII', version: cfg?.version ?? 'not-deployed' };
+  const pin = pinCheck('DET-PII');
+  const base = { id: 'DET-PII', version: cfg?.version ?? 'not-deployed', ...(pin.sha256 ? { sha256: pin.sha256 } : {}) };
   const findings = new Map<string, Finding[]>();
   const url = presidioUrl();
   if (!cfg || cfg.mode === 'off' || !url) return { result: { ...base, status: 'unavailable', reason: !url ? 'SIGNET_PRESIDIO_URL not set' : 'off' }, findings };
+  if (!pin.ok) return { result: { ...base, status: 'unavailable', reason: `pin mismatch: ${pin.reason}` }, findings };
   const unique = [...new Set(texts.filter((t) => /\p{L}{2,}/u.test(t)))];
   if (unique.reduce((n, t) => n + t.length, 0) > MAX_CHARS) return { result: { ...base, status: 'unavailable', reason: `prompt over ${MAX_CHARS} characters` }, findings };
   try {

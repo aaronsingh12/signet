@@ -37,3 +37,20 @@ test('DET-GROUND sampling: reproducible by request ID, about the tier rate, and 
   assert.equal(groundingInput([{ role: 'user', content: 'hi' }], 'hello'), null, 'no sources: nothing to judge');
   assert.deepEqual(groundingInput([{ role: 'system', content: 'Refund policy: 30 days from delivery.' }, { role: 'user', content: 'Refund window?' }], '30 days')!.sources, ['Refund policy: 30 days from delivery.']);
 });
+
+test('pins: a detector whose running hash differs from the bundle pin reports unavailable', async () => {
+  const { knownPin, ANOM_VERSION } = await import('@signet/core');
+  const { pinCheck } = await import('../src/pins');
+  state.detectors.set('DET-ANOM', { id: 'DET-ANOM', version: ANOM_VERSION, mode: 'active', sha256: knownPin('DET-ANOM', ANOM_VERSION) });
+  assert.equal(pinCheck('DET-ANOM').ok, true);
+  const ok = anomalyResult(live, 'T1')!;
+  assert.equal(ok.status, 'ok');
+  assert.equal(ok.sha256, knownPin('DET-ANOM', ANOM_VERSION));
+  assert.deepEqual(ok.thresholds, [0.5, 0.7]);
+  state.detectors.set('DET-ANOM', { id: 'DET-ANOM', version: ANOM_VERSION, mode: 'active', sha256: 'a'.repeat(64) });
+  const bad = anomalyResult(live)!;
+  assert.equal(bad.status, 'unavailable');
+  assert.match(bad.reason!, /does not match the pinned/);
+  state.detectors.set('DET-INJ', { id: 'DET-INJ', version: 'x', mode: 'active', sha256: 'b'.repeat(64) });
+  assert.match(pinCheck('DET-INJ').reason!, /cannot hash/, 'no model loaded on this node: cannot prove the pin');
+});

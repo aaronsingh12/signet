@@ -171,6 +171,7 @@ export interface DetectorConfig {
   id: string;
   version: string;
   mode: DetectorMode;
+  sha256?: string | null; // pinned hash of the version (DA 3); the gateway checks what it runs against it
 }
 
 // Signed policy bundle the control plane pushes to every gateway node.

@@ -2,7 +2,8 @@ import express, { type Request, type Response } from 'express';
 import { destinationPolicyFromEnv, httpToolRequest, request, verifyJws, type ToolAlias } from '@signet/core';
 import { handleChat } from './chat';
 import { type Done, Halt, hitlDecided, newCtx, preflight } from './ctx';
-import { modelInfo, startRuntime } from './detectors';
+import { isolation, modelInfo, startRuntime } from './detectors';
+import { runningHashes } from './pins';
 import { engineName, initEngine } from './engine';
 import { llmStatus, probe, type ChatResponse } from './provider';
 import * as state from './state';
@@ -255,6 +256,7 @@ app.get('/healthz', (_req, res) =>
 
 state.setHitlListener(hitlDecided);
 state.setHeartbeatExtra(llmStatus);
+state.setDetectorReport(() => ({ hashes: runningHashes(), runtime: modelInfo, isolation: isolation() }));
 await initEngine();
 startRuntime();
 state

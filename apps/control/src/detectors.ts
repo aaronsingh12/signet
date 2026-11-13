@@ -1,4 +1,5 @@
-import { DEV_OVERRIDE_DISABLED, devOverridesAllowed, type DetectorMode } from '@signet/core';
+import { DEV_OVERRIDE_DISABLED, devOverridesAllowed, knownPin, specHash, type DetectorMode } from '@signet/core';
+import { GROUND_SPEC } from './grounding';
 import { db, nowIso, tx } from './db';
 import { PolicyError, forbidden, invalid, notFound } from './errors';
 import * as hub from './hub';
@@ -32,6 +33,25 @@ for (const d of SEED) {
   (await db.prepare('INSERT INTO detector (id, version, mode, notes) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING').run(d.id, d.version, mode, d.notes));
   if (!known && mode === 'active') (await ledger.append({ kind: 'admin', data: { event: 'detector.registered', detector: d.id, version: d.version, mode, grandfathered: true, reason: 'was enforcing before it was registered; kept active so protection does not drop', actor: 'system' } }));
   (await db.prepare("UPDATE detector SET shadow_since = COALESCE(shadow_since, ?) WHERE id = ? AND mode = 'shadow'").run(nowIso(), d.id));
+}
+
+// Pin every detector version Signet knows from code (DA 3): model weights for DET-INJ, the specification
+// hash for the others. A pin is set once per version; a different hash for the same version is refused
+// by the gateway (the detector reports unavailable) until a person pins a new release.
+const pinFor = (id: string, version: string) => knownPin(id, version) ?? (id === 'DET-GROUND' && version === GROUND_SPEC.version ? specHash(GROUND_SPEC) : null);
+for (const d of (await db.prepare('SELECT id, version, model_sha256 FROM detector').all()) as { id: string; version: string; model_sha256: string | null }[]) {
+  const pin = pinFor(d.id, d.version);
+  if (!pin) continue;
+  if (!d.model_sha256) {
+    (await db.prepare('UPDATE detector SET model_sha256 = ? WHERE id = ? AND model_sha256 IS NULL').run(pin, d.id));
+    (await ledger.append({ kind: 'admin', data: { event: 'detector.pinned', detector: d.id, version: d.version, sha256: pin, actor: 'system' } }));
+  }
+  (await db.prepare('INSERT INTO detector_pin (detector_id, version, sha256, pinned_by, pinned_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING').run(d.id, d.version, d.model_sha256 ?? pin, 'system', nowIso()));
+}
+
+/** Hashes each detector has ever been pinned to (Replay checks recorded hashes against these). */
+export async function pinsOf(id: string): Promise<Set<string>> {
+  return new Set(((await db.prepare('SELECT sha256 FROM detector_pin WHERE detector_id = ?').all(id)) as { sha256: string }[]).map((r) => r.sha256));
 }
 
 export const list = async () => (await db.prepare('SELECT * FROM detector ORDER BY id').all());

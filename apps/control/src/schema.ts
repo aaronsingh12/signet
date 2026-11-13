@@ -347,10 +347,17 @@ CREATE TABLE IF NOT EXISTS ground_eval (
 );
 CREATE INDEX IF NOT EXISTS ground_eval_agent ON ground_eval(agent_id, created_at);
 CREATE INDEX IF NOT EXISTS ground_eval_status ON ground_eval(status, created_at);
+-- Detector pins (DA 3 "pinned and hashed"): every hash a detector version has been pinned to, so Replay
+-- can check the hash recorded on a past decision was a released one.
+CREATE TABLE IF NOT EXISTS detector_pin (detector_id TEXT NOT NULL, version TEXT NOT NULL, sha256 TEXT NOT NULL, pinned_by TEXT NOT NULL, pinned_at TEXT NOT NULL, PRIMARY KEY (detector_id, sha256));
+-- Replay samples (DA 6 mechanism 3, SGC-SELF-007): a random daily sample of decisions re-run from the ledger.
+CREATE TABLE IF NOT EXISTS replay_run (id TEXT PRIMARY KEY, sampled INTEGER NOT NULL, reproduced INTEGER NOT NULL, mismatched INTEGER NOT NULL, details TEXT NOT NULL, actor TEXT NOT NULL, created_at TEXT NOT NULL);
 -- SAML request IDs: each response must answer a request Signet sent, and only once.
 CREATE TABLE IF NOT EXISTS saml_request (id TEXT PRIMARY KEY, value TEXT NOT NULL, expires_ms BIGINT NOT NULL);
 -- When the owner was deactivated (BP 6 Stage 7); cleared when a new owner is named.
 ALTER TABLE agent ADD COLUMN IF NOT EXISTS owner_left_at TEXT;
+-- What each gateway node's detectors run: hashes and isolation settings (DA 6, SGC-SELF-001 / 008).
+ALTER TABLE gateway_node ADD COLUMN IF NOT EXISTS detectors TEXT;
 
 
 -- One lifecycle per agent version being onboarded (BP 6). data holds intake, manifest draft and deploy plan.

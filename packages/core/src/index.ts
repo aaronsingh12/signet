@@ -19,3 +19,4 @@ export * from './policyeval';
 export * from './types';
 export * from './sigv4';
 export * from './anomaly';
+export * from './detector-specs';

@@ -5,6 +5,7 @@ import { db, nowIso } from './db';
 import * as detectors from './detectors';
 import * as anomaly from './anomaly';
 import * as grounding from './grounding';
+import * as replay from './replay';
 import * as discovery from './discovery';
 import * as enforcement from './enforcement';
 import { PolicyError, invalid } from './errors';
@@ -545,6 +546,10 @@ api.post('/discovery/logs', requires('discovery.write'), express.json({ limit: '
 api.post('/discovered-assets/:id/resolve', requires('discovery.write'), route(async (req, res) => (await discovery.resolve(req.params.id!, req.body?.status, String(req.body?.note ?? ''), principalOf(res)))));
 
 // Detectors
+// Replay (DA 6 mechanism 3): re-run a recorded decision; the daily sample is SGC-SELF-007 evidence.
+api.post('/replay', requires('ledger.read'), route(async (req, res) => (await replay.replay(String(req.body?.record_id ?? ''), principalOf(res).id))));
+api.get('/replay/runs', requires('ledger.read'), route(async () => ({ items: await replay.runs() })));
+api.post('/replay/sample', requires('detectors.manage'), route(async (req, res) => (await replay.sample(Math.min(500, Math.max(1, Number(req.body?.size) || 100)), principalOf(res).id))));
 api.get('/detectors', requires('agents.read'), route(async () => ({ items: (await detectors.list()) })));
 api.post('/detectors/:id/mode', requires('detectors.manage'), route(async (req, res) => (await detectors.setMode(req.params.id!, req.body?.mode, principalOf(res), { reason: String(req.body?.reason ?? ''), dev_override: req.body?.dev_override === true }))));
 
@@ -645,8 +650,8 @@ int.post('/limits/tool-call', route(async (req) => ({ calls: await counters.coun
 int.post('/limits/tool-calls/read', route(async (req) => ({ calls: await counters.toolCallsIn(String(req.body?.session)) })));
 int.get('/secrets/:id', route(async (req) => (await secrets.revealForGateway(req.params.id!))));
 int.post('/heartbeat', route(async (req) => {
-  (await db.prepare('INSERT INTO gateway_node (id, url, last_seen, bundle_version, llm_status) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET url = excluded.url, last_seen = excluded.last_seen, bundle_version = excluded.bundle_version, llm_status = excluded.llm_status').run(
-    String(req.body?.node_id), String(req.body?.url ?? ''), nowIso(), Number(req.body?.bundle_version) || null, req.body?.llm_status ? JSON.stringify(req.body.llm_status) : null,
+  (await db.prepare('INSERT INTO gateway_node (id, url, last_seen, bundle_version, llm_status, detectors) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET url = excluded.url, last_seen = excluded.last_seen, bundle_version = excluded.bundle_version, llm_status = excluded.llm_status, detectors = excluded.detectors').run(
+    String(req.body?.node_id), String(req.body?.url ?? ''), nowIso(), Number(req.body?.bundle_version) || null, req.body?.llm_status ? JSON.stringify(req.body.llm_status) : null, req.body?.detectors ? JSON.stringify(req.body.detectors) : null,
   ));
   return { ok: true };
 }));
@@ -674,6 +679,7 @@ int.post('/maintenance/connectors', route(async () => { await servicenow.work();
 int.post('/maintenance/connections', route(async () => { await externalConnections.work(); return { ok: true }; }));
 int.post('/maintenance/edge', route(async () => { await edge.sweep(); return { ok: true }; }));
 int.post('/maintenance/platform-usage', route(async () => { await platforms.sweepUsage(); return { ok: true }; }));
+int.post('/maintenance/replay', route(async () => (await replay.sample())));
 int.post('/maintenance/grounding', route(async () => (await grounding.work())));
 int.post('/maintenance/baselines', route(async () => (await anomaly.nightly())));
 int.post('/maintenance/aibom', route(async () => (await aibom.nightly(SYSTEM_PRINCIPAL))));
@@ -712,6 +718,7 @@ every(24 * 3_600_000, 'AIBOM vulnerability rescan', async () => (await aibom.nig
 // DET-ANOM baselines from the last 14 days of the ledger (DA 3).
 every(24 * 3_600_000, 'behaviour baselines', async () => (await anomaly.nightly()));
 every(60_000, 'groundedness judging', async () => (await grounding.work()));
+every(24 * 3_600_000, 'daily replay sample', async () => (await replay.sample()));
 every(10 * 60_000, 'ownerless agents', quarantineOwnerless)();
 every(10 * 60_000, 'control evaluation', async () => (await controls.evaluate()))();
 every(3_000, 'connector worker', async () => (await servicenow.work()));
