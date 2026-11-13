@@ -17,6 +17,8 @@ const ops: Record<string, Record<string, Op>> = {
     put: { summary: 'Edit config or rotate credential; destination changes require credential resubmission', permission: 'connectors.manage', body: 'ExternalConnectionInput' },
   },
   '/library/frameworks/{id}/enabled': { post: { summary: 'Switch a compliance framework on or off for this tenant; requires enabled boolean and a reason (ledgered)', permission: 'library.edit' } },
+  '/evidence/storage': { get: { summary: 'Evidence anchors: S3 Object Lock copy and RFC 3161 timestamps (configured, bucket check, days anchored)', permission: 'ledger.read' } },
+  '/evidence/anchor': { post: { summary: 'Copy pending daily roots to S3 Object Lock and timestamp them now (also runs every 10 minutes)', permission: 'ledger.verify' } },
   '/library/import/sheet': { post: { summary: 'Import framework requirements from spreadsheet rows (external_id, title, description); fills a licence-needed framework when licence_confirmation is given', permission: 'library.edit' } },
   '/library/suggestions': { get: { summary: 'Suggested Signet Controls for a requirement (requirement_id query); hints only, never applied', permission: 'compliance.read' } },
   '/library/mappings': { post: { summary: 'Propose a link from a requirement to a Signet Control; counts once a second person confirms it', permission: 'library.edit' } },

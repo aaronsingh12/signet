@@ -12,7 +12,7 @@ in this order:
 | Line | `type` | Content |
 | --- | --- | --- |
 | 1 | `manifest` | `format`, `tenant`, `tenant_name`, `created_at`, `created_by`, `range` (`from_day`, `to_day`, `from_seq`, `to_seq`), `record_count`, `start_prev_hash` (the `prev_hash` of the first record), `keys.ledger` and `keys.ca` (public JWKs), `payloads_included` |
-| 2..n | `root` | `day`, `jws`: a signed daily root (below) for each finished UTC day in range |
+| 2..n | `root` | `day`, `jws`: a signed daily root (below) for each finished UTC day in range; optional `timestamp` (below) |
 | n+1.. | `record` | `record`: one ledger record, in sequence order |
 | last | `end` | `sha256` of every preceding line (each including its trailing `\n`), and `signature`: a JWS (`typ: signet-sep`) by the ledger key over `{format, sha256, record_count, roots}` |
 
@@ -38,6 +38,25 @@ node = SHA-256(0x01 ‖ left ‖ right)) over that day's record hashes in sequen
 ```
 
 `chain_head` ties the root to the hash chain, so a root cannot be moved to a different history.
+
+## Outside timestamps (RFC 3161)
+
+When the tenant sets `SIGNET_TSA_URL`, each signed root is timestamped by that Time-Stamp Authority and the
+root line carries `timestamp: { token, time, tsa_url, digest }`. `token` is the TSA's full TimeStampResp
+(base64) over `digest` = SHA-256 of the root JWS text. It proves the root existed at `time`, even against
+an operator who controls Signet and its keys. Check it with OpenSSL and the TSA's certificate chain:
+
+```
+echo <token> | base64 -d > day.tsr
+openssl ts -verify -digest <digest> -in day.tsr -CAfile tsa-ca.pem -untrusted tsa.crt
+```
+
+## Write-once copies (S3 Object Lock)
+
+When `SIGNET_EVIDENCE_S3_*` is set, each day's root (`<tenant>/roots/<day>.jws`) and records
+(`<tenant>/segments/<day>.jsonl`) are also stored in an S3 bucket with Object Lock, in COMPLIANCE mode by
+default, for `SIGNET_EVIDENCE_RETENTION_DAYS` (default 2555, seven years). Nobody can change or delete
+them before that date, including the bucket owner. The ledger records each copy (`evidence.worm_stored`).
 Roots and the day's records are also written once to write-once storage (S3 Object Lock in production).
 
 ## Verification (what `signet-verify` checks)

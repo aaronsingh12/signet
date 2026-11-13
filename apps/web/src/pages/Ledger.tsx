@@ -24,6 +24,7 @@ export function Ledger() {
   const q = new URLSearchParams({ kind, limit: '50', ...(agent ? { agent } : {}), ...(cursor ? { cursor } : {}) });
   const { data } = useApi<any>(`/ledger/records?${q}`, [kind, cursor, agent]);
   const { data: roots } = useApi<any>('/ledger/roots');
+  const { data: storage } = useApi<any>('/evidence/storage');
   const [sel, setSel] = useState<any>(null);
   const [proof, setProof] = useState<any>(null);
   const [verify, setVerify] = useState<any>(null);
@@ -127,7 +128,7 @@ export function Ledger() {
                     <tr key={r.day}>
                       <td className="td mono">{r.day}</td>
                       <td className="td mono">{hash(r.merkle_root)}</td>
-                      <td className="td text-xs">{r.count} recs · signed{r.worm ? ' · WORM' : ''}</td>
+                      <td className="td text-xs" title={r.timestamp ? `Timestamped ${r.timestamp.time} by ${r.timestamp.tsa_url}` : ''}>{r.count} recs · signed{r.worm ? ' · local copy' : ''}{r.s3 ? ' · S3 locked' : ''}{r.timestamp ? ' · timestamped' : ''}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -136,6 +137,12 @@ export function Ledger() {
               <Empty>No finished day yet. Roots are signed shortly after 00:00 UTC.</Empty>
             )}
             {roots?.ledger_key && <div className="border-t border-line px-4 py-2 text-xs text-ink-3">Ledger key <Mono>{roots.ledger_key.kid}</Mono> · Ed25519</div>}
+            {storage && (
+              <div className="border-t border-line px-4 py-2 text-xs text-ink-3">
+                <div>Write-once copy: {storage.s3.configured ? `S3 ${storage.s3.bucket} · ${storage.s3.detail} · ${storage.s3.stored} of ${storage.roots} days stored` : `not set up (${storage.local_copy} only)${storage.s3.error ? ` · ${storage.s3.error}` : ''}`}</div>
+                <div>Outside timestamps: {storage.tsa.configured ? `${storage.tsa.url} · ${storage.tsa.timestamped} of ${storage.roots} days` : 'not set up (SIGNET_TSA_URL)'}</div>
+              </div>
+            )}
           </Card>
         </div>
       </div>

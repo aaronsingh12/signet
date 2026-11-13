@@ -308,6 +308,19 @@ CREATE OR REPLACE TRIGGER evidence_no_root_update BEFORE UPDATE ON evidence_obje
 CREATE OR REPLACE TRIGGER evidence_no_delete BEFORE DELETE ON evidence_object FOR EACH ROW EXECUTE FUNCTION signet_append_only();
 CREATE OR REPLACE TRIGGER evidence_no_truncate BEFORE TRUNCATE ON evidence_object FOR EACH STATEMENT EXECUTE FUNCTION signet_append_only();
 
+-- Outside anchors for each signed daily root (BP 8.3): the S3 Object Lock copy (kind 's3') and the RFC 3161
+-- timestamp token (kind 'tsa'). Written once, never changed.
+CREATE TABLE IF NOT EXISTS evidence_anchor (
+  day TEXT NOT NULL REFERENCES daily_root(day),
+  kind TEXT NOT NULL,
+  ref TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (day, kind)
+);
+CREATE OR REPLACE TRIGGER anchor_no_update BEFORE UPDATE ON evidence_anchor FOR EACH ROW EXECUTE FUNCTION signet_append_only();
+CREATE OR REPLACE TRIGGER anchor_no_delete BEFORE DELETE ON evidence_anchor FOR EACH ROW EXECUTE FUNCTION signet_append_only();
+CREATE OR REPLACE TRIGGER anchor_no_truncate BEFORE TRUNCATE ON evidence_anchor FOR EACH STATEMENT EXECUTE FUNCTION signet_append_only();
+
 
 -- One lifecycle per agent version being onboarded (BP 6). data holds intake, manifest draft and deploy plan.
 CREATE TABLE IF NOT EXISTS lifecycle (

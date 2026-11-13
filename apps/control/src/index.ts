@@ -517,6 +517,8 @@ api.post('/ledger/verify', requires('ledger.verify'), route(async (req) => {
   return { ...r, roots_checked: roots.length, roots_valid: roots.every((x) => x.signature_valid), ms: Math.round(performance.now() - t0) };
 }));
 api.get('/ledger/roots', requires('ledger.read'), route(async () => ({ items: (await evidence.roots(60)), ledger_key: toJwk(keys.ledger) })));
+api.get('/evidence/storage', requires('ledger.read'), route(async () => (await evidence.storageStatus())));
+api.post('/evidence/anchor', requires('ledger.verify'), route(async () => (await evidence.anchorPending())));
 api.post('/ledger/roots/seal', requires('ledger.verify'), route(async (req) => (req.body?.day ? { sealed: [(await evidence.sealDay(String(req.body.day)))] } : { sealed: (await evidence.sealFinishedDays()) })));
 api.get('/ledger/export', requires('evidence.export'), async (req, res) => {
   const p = principalOf(res);
@@ -589,7 +591,7 @@ int.post('/maintenance/connections', route(async () => { await externalConnectio
 int.post('/maintenance/edge', route(async () => { await edge.sweep(); return { ok: true }; }));
 int.post('/maintenance/platform-usage', route(async () => { await platforms.sweepUsage(); return { ok: true }; }));
 int.post('/maintenance/counters', route(async () => { await counters.sweep(); return { ok: true }; }));
-int.post('/maintenance/roots', route(async () => ({ sealed: await evidence.sealFinishedDays() })));
+int.post('/maintenance/roots', route(async () => ({ sealed: await evidence.sealFinishedDays(), anchored: await evidence.anchorPending() })));
 app.use('/internal', int);
 
 app.use(problemHandler);
@@ -627,6 +629,9 @@ const sealRoots = async () => {
   try {
     const sealed = (await evidence.sealFinishedDays());
     if (sealed.length) console.log(`[control] daily roots signed for ${sealed.join(', ')}`);
+    const anchored = await evidence.anchorPending();
+    if (anchored.stored.length || anchored.timestamped.length) console.log(`[control] evidence anchored: S3 ${anchored.stored.join(', ') || '-'}; timestamps ${anchored.timestamped.join(', ') || '-'}`);
+    for (const e of anchored.errors) console.error(`[control] evidence anchor: ${e}`);
   } catch (e) {
     console.error('[control] daily root sealing failed', e);
   }

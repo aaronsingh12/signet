@@ -5,6 +5,8 @@ import { createGzip } from 'node:zlib';
 import type { Writable } from 'node:stream';
 import { DATA_DIR, canonicalize, inclusionProof, merkleRoot, signJws, toJwk, verifyJws } from '@signet/core';
 import { db, nowIso, tx } from './db';
+import { checkBucket, putOnce, s3Config } from './evidence-store';
+import { timestamp, tsaUrl } from './tsa';
 import { notFound } from './errors';
 import { keys } from './keys';
 import * as ledger from './ledger';
@@ -87,16 +89,89 @@ async function sealDayRecords(day: string) {
   const jws = signJws(payload, keys.ledger, 'signet-root');
   (await db.prepare('INSERT INTO daily_root (day, first_seq, last_seq, count, merkle_root, jws, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(day, payload.first_seq, payload.last_seq, payload.count, payload.merkle_root, jws, nowIso()));
   await writeOnce(`roots/${day}.jws`, jws);
-  await writeOnce(`segments/${day}.jsonl`, [...(await ledger.range(payload.first_seq, payload.last_seq))].map((r) => JSON.stringify(r)).join('\n') + '\n');
+  await writeOnce(`segments/${day}.jsonl`, (await segmentOf(payload.first_seq, payload.last_seq)));
   (await ledger.append({ kind: 'admin', data: { event: 'ledger.daily_root', day, count: payload.count, merkle_root: payload.merkle_root, key: keys.ledger.kid } }));
   return payload;
 }
 
+const segmentOf = async (first: number, last: number) => [...(await ledger.range(first, last))].map((r) => JSON.stringify(r)).join('\n') + '\n';
+
+// Outside anchors (BP 8.3). After a day is sealed, its signed root and records are copied to S3 with
+// Object Lock and the root is timestamped by an RFC 3161 authority, when those are configured. This runs
+// after sealing (and catches up older days), so an outage of S3 or the TSA never blocks the ledger; the
+// day simply stays "not anchored yet" and is retried on the next run.
+export async function anchorPending(limit = 30): Promise<{ stored: string[]; timestamped: string[]; errors: string[] }> {
+  const out = { stored: [] as string[], timestamped: [] as string[], errors: [] as string[] };
+  const cfg = s3Config();
+  const tsa = tsaUrl();
+  if (!cfg && !tsa) return out;
+  const rows = (await db.prepare(
+    `SELECT r.day, r.first_seq, r.last_seq, r.jws,
+       EXISTS (SELECT 1 FROM evidence_anchor a WHERE a.day = r.day AND a.kind = 's3') AS has_s3,
+       EXISTS (SELECT 1 FROM evidence_anchor a WHERE a.day = r.day AND a.kind = 'tsa') AS has_tsa
+     FROM daily_root r ORDER BY r.day`,
+  ).all()) as { day: string; first_seq: number; last_seq: number; jws: string; has_s3: boolean; has_tsa: boolean }[];
+  for (const r of rows.filter((x) => (cfg && !x.has_s3) || (tsa && !x.has_tsa)).slice(0, limit)) {
+    if (cfg && !r.has_s3) {
+      try {
+        const root = await putOnce(cfg, `${tenant.id}/roots/${r.day}.jws`, r.jws);
+        const segment = await putOnce(cfg, `${tenant.id}/segments/${r.day}.jsonl`, await segmentOf(Number(r.first_seq), Number(r.last_seq)));
+        await tx(async () => {
+          await db.prepare("INSERT INTO evidence_anchor (day, kind, ref, created_at) VALUES (?, 's3', ?, ?) ON CONFLICT DO NOTHING").run(r.day, JSON.stringify({ root, segment }), nowIso());
+          await ledger.append({ kind: 'admin', data: { event: 'evidence.worm_stored', day: r.day, root: root.url, segment: segment.url, mode: root.mode, retain_until: root.retain_until } });
+        });
+        out.stored.push(r.day);
+      } catch (e) {
+        out.errors.push(`${r.day} S3: ${(e as Error).message}`);
+      }
+    }
+    if (tsa && !r.has_tsa) {
+      try {
+        const t = await timestamp(tsa, r.jws);
+        await tx(async () => {
+          await db.prepare("INSERT INTO evidence_anchor (day, kind, ref, created_at) VALUES (?, 'tsa', ?, ?) ON CONFLICT DO NOTHING").run(r.day, JSON.stringify(t), nowIso());
+          await ledger.append({ kind: 'admin', data: { event: 'evidence.timestamped', day: r.day, tsa: t.tsa_url, time: t.time, digest: t.digest } });
+        });
+        out.timestamped.push(r.day);
+      } catch (e) {
+        out.errors.push(`${r.day} timestamp: ${(e as Error).message}`);
+      }
+    }
+  }
+  return out;
+}
+
+/** What the evidence anchors are set up to do, and how far behind they are. */
+export async function storageStatus() {
+  const cfg = (() => { try { return { cfg: s3Config(), error: null }; } catch (e) { return { cfg: null, error: (e as Error).message }; } })();
+  const counts = (await db.prepare(
+    `SELECT COUNT(*) AS roots,
+       SUM(CASE WHEN EXISTS (SELECT 1 FROM evidence_anchor a WHERE a.day = r.day AND a.kind = 's3') THEN 1 ELSE 0 END) AS s3,
+       SUM(CASE WHEN EXISTS (SELECT 1 FROM evidence_anchor a WHERE a.day = r.day AND a.kind = 'tsa') THEN 1 ELSE 0 END) AS tsa
+     FROM daily_root r`,
+  ).get()) as { roots: number; s3: number | null; tsa: number | null };
+  return {
+    roots: Number(counts.roots),
+    s3: cfg.cfg ? { configured: true, bucket: cfg.cfg.bucket, endpoint: cfg.cfg.endpoint, mode: cfg.cfg.mode, retention_days: cfg.cfg.retentionDays, stored: Number(counts.s3 ?? 0), ...(await checkBucket(cfg.cfg)) } : { configured: false, error: cfg.error, stored: Number(counts.s3 ?? 0) },
+    tsa: { configured: !!tsaUrl(), url: tsaUrl(), timestamped: Number(counts.tsa ?? 0) },
+    local_copy: process.env.VERCEL ? 'database (append-only table)' : 'read-only files on this server',
+  };
+}
+
 export async function roots(limit = 30) {
+  const anchors = new Map<string, { s3?: unknown; tsa?: { time: string; tsa_url: string } }>();
+  for (const a of (await db.prepare('SELECT day, kind, ref FROM evidence_anchor').all()) as { day: string; kind: string; ref: string }[]) {
+    anchors.set(a.day, { ...anchors.get(a.day), [a.kind]: JSON.parse(a.ref) });
+  }
+  const withAnchors = <T extends { day: string }>(r: T) => { const a = anchors.get(r.day); return { ...r, s3: a?.s3 ?? null, timestamp: a?.tsa ? { time: a.tsa.time, tsa_url: a.tsa.tsa_url } : null }; };
+  return (await rootsLocal(limit)).map(withAnchors);
+}
+
+async function rootsLocal(limit: number) {
   if (process.env.VERCEL) return await db.prepare("SELECT day, first_seq, last_seq, count, merkle_root, jws, created_at, EXISTS (SELECT 1 FROM evidence_object WHERE tenant_id = ? AND path = 'roots/' || daily_root.day || '.jws') AS worm FROM daily_root ORDER BY day DESC LIMIT ?").all(tenant.id, limit) as { day: string; jws: string; worm: boolean }[];
-  return ((await db.prepare('SELECT day, first_seq, last_seq, count, merkle_root, jws, created_at FROM daily_root ORDER BY day DESC LIMIT ?').all(limit)) as { jws: string }[]).map((r) => ({
+  return ((await db.prepare('SELECT day, first_seq, last_seq, count, merkle_root, jws, created_at FROM daily_root ORDER BY day DESC LIMIT ?').all(limit)) as { day: string; jws: string }[]).map((r) => ({
     ...r,
-    worm: existsSync(join(WORM_DIR, `roots/${(r as unknown as { day: string }).day}.jws`)),
+    worm: existsSync(join(WORM_DIR, `roots/${r.day}.jws`)),
   }));
 }
 
@@ -129,7 +204,7 @@ export async function writePackage(out: Writable, opts: { fromDay?: string; toDa
   const from = opts.fromDay ?? '0000-00-00';
   const to = opts.toDay ?? '9999-99-99';
   const span = (await db.prepare('SELECT MIN(seq) AS a, MAX(seq) AS b, COUNT(*) AS n FROM ledger_record WHERE substr(ts, 1, 10) BETWEEN ? AND ?').get(from, to)) as { a: number | null; b: number | null; n: number };
-  const rootRows = (await db.prepare('SELECT day, jws FROM daily_root WHERE day BETWEEN ? AND ? ORDER BY day').all(from, to)) as { day: string; jws: string }[];
+  const rootRows = (await db.prepare("SELECT r.day, r.jws, (SELECT a.ref FROM evidence_anchor a WHERE a.day = r.day AND a.kind = 'tsa') AS tsa FROM daily_root r WHERE r.day BETWEEN ? AND ? ORDER BY r.day").all(from, to)) as { day: string; jws: string; tsa: string | null }[];
   const gz = createGzip();
   gz.pipe(out);
   const hash = createHash('sha256');
@@ -151,7 +226,8 @@ export async function writePackage(out: Writable, opts: { fromDay?: string; toDa
     keys: { ledger: toJwk(keys.ledger), ca: toJwk(keys.ca) },
     payloads_included: false,
   });
-  for (const r of rootRows) line({ type: 'root', day: r.day, jws: r.jws });
+  // A root's RFC 3161 token (base64 TimeStampResp) travels with it, for `openssl ts -verify` offline.
+  for (const r of rootRows) line({ type: 'root', day: r.day, jws: r.jws, ...(r.tsa ? { timestamp: JSON.parse(r.tsa) } : {}) });
   if (span.a && span.b) for (const r of (await ledger.range(span.a, span.b))) line({ type: 'record', record: r });
   const digest = hash.digest('hex');
   const sig = signJws({ format: 'signet-evidence-package/1', sha256: digest, record_count: span.n, roots: rootRows.length }, keys.ledger, 'signet-sep');
