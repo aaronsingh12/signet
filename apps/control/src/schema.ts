@@ -330,6 +330,8 @@ CREATE TABLE IF NOT EXISTS scim_user (
 CREATE INDEX IF NOT EXISTS scim_user_name ON scim_user(user_name);
 CREATE TABLE IF NOT EXISTS scim_group (id TEXT PRIMARY KEY, external_id TEXT, display_name TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS scim_group_member (group_id TEXT NOT NULL REFERENCES scim_group(id), user_id TEXT NOT NULL REFERENCES scim_user(id), PRIMARY KEY (group_id, user_id));
+-- SAML request IDs: each response must answer a request Signet sent, and only once.
+CREATE TABLE IF NOT EXISTS saml_request (id TEXT PRIMARY KEY, value TEXT NOT NULL, expires_ms BIGINT NOT NULL);
 -- When the owner was deactivated (BP 6 Stage 7); cleared when a new owner is named.
 ALTER TABLE agent ADD COLUMN IF NOT EXISTS owner_left_at TEXT;
 

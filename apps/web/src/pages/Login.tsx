@@ -7,15 +7,15 @@ export function Login() {
   const params = new URLSearchParams(location.search);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [config, setConfig] = useState<{ auth_mode: 'local' | 'oidc'; tenant_name: string } | null>(null);
+  const [config, setConfig] = useState<{ auth_mode: 'local' | 'oidc' | 'saml'; tenant_name: string } | null>(null);
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
   useEffect(() => {
     fetch('/api/v1/auth/config').then(async (response) => {
       if (!response.ok) throw new Error(`Authentication configuration request failed (HTTP ${response.status})`);
       const data = await response.json() as { auth_mode: string; tenant_name: string };
-      if ((data.auth_mode !== 'local' && data.auth_mode !== 'oidc') || typeof data.tenant_name !== 'string') throw new Error('Invalid authentication configuration response');
-      setConfig({ auth_mode: data.auth_mode, tenant_name: data.tenant_name });
+      if (!['local', 'oidc', 'saml'].includes(data.auth_mode) || typeof data.tenant_name !== 'string') throw new Error('Invalid authentication configuration response');
+      setConfig({ auth_mode: data.auth_mode as 'local' | 'oidc' | 'saml', tenant_name: data.tenant_name });
     }).catch((failure: Error) => setError(failure.message));
   }, []);
   const go = async () => {

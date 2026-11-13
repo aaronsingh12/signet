@@ -28,6 +28,7 @@ const LOCAL_ISSUER = 'signet-local-dev';
 const LOCAL_TOKEN_TTL_SECONDS = 600;
 
 const localAuthEnabled = () => OIDC.authMode === 'local';
+export const samlAuthEnabled = () => OIDC.authMode === 'saml';
 
 const SESSION_COOKIE = 'signet_session';
 const IDLE_MS = 30 * 60_000; // BP 18.5: 30 min idle
@@ -126,7 +127,7 @@ async function verifyIdpToken(token: string): Promise<IdClaims> {
   return claims;
 }
 
-function principalFromClaims(c: IdClaims, auth: Principal['auth']): Principal {
+export function principalFromClaims(c: IdClaims, auth: Principal['auth']): Principal {
   const isService = (c.preferred_username ?? '').startsWith('service-account-');
   const groups = c.groups ?? [];
   const roles = rolesFor(groups, tenant.settings.group_roles);
@@ -148,6 +149,7 @@ function principalFromClaims(c: IdClaims, auth: Principal['auth']): Principal {
 const pending = new Map<string, { verifier: string; nonce: string; returnTo: string; at: number }>();
 
 export async function login(req: Request, res: Response) {
+  if (samlAuthEnabled()) return (await import('./saml')).login(req, res);
   if (localAuthEnabled()) throw new PolicyError('AUTH', 'Local sign-in requires an administrator ID and password submitted to /api/v1/auth/local-login', 405);
   const d = await getDiscovery();
   const state = randomBytes(24).toString('base64url');
@@ -228,14 +230,18 @@ export async function callback(req: Request, res: Response) {
   const aud = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
   if (!aud.includes(OIDC.clientId)) throw new PolicyError('AUTH', 'ID token audience mismatch', 401);
   if (claims.nonce !== p.nonce) throw new PolicyError('AUTH', 'ID token nonce mismatch', 401);
-  const principal = principalFromClaims(claims, 'session');
+  await createSession(res, principalFromClaims(claims, 'session'), tokens.id_token);
+  res.redirect(`${OIDC.publicUrl}${p.returnTo}`);
+}
+
+/** Start a console session for a signed-in person (OIDC or SAML). */
+export async function createSession(res: Response, principal: Principal, idToken: string | null) {
   const sid = randomBytes(32).toString('base64url');
   const now = Date.now();
   (await db.prepare('INSERT INTO session (id_hash, tenant_id, principal, id_token, created_at, expires_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
-    sha256(sid), tenant.id, JSON.stringify(principal), tokens.id_token, nowIso(), new Date(now + ABSOLUTE_MS).toISOString(), nowIso(),
+    sha256(sid), tenant.id, JSON.stringify(principal), idToken, nowIso(), new Date(now + ABSOLUTE_MS).toISOString(), nowIso(),
   ));
   res.cookie(SESSION_COOKIE, sid, { httpOnly: true, sameSite: 'lax', secure: OIDC.publicUrl.startsWith('https'), path: '/', maxAge: ABSOLUTE_MS });
-  res.redirect(`${OIDC.publicUrl}${p.returnTo}`);
 }
 
 export async function logout(req: Request, res: Response) {

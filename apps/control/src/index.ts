@@ -29,6 +29,7 @@ import * as controls from './controls';
 import * as oscal from './oscal';
 import * as libraryImport from './library-import';
 import * as scim from './scim';
+import * as saml from './saml';
 import * as hitl from './hitl';
 import * as notify from './notify';
 import * as servicenow from './servicenow';
@@ -65,7 +66,7 @@ app.post('/api/v1/connection-webhooks/:id', express.raw({ type: 'application/jso
 // Log uploads for discovery have their own, larger limit on their route.
 const jsonBody = express.json({ limit: '1mb' });
 const edgeResultBody = express.json({ limit: '6mb' });
-app.use((req, res, next) => req.path.startsWith('/api/v1/edge/runners/') && req.path.endsWith('/result') ? edgeResultBody(req, res, next) : req.path === '/api/v1/discovery/logs' || req.path === '/api/v1/library/import/oscal' || req.path === '/api/v1/library/import/sheet' || req.path.startsWith('/api/v1/scim/v2') ? next() : jsonBody(req, res, next));
+app.use((req, res, next) => req.path.startsWith('/api/v1/edge/runners/') && req.path.endsWith('/result') ? edgeResultBody(req, res, next) : req.path === '/api/v1/discovery/logs' || req.path === '/api/v1/library/import/oscal' || req.path === '/api/v1/library/import/sheet' || req.path.startsWith('/api/v1/scim/v2') || req.path === '/api/v1/auth/saml/acs' ? next() : jsonBody(req, res, next));
 app.use((_req, res, next) => {
   // BP 18.5 security headers
   res.setHeader('x-content-type-options', 'nosniff');
@@ -105,6 +106,9 @@ async function throttledLogin<T>(req: Request, username: unknown, attempt: () =>
 }
 api.post('/auth/local-login', route(async (req, res) => (await throttledLogin(req, req.body?.username, () => oidc.localLogin(req, res)))));
 api.get('/auth/callback', route(async (req, res) => (await oidc.callback(req, res))));
+// SAML 2.0 (SIGNET_AUTH_MODE=saml): the identity provider posts the signed response here as a form.
+api.post('/auth/saml/acs', express.urlencoded({ extended: false, limit: '512kb' }), route(async (req, res) => (await saml.acs(req, res))));
+api.get('/auth/saml/metadata', (_req, res, next) => { try { saml.metadata(res); } catch (e) { next(e); } });
 api.post('/auth/logout', route(async (req, res) => (await oidc.logout(req, res))));
 api.post('/auth/dev-token', route(async (req) => (await throttledLogin(req, req.body?.username ?? req.body?.client_id, () => oidc.localToken(req.body ?? {})))));
 api.get('/identity/jwks', route(() => jwks()));

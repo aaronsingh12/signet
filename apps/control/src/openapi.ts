@@ -17,6 +17,8 @@ const ops: Record<string, Record<string, Op>> = {
     put: { summary: 'Edit config or rotate credential; destination changes require credential resubmission', permission: 'connectors.manage', body: 'ExternalConnectionInput' },
   },
   '/library/frameworks/{id}/enabled': { post: { summary: 'Switch a compliance framework on or off for this tenant; requires enabled boolean and a reason (ledgered)', permission: 'library.edit' } },
+  '/auth/saml/acs': { post: { summary: 'SAML 2.0 Assertion Consumer Service (form POST from the identity provider; SIGNET_AUTH_MODE=saml)', public: true } },
+  '/auth/saml/metadata': { get: { summary: 'SAML 2.0 service provider metadata for the identity provider', public: true } },
   '/scim/v2/Users': { get: { summary: 'SCIM 2.0 users for the identity provider (bearer SCIM token); also POST, and GET/PUT/PATCH/DELETE /scim/v2/Users/{id}', public: true } },
   '/scim/v2/Groups': { get: { summary: 'SCIM 2.0 groups (bearer SCIM token); also POST, and GET/PUT/PATCH/DELETE /scim/v2/Groups/{id}', public: true } },
   '/scim/token': { post: { summary: 'Create the SCIM bearer token for the identity provider (shown once; earlier tokens stop working)', permission: 'tenant.admin' } },
