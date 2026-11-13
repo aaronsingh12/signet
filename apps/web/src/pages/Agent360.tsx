@@ -129,7 +129,8 @@ export function Agent360() {
       {tab === 'lifecycle' && <SealTab agentId={agent.id} cert={cert} history={data.certificates} />}
       {tab === 'manifest' && cert && <ManifestTab cert={cert} />}
       {tab === 'connection' && data.instances.length > 0 && (
-        <Card pad={false}>
+        <details className="card mb-4" data-testid="connection-instances">
+          <summary className="cursor-pointer px-4 py-3 text-sm font-medium">Runtime instances ({data.instances.length})</summary>
           {data.instances.length ? (
             <table className="w-full">
               <thead><tr>{['Instance', 'Version', 'Env', 'Started', 'Last token', 'State'].map((h) => <th key={h} className="th">{h}</th>)}</tr></thead>
@@ -145,7 +146,7 @@ export function Agent360() {
           ) : (
             <Empty>No instances yet. A deployment exchanges a bootstrap credential for a workload token, which starts an instance.</Empty>
           )}
-        </Card>
+        </details>
       )}
       {tab === 'ledger' && <AgentLedger agentId={agent.id} />}
       {tab === 'scans' && can('ledger.read') && <ScanHistory key={agent.id} agentId={agent.id} />}

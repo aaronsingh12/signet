@@ -81,6 +81,8 @@ class TokenManager:
     # --- internals ---
     def _exchange(self) -> dict:
         c = self.config
+        if c.deployment_credential:
+            return self._post("/api/v1/identity/deployment-token", json={"deployment_credential": c.deployment_credential})
         if c.client_id and c.client_secret:
             return self._post("/api/v1/identity/token", json={"grant_type": "client_credentials", "client_id": c.client_id, "client_secret": c.client_secret})
         if c.bootstrap_credential and not self._bootstrap_used:

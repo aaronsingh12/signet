@@ -6,6 +6,7 @@ import { singleOperator, type Principal } from './rbac';
 import { getAgent, registerAgent } from './registry';
 import { tenant } from './tenant';
 import * as workflow from './workflow';
+import { gatewayAddress } from './connection-settings';
 
 // One form from registration to a working key, for agents that only call the model. Nothing is
 // invented on the admin's behalf: the classifier decides the tier, T3 questionnaire answers come from
@@ -97,7 +98,7 @@ const HINTS: Record<string, string> = {
 /** One real request through the public gateway, so the admin sees what the agent will see. */
 export async function testCall(credential: unknown): Promise<{ ok: boolean; status: number; reply?: string; code?: string; message?: string; hint?: string; record_id?: string }> {
   if (typeof credential !== 'string' || !/^sdc_[A-Za-z0-9_-]+$/.test(credential)) throw invalid('paste a deployment credential (it starts with sdc_)');
-  const base = process.env.SIGNET_GATEWAY_PUBLIC_URL ?? 'http://localhost:8100';
+  const base = await gatewayAddress();
   let r;
   try {
     // Test with a model this agent's seal grants: any other would count as an out-of-manifest attempt.
@@ -109,7 +110,7 @@ export async function testCall(credential: unknown): Promise<{ ok: boolean; stat
       body: JSON.stringify({ model, max_tokens: 200, messages: [{ role: 'user', content: 'Connection test: reply with the single word OK.' }] }),
     });
   } catch (e) {
-    return { ok: false, status: 0, code: 'gateway_unreachable', message: (e as Error).message, hint: `Signet could not reach the gateway at ${base}. Check SIGNET_GATEWAY_PUBLIC_URL.` };
+    return { ok: false, status: 0, code: 'gateway_unreachable', message: (e as Error).message, hint: `Signet could not reach the gateway at ${base}. Check Hosted Signet addresses in the connection setup.` };
   }
   const record_id = r.headers['x-signet-record-id'];
   let body: { choices?: { message?: { content?: string } }[]; error?: { code?: string; message?: string } } = {};

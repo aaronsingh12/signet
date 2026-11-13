@@ -1,5 +1,5 @@
 import { setTimeout } from 'node:timers/promises';
-import { destinationPolicyFromEnv, httpToolRequest, request, type EdgeTask, type HttpResponse } from '@signet/core';
+import { httpToolRequest, request, type EdgeTask, type HttpResponse } from '@signet/core';
 import type { EdgeConfig } from './config';
 
 class ControlError extends Error {
@@ -45,7 +45,7 @@ async function monitorLease(config: EdgeConfig, taskId: string, controller: Abor
   }
 }
 
-/** Execute only a local allowlisted action, with per-connection SSRF checks and local credentials. */
+/** Execute only a local allowlisted action, with per-connection SSRF checks and local or brokered credentials. */
 export async function executeTask(config: EdgeConfig, task: EdgeTask, signal: AbortSignal): Promise<string> {
   const local = config.tools.find((item) => item.tool.alias === task.alias);
   if (!local) throw new TypeError(`runner ${config.runnerId}: tool ${task.alias} is not in the local allowlist`);
@@ -55,8 +55,13 @@ export async function executeTask(config: EdgeConfig, task: EdgeTask, signal: Ab
   if (remaining <= 0) throw new Error(`connector job ${task.id} expired before execution; it will not be replayed`);
   const args: unknown = JSON.parse(task.args_json);
   if (!args || typeof args !== 'object' || Array.isArray(args)) throw new TypeError(`connector job ${task.id}: arguments must be an object`);
-  const credential = local.tokenEnv ? process.env[local.tokenEnv] : null;
+  let credential = local.tokenEnv ? process.env[local.tokenEnv] : null;
   if (local.tokenEnv && !credential) throw new TypeError(`tool ${task.alias}: credential environment variable ${local.tokenEnv} is missing`);
+  if (local.credentialSource === 'broker') {
+    const response = (await control(config, `/tools/${encodeURIComponent(task.alias)}/credential`, 'GET', undefined, signal)).json<{ credential: string | null }>();
+    if (!response || (response.credential !== null && (typeof response.credential !== 'string' || !response.credential))) throw new TypeError(`runner credential response for ${task.alias} must contain a non-empty credential or null`);
+    credential = response.credential;
+  }
   const target = httpToolRequest(local.tool, task.action, args as Record<string, unknown>, credential ?? null);
   const controller = new AbortController();
   const abort = (): void => controller.abort(signal.reason);
@@ -67,7 +72,7 @@ export async function executeTask(config: EdgeConfig, task: EdgeTask, signal: Ab
   try {
     const response = await request(target.url, {
       method: target.method, headers: target.headers, body: target.body,
-      destination: destinationPolicyFromEnv(), maxBytes: 512 * 1024,
+      destination: config.destination, maxBytes: 512 * 1024,
       signal: AbortSignal.any([controller.signal, AbortSignal.timeout(remaining)]), timeoutMs: remaining,
     });
     if (!response.ok) throw new Error(`private tool ${task.alias}.${task.action}: ${target.method} ${target.url.pathname} returned ${response.status}: ${response.text()}`);

@@ -54,7 +54,7 @@ export async function registerTool(input: ToolInput, p: Principal): Promise<Tool
   if (url.username || url.password || url.search || url.hash) throw invalid('tool URL must not contain credentials, query parameters or a fragment');
   if (input.runner_id) {
     if (input.kind !== 'http') throw invalid('connector runners support HTTP tools; MCP tools connect directly to the gateway');
-    if (input.secret) throw invalid('runner tool credentials stay on the runner; configure token_env in its local tools file');
+    if (input.secret && (await getSecretMeta(input.secret)).kind !== 'tool') throw invalid('runner tools require a tool credential from Secrets Broker');
     const runner = (await db.prepare('SELECT id FROM edge_runner WHERE id = ? AND tenant_id = ? AND revoked_at IS NULL').get(input.runner_id, tenant.id));
     if (!runner) throw invalid(`runner ${input.runner_id} is unknown or revoked`);
   }

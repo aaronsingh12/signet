@@ -40,7 +40,9 @@ import * as externalConnections from './external-connections';
 import { suggestOpenApi } from './external-openapi';
 import * as counters from './counters';
 import * as quickConnect from './quick-connect';
+import { connectionAddresses, saveConnectionAddresses } from './connection-settings';
 import { scanHistory } from './scan-history';
+import { testModelConnection } from './model-connection';
 
 const INTERNAL_TOKEN = devSecret('SIGNET_INTERNAL_TOKEN');
 const PORT = Number(process.env.PORT ?? env('SIGNET_CONTROL_PORT', '4100'));
@@ -147,6 +149,10 @@ runners.use('/:runnerId', async (req, _res, next) => {
   } catch (error) { next(error); }
 });
 runners.post('/:runnerId/poll', route(async (req) => (await edge.poll(req.params.runnerId!))));
+runners.get('/:runnerId/tools/:alias/credential', route(async (req, res) => {
+  res.setHeader('cache-control', 'no-store');
+  return edge.runnerToolCredential(req.params.runnerId!, req.params.alias!);
+}));
 runners.get('/:runnerId/jobs/:jobId/lease', route(async (req) => (await edge.lease(req.params.runnerId!, req.params.jobId!))));
 runners.post('/:runnerId/jobs/:jobId/result', route(async (req) => (await edge.complete(req.params.runnerId!, req.params.jobId!, req.body))));
 api.use('/edge/runners', runners);
@@ -196,11 +202,26 @@ api.post('/edge-runners', requires('connectors.manage'), route(async (req, res) 
   return [201, (await edge.createRunner(req.body?.name, principalOf(res)))];
 }));
 api.post('/edge-runners/:id/revoke', requires('connectors.manage'), route(async (req, res) => (await edge.revokeRunner(req.params.id!, principalOf(res)))));
+api.post('/edge-runners/:id/tools', requires('connectors.manage'), requires('tools.manage'), requires('secrets.manage'), route(async (req, res) => {
+  const tool = await edge.registerRunnerTool(req.params.id!, req.body, principalOf(res));
+  hub.publish('bundle', { reason: 'tool.registered', alias: tool.alias });
+  return [201, tool];
+}));
+api.put('/edge-runners/:id/tools/:alias/credential', requires('connectors.manage'), requires('secrets.manage'), route(async (req, res) => {
+  const result = await edge.saveRunnerToolCredential(req.params.id!, req.params.alias!, req.body?.credential, principalOf(res));
+  hub.publish('bundle', { reason: 'secret.rotated', alias: req.params.alias! });
+  return result;
+}));
 api.get('/plugins/vercel', requires('tenant.admin'), route(async (_req, res) => (await plugins.vercelConnection(principalOf(res)))));
 api.get('/plugins/vercel/connect', requires('tenant.admin'), route((_req, res) => plugins.startVercelConnection(res, principalOf(res))));
 api.get('/plugins/vercel/callback', requires('tenant.admin'), route(async (req, res) => (await plugins.completeVercelConnection(req, res, principalOf(res)))));
 api.post('/plugins/vercel/disconnect', requires('tenant.admin'), route(async (_req, res) => (await plugins.disconnectVercel(principalOf(res)))));
 api.get('/catalogue', requires('agents.read'), route(async () => ({ catalogue: (await reloadSettings()).catalogue })));
+api.post('/catalogue/:model/test', requires('identity.bootstrap'), route(async (req, res) => testModelConnection(req.params.model!, principalOf(res).id)));
+api.post('/connections/:id/agent', requires('connectors.manage'), route(async (req, res) => {
+  if (typeof req.body?.agent_id !== 'string') throw invalid('agent_id is required');
+  return externalConnections.attachToAgent(req.params.id!, req.body.agent_id, principalOf(res));
+}));
 // An agent's own LLM: agents keep their model and Signet checks each call on its way there. The key goes
 // to the Secrets Broker, as kind tool so it can never be taken for the default LLM's credential.
 api.post('/catalogue', requires('tenant.admin'), route(async (req, res) => {
@@ -352,6 +373,7 @@ api.get('/platforms/:id/workloads', requires('connectors.manage'), route(async (
 api.post('/platforms/:id/scan', requires('connectors.manage'), route(async (req, res) => platforms.scan(req.params.id!, principalOf(res))));
 api.post('/platforms/:id/workloads/:workload/stop', requires('ladder.kill'), route(async (req, res) => platforms.stop(req.params.id!, decodeURIComponent(req.params.workload!), String(req.body?.reason ?? ''), principalOf(res).id)));
 api.post('/platforms/:id/workloads/:workload/register', requires('connectors.manage'), route(async (req, res) => [201, await platforms.register(req.params.id!, decodeURIComponent(req.params.workload!), principalOf(res))]));
+api.post('/platforms/:id/workloads/:workload/agent', requires('connectors.manage'), route(async (req, res) => platforms.attachAgent(req.params.id!, req.params.workload!, req.body?.agent_id, principalOf(res))));
 api.post('/platforms/:id/workloads/:workload/link', requires('connectors.manage'), route(async (req, res) => platforms.link(req.params.id!, decodeURIComponent(req.params.workload!), req.body ?? {}, principalOf(res))));
 api.get('/platforms/:id/workloads/:workload/link', requires('connectors.manage', 'agents.read'), route(async (req) => platforms.linkStatus(req.params.id!, decodeURIComponent(req.params.workload!))));
 api.post('/connectors', requires('connectors.manage'), route(async (req, res) => [201, (await servicenow.create(req.body ?? {}, principalOf(res)))]));
@@ -377,17 +399,13 @@ api.post('/certificates/verify', requires('agents.read'), route(async (req) => {
 }));
 // Where agents connect: shown in the console's connection instructions. Set the public URLs in production.
 api.get('/connect/info', requires('agents.read'), route(async () => {
-  const nodes = (await db.prepare('SELECT id, url, last_seen FROM gateway_node ORDER BY id').all()) as { id: string; url: string; last_seen: string }[];
-  const live = nodes.filter((n) => Date.now() - Date.parse(n.last_seen) < 30_000);
   return {
-    gateway_url: process.env.SIGNET_GATEWAY_PUBLIC_URL ?? live[0]?.url ?? null,
-    gateway_url_source: process.env.SIGNET_GATEWAY_PUBLIC_URL ? 'SIGNET_GATEWAY_PUBLIC_URL' : live[0] ? `gateway node ${live[0].id} (local address; set SIGNET_GATEWAY_PUBLIC_URL for remote agents)` : 'no live gateway node',
-    control_url: process.env.SIGNET_CONTROL_PUBLIC_URL ?? `http://localhost:${PORT}`,
-    control_url_source: process.env.SIGNET_CONTROL_PUBLIC_URL ? 'SIGNET_CONTROL_PUBLIC_URL' : 'local address; set SIGNET_CONTROL_PUBLIC_URL for remote agents',
-    models: tenant.settings.catalogue.map((c) => c.model),
+    ...await connectionAddresses(),
+    models: (await reloadSettings()).catalogue.map((c) => c.model),
     tools: (await tools.listTools()).map((t) => ({ alias: t.alias, kind: t.kind, actions: Object.keys(t.actions) })),
   };
 }));
+api.put('/connect/settings', requires('tenant.admin'), route(async (req, res) => saveConnectionAddresses({ control_url: req.body?.control_url, gateway_url: req.body?.gateway_url }, principalOf(res))));
 api.get('/agents/:id/connection', requires('agents.read'), route(async (req) => (await connectivity.status(req.params.id!))));
 api.post('/agents/:id/clients', requires('identity.bootstrap'), route(async (req, res) => {
   res.setHeader('cache-control', 'no-store');

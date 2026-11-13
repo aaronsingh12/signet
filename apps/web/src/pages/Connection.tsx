@@ -54,6 +54,9 @@ export function ConnectionTab({ data, onChange }: { data: any; onChange: () => v
   return (
     <div className="space-y-4">
       <ConnectionSetup key={agent.id} agent={agent} certificate={cert} state={c.state} onChange={onChange} />
+      <details className="card" data-testid="connection-diagnostics">
+        <summary className="cursor-pointer px-4 py-3 text-sm font-medium">Connection activity and diagnostics</summary>
+        <div className="space-y-4 border-t border-line p-4">
       <div className="grid gap-4 xl:grid-cols-2">
         <Card title="Connection">
           <div className="mb-2"><ConnectionPill state={c.state} /></div>
@@ -156,8 +159,8 @@ export function ConnectionTab({ data, onChange }: { data: any; onChange: () => v
       </Card>
       <div><ErrorNote error={error} /></div>
       <Activity agentId={agent.id} />
-
-
+        </div>
+      </details>
     </div>
   );
 }

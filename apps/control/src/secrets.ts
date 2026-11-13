@@ -6,8 +6,9 @@ import type { Principal } from './rbac';
 import { tenant } from './tenant';
 
 // Secrets Broker (BP 3 C9, E32 Keyless Agents): model and tool credentials live here, sealed with
-// AES-256-GCM. No API returns a value; only gateway nodes fetch them over the internal channel to
-// inject per call. Dev keeps the broker key in data/dev-secrets.json; production uses OpenBao or a KMS.
+// AES-256-GCM. Console APIs return metadata only; gateway nodes and authenticated runners read
+// assigned tool credentials to inject per call. Dev keeps the broker key in data/dev-secrets.json;
+// production supplies a persistent broker key through its secret manager.
 
 const KEY = Buffer.from(devSecret('SIGNET_BROKER_KEY'), 'base64url').subarray(0, 32);
 

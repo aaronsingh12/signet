@@ -1,4 +1,5 @@
 export * from './canonical';
+export * from './agent-config';
 export * from './analytics';
 export * from './crypto';
 export * from './datamatrix';

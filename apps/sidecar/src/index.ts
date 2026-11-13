@@ -1,6 +1,8 @@
 import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import https from 'node:https';
 import { identityFromEnv, TokenManager } from './tokens';
+import { parseArgs } from 'node:util';
+import { connectionFromFile } from './config';
 
 // Signet sidecar: a local endpoint that holds the agent's workload identity and forwards to the Signet
 // gateway. For agents that cannot run the SDK (n8n, Flowise, Dify, other languages): point the
@@ -10,13 +12,15 @@ import { identityFromEnv, TokenManager } from './tokens';
 // Whoever can reach the sidecar acts as this agent, so it listens on 127.0.0.1 unless
 // SIGNET_SIDECAR_BIND says otherwise (only a private container network, never a public interface).
 
-const GATEWAY = (process.env.SIGNET_GATEWAY_URL ?? '').replace(/\/$/, '');
+const { values } = parseArgs({ options: { config: { type: 'string' } } });
+const fileConfig = values.config ? connectionFromFile(values.config) : null;
+const GATEWAY = (fileConfig ? fileConfig.gatewayUrl : process.env.SIGNET_GATEWAY_URL ?? '').replace(/\/$/, '');
 if (!GATEWAY) throw new Error('SIGNET_GATEWAY_URL is required');
 const PORT = Number(process.env.SIGNET_SIDECAR_PORT ?? '8300');
 const BIND = process.env.SIGNET_SIDECAR_BIND ?? '127.0.0.1';
 const SESSION = process.env.SIGNET_SESSION_ID;
 const VERSION = '0.1.0';
-const tokens = new TokenManager(identityFromEnv());
+const tokens = new TokenManager(fileConfig ? fileConfig.identity : identityFromEnv());
 const gw = new URL(GATEWAY);
 const mod = gw.protocol === 'https:' ? https : http;
 const agent = new mod.Agent({ keepAlive: true });

@@ -8,6 +8,14 @@ CREATE TABLE IF NOT EXISTS tenant (
   created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS connection_settings (
+  tenant_id TEXT PRIMARY KEY REFERENCES tenant(id),
+  control_url TEXT NOT NULL,
+  gateway_url TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  updated_by TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS session (
   id_hash TEXT PRIMARY KEY,
   tenant_id TEXT NOT NULL,

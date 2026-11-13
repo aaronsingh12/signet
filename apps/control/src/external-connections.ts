@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import { newId, sha256, request as httpRequest, evaluateTs } from '@signet/core';
 import type { AgentListFields, ConnectionHealth, ExternalConnectionConfig, ExternalConnectionView, ExternalOperation, ResponseMapping } from '@signet/core/types';
 import { db, nowIso, tx } from './db';
+import { gatewayAddress } from './connection-settings';
 import { PolicyError, forbidden, invalid, notFound } from './errors';
 import { adaptRecords, agentListFields, endpointUrl, object, parseConfig, pointer, nextExecutionOffset, type ImportedRecord, type Json } from './external-contract';
 import { readJson, requestJson } from './external-http';
@@ -93,6 +94,24 @@ export async function create(agentRef: string | null, value: unknown, actor: Pri
     const secret = await secrets.putSecret({ name: id.toLowerCase(), kind: 'tool', value: JSON.stringify({ config, credential, token: null, expires_at: 0 } satisfies Stored) }, actor);
     await db.prepare('INSERT INTO external_connection (id, tenant_id, agent_id, secret_id, state, health, next_sync_at, busy_until, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(id, tenant.id, agent?.id ?? null, secret.id, 'enabled', JSON.stringify(initialHealth()), Date.now() + config.sync_interval_seconds * 1000, 0, actor.id, nowIso(), nowIso());
     await audit(id, 'created', actor.id);
+    return view(id);
+  });
+}
+
+/** Associate a verified setup profile with its newly registered agent without granting runtime access. */
+export async function attachToAgent(id: string, agentRef: string, actor: Principal): Promise<ExternalConnectionView> {
+  requireManager(actor);
+  const agent = await getAgent(agentRef);
+  assertCan(actor, 'agents.write', agent);
+  return tx(async () => {
+    await db.prepare('SELECT id FROM external_connection WHERE id = ? AND tenant_id = ? FOR UPDATE').get(id, tenant.id);
+    const row = await rowOf(id);
+    if (row.created_by !== actor.id && !actor.permissions.includes('tenant.admin')) throw forbidden('RBAC', 'Only the connection creator or tenant administrator can attach this setup');
+    if (row.agent_id && row.agent_id !== agent.id) throw invalid('Connection already belongs to another agent');
+    const health = (await view(id)).health;
+    if (row.state !== 'enabled' || !health.endpoint_verified || !['valid', 'not_required'].includes(health.authentication)) throw invalid('Verify the endpoint and authentication before attaching this connection');
+    await db.prepare('UPDATE external_connection SET agent_id = ?, updated_at = ? WHERE id = ? AND tenant_id = ?').run(agent.id, nowIso(), id, tenant.id);
+    await audit(id, 'attached', actor.id);
     return view(id);
   });
 }
@@ -195,8 +214,7 @@ async function send(row: Row, op: ExternalOperation, externalId: string | null, 
   if (!endpoint) throw invalid(`Connection does not support ${op}`);
   if (c.private_connector) {
     await validatePrivate(row.agent_id, c);
-    const gateway = process.env.SIGNET_GATEWAY_URL?.replace(/\/+$/, '');
-    if (!gateway) throw invalid('SIGNET_GATEWAY_URL is required on the control plane for private connector requests');
+    const gateway = await gatewayAddress();
     const headers = await authHeaders(row, stored, actor);
     const response = await httpRequest(`${gateway}/v1/tools/http/${c.private_connector.tool_alias}/${op}`, { method: 'POST', headers: { ...headers, 'content-type': 'application/json', 'x-request-id': query.__correlation! }, body: JSON.stringify({ ...Object.fromEntries(Object.entries(query).filter(([key]) => !key.startsWith('__'))), ...(body !== null && typeof body === 'object' && !Array.isArray(body) ? body : {}), ...(externalId === null ? {} : { id: externalId }) }), timeoutMs: c.timeout_ms, signal: AbortSignal.timeout(c.timeout_ms), maxBytes: 1024 * 1024 });
     if (!response.ok) throw new PolicyError('PRIVATE_GATEWAY_REFUSED', `Private connector Gateway call returned HTTP ${response.status}; check runner heartbeat, approved action, seal, policy and identity. Response body withheld.`, 502);

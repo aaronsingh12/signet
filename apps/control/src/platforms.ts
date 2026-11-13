@@ -6,10 +6,11 @@ import { PolicyError, invalid, notFound } from './errors';
 import * as ledger from './ledger';
 import { DRIVERS, PLATFORM_LABEL, type PlatformKind, type RawWorkload } from './platform-drivers';
 import type { Principal } from './rbac';
-import { activeCertificate, getAgent, registerAgent } from './registry';
+import { activeCertificate, assertCan, getAgent, registerAgent } from './registry';
 import { putSecret, revealPlatformCredential } from './secrets';
 import { tenant } from './tenant';
 import * as workflow from './workflow';
+import { gatewayAddress } from './connection-settings';
 
 // Platform connectors (Phases A3 and B): an admin connects a hosting platform once. Signet lists its
 // workloads, flags the ones that use an AI provider or are AI agents themselves, registers them as
@@ -195,6 +196,26 @@ export async function register(connectionId: string, workloadId: string, p: Prin
   return { agent_id: agent.id, handle: agent.handle, lifecycle_id: lc.id };
 }
 
+/** Attach a verified platform source to a proposal without issuing credentials or changing the workload. */
+export async function attachAgent(connectionId: string, workloadId: string, agentId: string, p: Principal): Promise<{ agent_id: string }> {
+  if (typeof agentId !== 'string' || !agentId.trim()) throw invalid('agent_id is required to attach a platform workload');
+  const agent = await getAgent(agentId);
+  assertCan(p, 'agents.write', agent);
+  const { c, raw } = await rawWorkloads(connectionId);
+  const workload = raw.find((item) => item.id === workloadId);
+  if (!workload) throw notFound(`workload ${workloadId} in platform connection ${connectionId}`);
+  if (workload.platform_ai && workload.kind !== 'api_key' && agent.kind !== 'third_party') throw invalid(`workload ${workloadId} runs inside ${PLATFORM_LABEL[c.platform]}; register it as a vendor-hosted agent`);
+  await tx(async () => {
+    const now = nowIso();
+    const inserted = await db.prepare('INSERT INTO platform_link (id, tenant_id, connection_id, workload_id, workload_name, agent_id, settings, state, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (connection_id, workload_id) DO NOTHING')
+      .run(newId('pll'), tenant.id, connectionId, workload.id, workload.name, agent.id, '{}', 'registered', p.id, now, now);
+    const existing = await db.prepare('SELECT agent_id FROM platform_link WHERE tenant_id = ? AND connection_id = ? AND workload_id = ?').get(tenant.id, connectionId, workload.id) as { agent_id: string };
+    if (existing.agent_id !== agent.id) throw new PolicyError('VALIDATION', `workload ${workloadId} is already attached to agent ${existing.agent_id}; open that agent's safety review`, 409);
+    if (inserted.changes) await ledger.append({ kind: 'lifecycle', agent_id: agent.id, data: { event: 'platform.workload_attached', platform: c.platform, connection_id: connectionId, workload_id: workload.id, workload: workload.name, actor: p.id } });
+  });
+  return { agent_id: agent.id };
+}
+
 // --- connect a workload to Signet (no code change) -----------------------------------------------
 
 export interface LinkInput {
@@ -209,9 +230,8 @@ export interface LinkInput {
 
 const VAR = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
 
-function gatewayBase(): string {
-  const url = process.env.SIGNET_GATEWAY_PUBLIC_URL;
-  if (!url) throw new PolicyError('CONFIG', 'SIGNET_GATEWAY_PUBLIC_URL is not set: Signet does not know the public gateway address to give the app', 503);
+async function gatewayBase(): Promise<string> {
+  const url = await gatewayAddress();
   return url.replace(/\/+$/, '').replace(/\/v1$/, '') + '/v1';
 }
 
@@ -230,7 +250,7 @@ export async function link(connectionId: string, workloadId: string, input: Link
   const environment = input.environment ?? cert.environments[0] ?? 'dev';
   const model = cert.models[0]?.model;
   if (!model) throw new PolicyError('VALIDATION', 'the agent\'s seal has no model grant (third-party agents cannot route their model through Signet)', 409);
-  const base = gatewayBase();
+  const base = await gatewayBase();
 
   const now = nowIso();
   await db.prepare('INSERT INTO platform_link (id, tenant_id, connection_id, workload_id, workload_name, agent_id, settings, state, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (connection_id, workload_id) DO UPDATE SET agent_id = excluded.agent_id, settings = excluded.settings, state = excluded.state, detail = NULL, updated_at = excluded.updated_at')
