@@ -9,6 +9,7 @@ export function Tools() {
   const can = useCan();
   const { data: tools, reload: reloadTools } = useApi<any>('/tools');
   const { data: secrets, reload: reloadSecrets } = useApi<any>(can('secrets.manage') ? '/secrets' : null);
+  const { data: keyService, reload: reloadKeyService } = useApi<any>(can('secrets.manage') ? '/secrets/key-service' : null);
   const [sec, setSec] = useState({ name: '', kind: 'tool', value: '' });
   const [tool, setTool] = useState({ alias: '', kind: 'mcp', url: '', secret: '', actions: '' });
   const [error, setError] = useState<ApiError | null>(null);
@@ -104,6 +105,15 @@ export function Tools() {
               <button className="btn-primary md:col-span-3" onClick={() => void run(async () => (await api('/secrets', { method: 'POST', body: sec }), setSec({ name: '', kind: 'tool', value: '' }), void reloadSecrets()))}>
                 Store in broker
               </button>
+            </div>
+          )}
+          {keyService && (
+            <div className="border-t border-line px-4 py-3 text-xs text-ink-2">
+              <div><span className="font-medium">Key service:</span> {keyService.describe || keyService.provider} · {keyService.ok ? 'working' : <span className="text-bad">not working: {keyService.detail}</span>}</div>
+              <div className="text-ink-3">Each secret has its own data key, wrapped by this service. Sealed by: {Object.entries(keyService.sealed_by ?? {}).map(([k, n]) => `${k === 'legacy' ? 'older local key' : k} ${n}`).join(', ') || 'no secrets yet'}.</div>
+              {keyService.ok && Object.keys(keyService.sealed_by ?? {}).some((k) => k !== keyService.provider) && (
+                <button className="btn-ghost mt-1" onClick={() => void run(async () => { const r = await api<any>('/secrets/rewrap', { method: 'POST' }); alert(`${r.rewrapped} of ${r.total} secrets moved to ${r.provider}.`); void reloadKeyService(); })}>Move all secrets to {keyService.provider}</button>
+              )}
             </div>
           )}
         </Card>

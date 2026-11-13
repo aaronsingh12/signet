@@ -467,6 +467,8 @@ api.post('/tools', requires('tools.manage'), route(async (req, res) => {
   return [201, t];
 }));
 api.get('/secrets', requires('secrets.manage'), route(async () => ({ items: (await secrets.listSecrets()) })));
+api.get('/secrets/key-service', requires('secrets.manage'), route(async () => (await secrets.keyStatus())));
+api.post('/secrets/rewrap', requires('secrets.manage'), route(async (_req, res) => (await secrets.rewrapAll(principalOf(res)))));
 api.post('/secrets', requires('secrets.manage'), route(async (req, res) => {
   const s = (await secrets.putSecret(req.body, principalOf(res)));
   (await discovery.reconcileWithBroker());
