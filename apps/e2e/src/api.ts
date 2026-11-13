@@ -114,6 +114,9 @@ export async function onboard(input: OnboardInput, log: (s: string) => void = ()
     must(await api('owner', 'PUT', `/lifecycles/${lc}/assessments/${a.type}`, { content, complete: true }), `assessment ${a.type}`);
   }
   must(await api('owner', 'POST', `/lifecycles/${lc}/stages/assess/submit`), 'submit assess');
+  // Attack-test evidence (BP 6 Stage 4), as an owner would import from garak/PyRIT; required for T1/T2.
+  const suites = ['prompt_injection_direct', 'prompt_injection_indirect', 'jailbreak', 'data_leakage_live', 'groundedness', 'load'];
+  must(await api('owner', 'POST', `/lifecycles/${lc}/attack-reports`, { tool: 'json', report: JSON.stringify({ results: suites.flatMap((suite) => Array.from({ length: 50 }, (_, i) => ({ suite, passed: true, id: `${suite}-${i}` }))) }) }), 'attack report');
   const test = must(await api('owner', 'POST', `/lifecycles/${lc}/test-runs`, input.evidence ?? { functional_score: 92 }), 'tests');
   log(`baseline tests ${test.passed ? 'passed' : 'FAILED'} · report ${String(test.report_sha256).slice(0, 12)}…`);
   if (!test.passed) throw new Error(`tests failed: ${JSON.stringify(test.suites.filter((s: Json) => s.required && !s.passed))}`);

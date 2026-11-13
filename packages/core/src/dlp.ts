@@ -1,3 +1,4 @@
+import { packRecognisers } from './dlp-packs';
 import type { DataTag } from './types';
 
 // Pattern DLP (BP 5.3): regex and checksum recognisers that run inline in well under a millisecond.
@@ -16,6 +17,7 @@ interface Recogniser {
   tag: DataTag;
   re: RegExp;
   check?: (match: string) => boolean;
+  context?: RegExp; // a keyword that must appear shortly before the match
 }
 
 export function luhn(digits: string): boolean {
@@ -54,8 +56,11 @@ const RECOGNISERS: Recogniser[] = [
   { name: 'jwt', tag: 'secrets', re: /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g },
   { name: 'connection_string', tag: 'secrets', re: /\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis):\/\/[^\s:/@]+:[^\s@]+@[^\s]+/g },
   { name: 'password_assignment', tag: 'secrets', re: /\b(?:password|passwd|pwd)\s*[:=]\s*\S{6,}/gi },
-  { name: 'payment_card', tag: 'payment_card', re: /\b\d(?:[ -]?\d){12,18}\b/g, check: luhn },
+  // A 15-digit number starting 784 is a UAE Emirates ID (also Luhn-valid), not a card.
+  { name: 'payment_card', tag: 'payment_card', re: /\b\d(?:[ -]?\d){12,18}\b/g, check: (v) => luhn(v) && !/^784\d{12}$/.test(v.replace(/\D/g, '')) },
   { name: 'iban', tag: 'financial_account', re: /\b[A-Z]{2}\d{2}(?: ?[A-Z0-9]){11,30}\b/g, check: ibanValid },
+  // Country packs (national IDs and more) come before email and phone, so an ID is never read as a phone number.
+  ...packRecognisers(),
   { name: 'email', tag: 'personal', re: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g },
   // Not preceded or followed by another digit group, so long numbers (cards, IBANs) are never read as phones.
   { name: 'phone', tag: 'personal', re: /(?<![\w+-])(?<!\d[ .-])(?:\+\d{1,3}[ .-]?)?(?:\(\d{2,4}\)|\d{2,4})[ .-]?\d{3,4}[ .-]?\d{3,4}(?![ .-]?\d)/g },
@@ -68,6 +73,7 @@ export function scan(text: string): Finding[] {
       const value = m[0];
       if (r.check && !r.check(value)) continue;
       const start = m.index ?? 0;
+      if (r.context && !r.context.test(text.slice(Math.max(0, start - 40), start))) continue;
       found.push({ recogniser: r.name, tag: r.tag, start, end: start + value.length, value });
     }
   }

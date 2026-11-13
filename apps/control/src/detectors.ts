@@ -14,12 +14,15 @@ const SHADOW_DAYS = 14;
 const SEED = [
   { id: 'DET-INJ', version: 'deberta-v3-base-injection-v2-fp32', notes: 'protectai/deberta-v3-base-prompt-injection-v2 (Apache-2.0), fp32 ONNX; int8 dynamic quantisation was rejected (scored a planted instruction 0.10 vs 1.00)' },
   { id: 'DET-JB', version: 'not-deployed', notes: 'model not selected yet (E39)' },
-  { id: 'DET-PII', version: 'not-deployed', notes: 'pattern DLP covers structured identifiers; ML recogniser is E39' },
+  { id: 'DET-PII', version: 'presidio-analyzer-2', notes: 'Microsoft Presidio (MIT) for names and addresses in free text; gateway calls SIGNET_PRESIDIO_URL. Pattern DLP still covers structured identifiers.' },
   // DET-SAFE was blocking unsafe content before it was registered here, so it starts active (recorded as
   // grandfathered in the ledger) rather than silently dropping to shadow. It uses the cloud LLM as a
   // classifier until a small safety model (Llama Guard / Granite Guardian / ShieldGemma family) replaces it.
   { id: 'DET-SAFE', version: 'gpt-oss-120b-safety-prompt-v1', notes: 'cloud LLM used as a safety classifier (interim; DA 3 asks for a small classifier); grandfathered active', mode: 'active' as const },
 ];
+
+// DET-PII used to ship as not-deployed; it now has a model, so it moves to shadow (RB-MOD-03: 14 days before it may be promoted).
+(await db.prepare("UPDATE detector SET version = 'presidio-analyzer-2', mode = 'shadow', shadow_since = ?, notes = ? WHERE id = 'DET-PII' AND version = 'not-deployed'").run(nowIso(), 'Microsoft Presidio (MIT) for names and addresses in free text; gateway calls SIGNET_PRESIDIO_URL. Pattern DLP still covers structured identifiers.'));
 
 for (const d of SEED) {
   const known = await db.prepare('SELECT id FROM detector WHERE id = ?').get(d.id);

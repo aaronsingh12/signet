@@ -330,6 +330,14 @@ CREATE TABLE IF NOT EXISTS scim_user (
 CREATE INDEX IF NOT EXISTS scim_user_name ON scim_user(user_name);
 CREATE TABLE IF NOT EXISTS scim_group (id TEXT PRIMARY KEY, external_id TEXT, display_name TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS scim_group_member (group_id TEXT NOT NULL REFERENCES scim_group(id), user_id TEXT NOT NULL REFERENCES scim_user(id), PRIMARY KEY (group_id, user_id));
+-- AI Bill of Materials (CycloneDX 1.6) per agent and the vulnerabilities found in it (BP 6 Stage 3, 7).
+CREATE TABLE IF NOT EXISTS aibom (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL REFERENCES agent(id), bom TEXT NOT NULL, sha256 TEXT NOT NULL, uploaded TEXT, created_by TEXT NOT NULL, created_at TEXT NOT NULL, scanned_at TEXT);
+CREATE INDEX IF NOT EXISTS aibom_agent ON aibom(agent_id, created_at);
+CREATE TABLE IF NOT EXISTS vulnerability_finding (
+  agent_id TEXT NOT NULL REFERENCES agent(id), component TEXT NOT NULL, vuln_id TEXT NOT NULL, aliases TEXT NOT NULL, severity TEXT NOT NULL,
+  kev INTEGER NOT NULL DEFAULT 0, summary TEXT, cvss TEXT, status TEXT NOT NULL, first_seen TEXT NOT NULL, last_seen TEXT NOT NULL, aibom_id TEXT,
+  PRIMARY KEY (agent_id, component, vuln_id)
+);
 -- SAML request IDs: each response must answer a request Signet sent, and only once.
 CREATE TABLE IF NOT EXISTS saml_request (id TEXT PRIMARY KEY, value TEXT NOT NULL, expires_ms BIGINT NOT NULL);
 -- When the owner was deactivated (BP 6 Stage 7); cleared when a new owner is named.
@@ -678,6 +686,13 @@ ALTER TABLE control_mapping ADD COLUMN IF NOT EXISTS reviewed_at TEXT;
 ALTER TABLE control_mapping ADD COLUMN IF NOT EXISTS proposed_by TEXT;
 ALTER TABLE control_mapping ADD COLUMN IF NOT EXISTS proposed_at TEXT;
 CREATE TABLE IF NOT EXISTS library_state (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
+-- Test Lab attack runs (BP 6 Stage 4): Signet's probes against the agent's test address, or imported
+-- garak / promptfoo / PyRIT reports. suites holds per-suite counts and pass rates.
+CREATE TABLE IF NOT EXISTS attack_run (
+  id TEXT PRIMARY KEY, lifecycle_id TEXT NOT NULL REFERENCES lifecycle(id), agent_id TEXT NOT NULL REFERENCES agent(id), source TEXT NOT NULL,
+  status TEXT NOT NULL, suites TEXT NOT NULL, target_url TEXT, manifest_sha256 TEXT NOT NULL, report_sha256 TEXT, error TEXT,
+  actor TEXT NOT NULL, started_at TEXT NOT NULL, finished_at TEXT
+);
 CREATE TABLE IF NOT EXISTS external_agent_mapping (
   connection_id TEXT NOT NULL REFERENCES external_connection(id) ON DELETE CASCADE,
   external_id TEXT NOT NULL, agent_id TEXT NOT NULL REFERENCES agent(id) ON DELETE CASCADE,

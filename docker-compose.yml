@@ -1,6 +1,7 @@
 # Dev and test environment (Phase 0 "IaC for dev/test").
 #   docker compose up -d keycloak          identity provider only (run Signet with `npm run dev`)
 #   docker compose --profile full up -d    the whole stack in containers
+#   docker compose --profile presidio up -d presidio   DET-PII (then SIGNET_PRESIDIO_URL=http://localhost:5002)
 services:
   keycloak:
     image: quay.io/keycloak/keycloak:26.4
@@ -12,6 +13,13 @@ services:
     ports: ["8180:8180"]
     volumes:
       - ./infra/keycloak/realm-signet.json:/opt/keycloak/data/import/realm-signet.json:ro
+
+  # DET-PII: Microsoft Presidio analyzer (MIT) for names and addresses in free text. Pinned: the
+  # "latest" image did not start its worker when checked (13 Nov 2026).
+  presidio:
+    profiles: ["presidio", "full"]
+    image: mcr.microsoft.com/presidio-analyzer:2.2.358
+    ports: ["127.0.0.1:5002:3000"]
 
   control:
     profiles: ["full"]

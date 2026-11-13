@@ -1,4 +1,4 @@
-import { maskCard, promptDecision, rewrite, scan, toolArgDecision, type CatalogueModel, type CompiledAction, type CompiledPolicy, type DataTag } from '@signet/core';
+import { maskCard, promptDecision, rewrite, scan, toolArgDecision, type CatalogueModel, type CompiledAction, type CompiledPolicy, type DataTag, type Finding } from '@signet/core';
 
 export { promptDecision, toolArgDecision };
 
@@ -27,6 +27,13 @@ function mapMessage<T extends Msg>(m: T, fn: (s: string) => string): T {
   return out;
 }
 
+/** Every text segment of the messages, as inspectPrompt sees them (for detectors that score segments). */
+export function textsOf(messages: Msg[]): string[] {
+  const parts: string[] = [];
+  for (const m of messages) mapMessage(m, (s) => (parts.push(s), s));
+  return parts;
+}
+
 export function textOf(messages: Msg[]): string {
   const parts: string[] = [];
   for (const m of messages) mapMessage(m, (s) => (parts.push(s), s));
@@ -50,14 +57,16 @@ export interface Inspection {
   tokenised: number;
 }
 
-export function inspectPrompt(messages: Msg[], policy: CompiledPolicy, model: CatalogueModel, tokenise: (value: string, tag: DataTag) => string): Inspection {
+// `extra` holds findings from an active detector (DET-PII) per text segment. Pattern findings win where
+// both cover the same characters; detector findings only add to them.
+export function inspectPrompt(messages: Msg[], policy: CompiledPolicy, model: CatalogueModel, tokenise: (value: string, tag: DataTag) => string, extra?: Map<string, Finding[]>): Inspection {
   const events: DlpEvent[] = [];
   let blocked: Inspection['blocked'] = null;
   let exfiltration: Inspection['exfiltration'] = null;
   let tokenised = 0;
   const out = messages.map((m) =>
     mapMessage(m, (text) =>
-      rewrite(text, scan(text), (f) => {
+      rewrite(text, withExtra(scan(text), extra?.get(text)), (f) => {
         const d = promptDecision(f.tag, policy, model);
         events.push({ direction: 'in', tag: f.tag, recogniser: f.recogniser, action: d.action });
         if (d.action === 'block') {
@@ -74,6 +83,13 @@ export function inspectPrompt(messages: Msg[], policy: CompiledPolicy, model: Ca
     ),
   );
   return { messages: out, events, blocked, exfiltration, tokenised };
+}
+
+function withExtra(found: Finding[], extra: Finding[] | undefined): Finding[] {
+  if (!extra?.length) return found;
+  const out = [...found];
+  for (const e of extra) if (!out.some((o) => e.start < o.end && o.start < e.end)) out.push(e);
+  return out.sort((a, b) => a.start - b.start);
 }
 
 export interface ArgInspection {

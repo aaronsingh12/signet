@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { AttackLab } from '../components/AttackLab';
 import { Link } from 'react-router-dom';
 import { Card, Empty, ErrorNote, KV, Mono, Pill, TierChip } from '../components/ui';
 import { ApiError, api, useApi } from '../lib/api';
@@ -419,8 +420,9 @@ export function TestStage({ v, onChange }: { v: any; onChange: () => void }) {
   return (
     <div className="grid gap-4 xl:grid-cols-[1fr_320px]">
       <Card title="Last test run" pad={false}>{last ? <Suites suites={last.suites.suites} /> : <Empty>No run yet.</Empty>}</Card>
+      <AttackLab lifecycleId={v.lifecycle.id} tier={v.agent.tier} />
       <Card title="Run baseline suites">
-        <p className="text-xs text-ink-3">Signet runs tool misuse, argument constraints, data leakage and HITL suites against the compiled policy. Supply the evidence it cannot measure itself.</p>
+        <p className="text-xs text-ink-3">Signet runs tool misuse, argument constraints, data leakage and HITL suites against the compiled policy, and applies the latest attack-test results. Supply the evidence it cannot measure itself.</p>
         <label className="label mt-3">Functional eval score % (T1/T2 need ≥ 85)</label>
         <input className="input" value={functional} onChange={(e) => setFunctional(e.target.value.replace(/[^\d.]/g, ''))} />
         <label className="label mt-2">Bias ratio (if it decides about individuals; 0.8–1.25)</label>
