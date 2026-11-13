@@ -386,6 +386,67 @@ export const REQUIREMENTS: RequirementDef[] = [
   ]),
 ];
 
+// Mapping pass for requirements that had no Signet Control. Each entry is "SGC-X-001" (subset_of) or
+// "SGC-X-001~intersects"; a third part after "~" is a note for the auditor. Where Signet only covers
+// part of a duty, the relationship is "intersects" and the note says what the organisation still does.
+const LATER_MAPS: Record<string, string[]> = {
+  'nist-ai-rmf|GOVERN 3.1': ['SGC-GOV-003'],
+  'nist-ai-rmf|GOVERN 4.1': ['SGC-GOV-003', 'SGC-GOV-002~intersects'],
+  'nist-ai-rmf|GOVERN 5.1': ['SGC-HUMAN-005~intersects~appeal routes collect feedback from affected people', 'SGC-GOV-003~intersects'],
+  'nist-ai-rmf|GOVERN 5.2': ['SGC-GOV-003~intersects', 'SGC-LIFE-002~intersects~changes go through the lifecycle again'],
+  'nist-ai-rmf|MAP 1.2': ['SGC-GOV-003'],
+  'nist-ai-rmf|MAP 1.6': ['SGC-LIFE-002~intersects~the Propose stage records purpose, users, data and tools'],
+  'nist-ai-rmf|MAP 5.2': ['SGC-HUMAN-005~intersects', 'SGC-GOV-003~intersects'],
+  'nist-ai-rmf|MEASURE 1.2': ['SGC-GOV-002~intersects', 'SGC-SELF-006~intersects~controls are evaluated automatically every 10 minutes; detectors reviewed monthly'],
+  'nist-ai-rmf|MEASURE 2.2': ['SGC-FAIR-001~intersects'],
+  'nist-ai-rmf|MEASURE 2.9': ['SGC-MON-005~intersects~answers checked against their sources', 'SGC-SELF-007~intersects~every Signet decision can be explained and replayed'],
+  'nist-ai-rmf|MEASURE 2.12': ['SGC-VALUE-002~intersects~token use and cost per agent are metered; energy figures come from the model provider'],
+  'nist-ai-rmf|MEASURE 2.13': ['SGC-SELF-004~intersects~detector benchmarks and champion/challenger'],
+  'nist-ai-rmf|MEASURE 3.2': ['SGC-RISK-002~intersects'],
+  'nist-ai-rmf|MEASURE 3.3': ['SGC-HUMAN-005'],
+  'nist-ai-rmf|MEASURE 4.1': ['SGC-RISK-002~intersects', 'SGC-MON-004~intersects~each agent is measured against its own baseline'],
+  'nist-ai-rmf|MEASURE 4.2': ['SGC-GOV-003~intersects', 'SGC-HUMAN-002~intersects'],
+  'nist-ai-rmf|MANAGE 1.4': ['SGC-RISK-002~intersects~residual risks are recorded in the impact assessment'],
+  'nist-ai-rmf|MANAGE 2.1': ['SGC-VALUE-001~intersects~the business case records why an AI agent is used'],
+  'nist-ai-rmf|MANAGE 4.2': ['SGC-LIFE-002~intersects', 'SGC-SELF-006~intersects'],
+  'nist-ai-600-1|GAI-01': ['SGC-SEC-003'],
+  'nist-ai-600-1|GAI-03': ['SGC-SEC-003'],
+  'nist-ai-600-1|GAI-05': ['SGC-VALUE-002~intersects~token use is metered per agent; energy figures come from the model provider'],
+  'nist-ai-600-1|GAI-11': ['SGC-SEC-003'],
+  'owasp-llm|LLM08': ['SGC-SEC-004~intersects~retrieved content is scored for hidden instructions', 'SGC-DATA-001~intersects~answers are scanned for sensitive data; the vector store itself is secured by the agent team'],
+  'owasp-agentic|T1': ['SGC-SEC-004~intersects~tool and retrieved content is scored; an injected session is tainted for 60 minutes'],
+  'owasp-agentic|T12': ['SGC-SEC-004~intersects', 'SGC-TOOL-004~intersects~agents call only tools and agents in their seal'],
+  'owasp-agentic|T14': ['SGC-HUMAN-003~intersects', 'SGC-TOOL-006~intersects'],
+  'mitre-atlas|AML.T0056': ['SGC-SEC-004', 'SGC-DATA-001~intersects~answers are scanned and secrets redacted'],
+  'mitre-atlas|AML.T0020': ['SGC-SUPPLY-001~intersects~models are recorded in the AIBOM and pinned; Signet does not train models', 'SGC-MODEL-002~intersects'],
+  'eu-ai-act|Art. 10': ['SGC-SUPPLY-001~intersects~a duty of the model provider; Signet records which model and version each agent uses'],
+  'gdpr|Art. 6': ['SGC-DATA-005'],
+  'gdpr|Art. 44': ['SGC-DATA-006', 'SGC-MODEL-003~intersects~provider terms record the region'],
+  'nist-csf|GV.OV': ['SGC-GOV-002~intersects', 'SGC-GOV-001~intersects'],
+  'nist-csf|ID.IM': ['SGC-SELF-006~intersects', 'SGC-RESP-002~intersects'],
+  'nist-csf|PR.PS': ['SGC-MODEL-002~intersects', 'SGC-SUPPLY-001~intersects', 'SGC-SUPPLY-002~intersects'],
+  'nist-csf|PR.IR': ['SGC-SELF-010~intersects~fail-safe when a detector or the model provider is down', 'SGC-RESP-001~intersects'],
+  'nist-csf|RS.AN': ['SGC-RESP-002~intersects', 'SGC-SELF-007~intersects~any decision can be replayed from the ledger'],
+  'nist-csf|RC.RP': ['SGC-RESP-001~intersects~quarantine and kill are released only by people after investigation'],
+  'nist-csf|RC.CO': ['SGC-RESP-003~intersects'],
+  'nist-800-53|SC-8': ['SGC-DATA-003'],
+  'nist-800-53|SC-28': ['SGC-DATA-004'],
+  'fedramp-moderate|SC-8': ['SGC-DATA-003'],
+  'fedramp-moderate|SC-28': ['SGC-DATA-004'],
+  'uk-ai-principles|P5': ['SGC-HUMAN-005'],
+  'au-ai-guardrails|G7': ['SGC-HUMAN-005'],
+  'us-co-ai-act|Adverse decisions': ['SGC-HUMAN-005', 'SGC-RISK-002~intersects~the impact assessment records how decisions are explained'],
+  'us-nyc-ll144|Audit summary': ['SGC-FAIR-002', 'SGC-FAIR-001~intersects~Signet holds the bias test results'],
+};
+for (const r of REQUIREMENTS) {
+  const later = LATER_MAPS[`${r.framework_id}|${r.external_id}`];
+  if (!later) continue;
+  for (const spec of later) {
+    const [control, rel, note] = spec.split('~') as [string, Relationship | undefined, string | undefined];
+    if (!r.maps.some((x) => x.control === control)) r.maps.push({ control, rel: rel ?? 'subset_of', ...(note ? { note } : {}) });
+  }
+}
+
 /**
  * Names of the enabled frameworks that apply to an agent with this risk profile (BP 6 Stage 2).
  * Built-in frameworks follow their `applies` rule; any other enabled framework (a licensed copy, an

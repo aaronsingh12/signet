@@ -5,7 +5,7 @@ import { Card, Empty, ErrorNote, KV, Mono, Pill, TierChip } from '../components/
 import { ApiError, api, useApi } from '../lib/api';
 import { useMe } from '../lib/auth';
 import { ago, date, hash } from '../lib/format';
-import { LifecycleIntake } from '../components/LifecycleIntake';
+import { IntakeRecords, LifecycleIntake } from '../components/LifecycleIntake';
 
 // The 8-stage lifecycle on Agent 360 (BP 6): where the agent is, what its exit gate still needs, and
 // the actions the signed-in person can take at this stage. Every action is an API call and a ledger entry.
@@ -73,6 +73,7 @@ export function LifecycleTab({ data, onChange }: { data: any; onChange: () => vo
         </div>
       </Card>
       {lc.status === 'in_progress' && lc.stage === 'propose' && <ProposeStage v={v} onChange={onChange} />}
+      {lc.stage !== 'propose' && lc.status !== 'retired' && <IntakeRecords key={lc.id} lifecycleId={lc.id} intake={v.lifecycle.data.intake} onChange={onChange} />}
       {lc.status === 'in_progress' && lc.stage === 'classify' && <ClassifyStage v={v} onChange={onChange} />}
       {lc.status === 'in_progress' && lc.stage === 'assess' && <AssessStage v={v} onChange={onChange} />}
       {lc.status === 'in_progress' && lc.stage === 'test' && <TestStage v={v} onChange={onChange} />}

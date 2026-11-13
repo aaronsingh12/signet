@@ -41,7 +41,16 @@ export interface Intake {
   expected_daily_cost_usd?: number;
   template?: string | null;
   prohibited_practice?: boolean; // EU AI Act Art. 5 (social scoring, manipulation, ...)
+  // How a person affected by the agent's decisions asks for a human review or appeal (UK principle 5,
+  // Australia guardrail 7, Colorado AI Act, NIST AI RMF MEASURE 3.3): a URL, email or other route.
+  appeal_route?: string;
+  lawful_basis?: LawfulBasis; // GDPR Art. 6, for agents that handle personal data
 }
+
+export const LAWFUL_BASES = ['consent', 'contract', 'legal_obligation', 'vital_interests', 'public_task', 'legitimate_interests'] as const;
+export type LawfulBasis = (typeof LAWFUL_BASES)[number];
+/** Data classes that are personal data (GDPR). */
+export const PERSONAL_TAGS: DataTag[] = ['personal', 'special_category', 'financial_account', 'payment_card'];
 
 interface DeployPlan {
   mode: Rollout['mode'];
@@ -122,6 +131,8 @@ function checkIntake(i: Partial<Intake>) {
   if (i.users_affected !== undefined && (!Array.isArray(i.users_affected) || i.users_affected.some((u) => !['internal', 'customers', 'public'].includes(u)))) throw invalid('users_affected must be a list of internal, customers or public');
   if (i.data_touched !== undefined && (!Array.isArray(i.data_touched) || i.data_touched.some((t) => !DATA_TAGS.includes(t)))) throw invalid('data_touched contains an unknown data class');
   if (i.reversibility !== undefined && !['yes', 'partly', 'no'].includes(i.reversibility)) throw invalid('reversibility must be yes, partly or no');
+  if (i.appeal_route !== undefined && (typeof i.appeal_route !== 'string' || i.appeal_route.length > 500)) throw invalid('appeal_route must be text of at most 500 characters');
+  if (i.lawful_basis !== undefined && i.lawful_basis !== null && !LAWFUL_BASES.includes(i.lawful_basis)) throw invalid(`lawful_basis must be one of ${LAWFUL_BASES.join(', ')}`);
 }
 
 export async function start(agent: AgentRow, intakeIn: Partial<Intake>, p: Principal, kind: Lifecycle['kind'] = 'initial', manifest?: SealInput | null): Promise<Lifecycle> {
@@ -139,6 +150,8 @@ export async function start(agent: AgentRow, intakeIn: Partial<Intake>, p: Princ
     expected_daily_cost_usd: intakeIn.expected_daily_cost_usd,
     template: tpl?.id ?? null,
     prohibited_practice: intakeIn.prohibited_practice ?? false,
+    appeal_route: intakeIn.appeal_route?.trim() || undefined,
+    lawful_basis: intakeIn.lawful_basis ?? undefined,
   };
   const id = newId('evt').replace('evt_', 'lcy_');
   const now = nowIso();
@@ -152,6 +165,16 @@ export async function start(agent: AgentRow, intakeIn: Partial<Intake>, p: Princ
 
 export async function updateIntake(lcId: string, patch: Partial<Intake>, p: Principal) {
   const lc = (await get(lcId));
+  // The appeal route and lawful basis are records, not inputs to the risk tier, so a sealed agent can
+  // add or correct them at any stage (written to the ledger). Everything else changes only in Propose.
+  const recordsOnly = Object.keys(patch).length > 0 && Object.keys(patch).every((k) => k === 'appeal_route' || k === 'lawful_basis');
+  if (recordsOnly && lc.stage !== 'propose') {
+    (await assertOwnerSide((await getAgent(lc.agent_id)), p));
+    checkIntake(patch);
+    (await saveData(lc.id, { ...lc.data, intake: { ...lc.data.intake, ...patch } }));
+    (await ledger.append({ kind: 'lifecycle', agent_id: lc.agent_id, data: { event: 'intake.records_updated', lifecycle_id: lc.id, stage: lc.stage, fields: Object.keys(patch), actor: p.id } }));
+    return (await view(lc.id));
+  }
   assertStage(lc, 'propose');
   (await assertOwnerSide((await getAgent(lc.agent_id)), p));
   checkIntake(patch);
@@ -304,11 +327,14 @@ const QUESTIONS = [
   { id: 'q8', control: 'SGC-RESP-002', severity: 'medium', text: 'Is there an incident route if the agent is quarantined or killed?' },
   { id: 'q9', control: 'SGC-VALUE-001', severity: 'low', text: 'Is the expected business value recorded?' },
   { id: 'q10', control: 'SGC-FAIR-001', severity: 'high', text: 'If the agent affects individuals, is outcome bias tested?' },
+  { id: 'q11', control: 'SGC-HUMAN-005', severity: 'high', text: 'If the agent makes decisions about people, can they ask for a human review or appeal, and is that route recorded?' },
+  { id: 'q12', control: 'SGC-DATA-005', severity: 'high', text: 'If the agent handles personal data, is the lawful basis recorded (GDPR Art. 6)?' },
 ];
 
 function questionnaireFor(i: Intake, a: AgentRow) {
   // Pre-filled from the intake where the answer is already known; the rest is asked.
-  const pre: Record<string, string> = { q1: a.owner ? 'yes' : '', q3: 'yes', q9: i.business_value ? 'yes' : '', q10: i.decisions_about_individuals ? '' : 'na' };
+  const personal = (i.data_touched ?? []).some((t) => PERSONAL_TAGS.includes(t));
+  const pre: Record<string, string> = { q1: a.owner ? 'yes' : '', q3: 'yes', q9: i.business_value ? 'yes' : '', q10: i.decisions_about_individuals ? '' : 'na', q11: i.decisions_about_individuals ? (i.appeal_route ? 'yes' : '') : 'na', q12: personal ? (i.lawful_basis ? 'yes' : '') : 'na' };
   return { questions: QUESTIONS, answers: Object.fromEntries(QUESTIONS.map((q) => [q.id, { answer: pre[q.id] ?? '', note: '' }])) };
 }
 
