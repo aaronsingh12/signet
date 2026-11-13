@@ -6,6 +6,7 @@ import * as detectors from './detectors';
 import * as anomaly from './anomaly';
 import * as grounding from './grounding';
 import * as replay from './replay';
+import * as benchmarks from './benchmarks';
 import * as discovery from './discovery';
 import * as enforcement from './enforcement';
 import { PolicyError, invalid } from './errors';
@@ -550,6 +551,10 @@ api.post('/discovered-assets/:id/resolve', requires('discovery.write'), route(as
 api.post('/replay', requires('ledger.read'), route(async (req, res) => (await replay.replay(String(req.body?.record_id ?? ''), principalOf(res).id))));
 api.get('/replay/runs', requires('ledger.read'), route(async () => ({ items: await replay.runs() })));
 api.post('/replay/sample', requires('detectors.manage'), route(async (req, res) => (await replay.sample(Math.min(500, Math.max(1, Number(req.body?.size) || 100)), principalOf(res).id))));
+// Detector release process (DA 6 mechanism 4): benchmarks, the promotion gate, Security / AI Assurance sign-off.
+api.get('/detectors/:id/release', requires('agents.read'), route(async (req) => ({ gate: await benchmarks.gate(req.params.id!), benchmarks: await benchmarks.list(req.params.id!) })));
+api.post('/detectors/:id/benchmarks', requires('detectors.manage'), route(async (req, res) => [201, await benchmarks.run(req.params.id!, principalOf(res))]));
+api.post('/detectors/:id/approvals', requires('agents.read'), route(async (req, res) => (await benchmarks.approve(req.params.id!, principalOf(res), req.body ?? {}))));
 api.get('/detectors', requires('agents.read'), route(async () => ({ items: (await detectors.list()) })));
 api.post('/detectors/:id/mode', requires('detectors.manage'), route(async (req, res) => (await detectors.setMode(req.params.id!, req.body?.mode, principalOf(res), { reason: String(req.body?.reason ?? ''), dev_override: req.body?.dev_override === true }))));
 

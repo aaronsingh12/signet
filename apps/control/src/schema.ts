@@ -352,6 +352,12 @@ CREATE INDEX IF NOT EXISTS ground_eval_status ON ground_eval(status, created_at)
 CREATE TABLE IF NOT EXISTS detector_pin (detector_id TEXT NOT NULL, version TEXT NOT NULL, sha256 TEXT NOT NULL, pinned_by TEXT NOT NULL, pinned_at TEXT NOT NULL, PRIMARY KEY (detector_id, sha256));
 -- Replay samples (DA 6 mechanism 3, SGC-SELF-007): a random daily sample of decisions re-run from the ledger.
 CREATE TABLE IF NOT EXISTS replay_run (id TEXT PRIMARY KEY, sampled INTEGER NOT NULL, reproduced INTEGER NOT NULL, mismatched INTEGER NOT NULL, details TEXT NOT NULL, actor TEXT NOT NULL, created_at TEXT NOT NULL);
+-- Detector release records (DA 6 mechanism 4): benchmark results per version hash and the Security and
+-- AI Assurance sign-offs a promotion needs. detector_pin.activated_at marks the champion.
+CREATE TABLE IF NOT EXISTS detector_benchmark (id TEXT PRIMARY KEY, detector_id TEXT NOT NULL, version TEXT NOT NULL, sha256 TEXT NOT NULL, set_id TEXT NOT NULL, set_sha256 TEXT NOT NULL, metrics TEXT NOT NULL, passed INTEGER NOT NULL, failures TEXT NOT NULL, runner TEXT NOT NULL, ran_by TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS detector_benchmark_lookup ON detector_benchmark(detector_id, sha256, created_at);
+CREATE TABLE IF NOT EXISTS detector_approval (detector_id TEXT NOT NULL, version TEXT NOT NULL, sha256 TEXT NOT NULL, role TEXT NOT NULL, approver TEXT NOT NULL, reason TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (detector_id, sha256, role));
+ALTER TABLE detector_pin ADD COLUMN IF NOT EXISTS activated_at TEXT;
 -- SAML request IDs: each response must answer a request Signet sent, and only once.
 CREATE TABLE IF NOT EXISTS saml_request (id TEXT PRIMARY KEY, value TEXT NOT NULL, expires_ms BIGINT NOT NULL);
 -- When the owner was deactivated (BP 6 Stage 7); cleared when a new owner is named.

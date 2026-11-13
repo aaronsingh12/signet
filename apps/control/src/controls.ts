@@ -264,7 +264,16 @@ const CONTROLS: ControlDef[] = [
       return { status: 'effective', detail: `${r.length} detector(s) pinned by hash${nodes.length ? `; ${nodes.length} live gateway(s) run the pinned versions` : ''}` };
     },
   },
-  { id: 'SGC-SELF-004', domain: 'SELF', severity: 'high', type: 'semi_automated', objective: 'Detector versions meet benchmark targets before activation (DA 7)', test: 'Release record shows benchmark results above thresholds (benchmark records not built yet)' },
+  {
+    id: 'SGC-SELF-004', domain: 'SELF', severity: 'high', type: 'semi_automated', objective: 'Detector versions meet benchmark targets before activation (DA 7)', test: 'Every active detector version has a passing benchmark on its pinned hash (precision / recall targets, FPR <= 1%)',
+    check: async () => {
+      const act = await all<{ id: string; model_sha256: string | null }>("SELECT id, model_sha256 FROM detector WHERE mode = 'active'");
+      if (!act.length) return { status: 'not_tested', detail: 'no active detector' };
+      const missing: string[] = [];
+      for (const d of act) if (!(await all('SELECT 1 FROM detector_benchmark WHERE detector_id = ? AND sha256 = ? AND passed = 1', d.id, d.model_sha256 ?? '')).length) missing.push(d.id);
+      return missing.length ? { status: missing.length === act.length ? 'ineffective' : 'partially_effective', detail: `active without a passing benchmark: ${missing.join(', ')}` } : { status: 'effective', detail: `${act.length} active detector(s) passed their benchmark` };
+    },
+  },
   { id: 'SGC-SELF-006', domain: 'SELF', severity: 'medium', type: 'manual', objective: 'Detector drift reviewed monthly (DA 7)', test: 'Monthly human-labelled sample completed; findings tracked' },
   {
     id: 'SGC-SELF-007', domain: 'SELF', severity: 'high', type: 'automated', objective: 'Decisions are reproducible (DA 7)', test: 'Replay of a random daily sample reproduces 100% of outcomes',

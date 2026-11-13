@@ -1,5 +1,6 @@
 import { DEV_OVERRIDE_DISABLED, devOverridesAllowed, knownPin, specHash, type DetectorMode } from '@signet/core';
 import { GROUND_SPEC } from './grounding';
+import * as benchmarks from './benchmarks';
 import { db, nowIso, tx } from './db';
 import { PolicyError, forbidden, invalid, notFound } from './errors';
 import * as hub from './hub';
@@ -48,6 +49,8 @@ for (const d of (await db.prepare('SELECT id, version, model_sha256 FROM detecto
   }
   (await db.prepare('INSERT INTO detector_pin (detector_id, version, sha256, pinned_by, pinned_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING').run(d.id, d.version, d.model_sha256 ?? pin, 'system', nowIso()));
 }
+// A version already active (DET-SAFE, grandfathered) is the champion a new version must beat.
+(await db.prepare("UPDATE detector_pin SET activated_at = ? WHERE activated_at IS NULL AND (detector_id, sha256) IN (SELECT id, model_sha256 FROM detector WHERE mode = 'active')").run(nowIso()));
 
 /** Hashes each detector has ever been pinned to (Replay checks recorded hashes against these). */
 export async function pinsOf(id: string): Promise<Set<string>> {
@@ -64,6 +67,7 @@ export async function setMode(id: string, mode: DetectorMode, p: Principal, opts
   if (!d) throw notFound(`detector ${id}`);
   if (d.version === 'not-deployed' && mode !== 'off') throw new PolicyError('E39', `${id} has no model deployed`, 409);
   let override = false;
+  let skipped: string[] = [];
   if (mode === 'active') {
     const days = d.shadow_since ? (Date.now() - Date.parse(d.shadow_since)) / 86_400_000 : 0;
     if (d.mode !== 'shadow') throw new PolicyError('RB-MOD-03', `${id} must run in shadow before it is promoted`, 409);
@@ -74,13 +78,22 @@ export async function setMode(id: string, mode: DetectorMode, p: Principal, opts
       }
       override = true;
     }
+    // Release gate (DA 6 mechanism 4, SGC-SELF-004): benchmark passed, beats the champion, Security and AI Assurance approved.
+    const g = await benchmarks.gate(id);
+    if (!g.ok) {
+      const failed = g.checks.filter((c) => !c.ok);
+      if (!(opts.dev_override && devOverridesAllowed())) throw new PolicyError('SGC-SELF-004', `${id} cannot be promoted: ${failed.map((c) => `${c.what}: ${c.detail}`).join('; ')}`, 409);
+      override = true;
+      skipped = failed.map((c) => c.what);
+    }
   }
   (await tx(async () => {
     (await db.prepare('UPDATE detector SET mode = ?, shadow_since = CASE WHEN ? = ? THEN ? ELSE shadow_since END, promoted_by = ?, promoted_at = ?, model_sha256 = COALESCE(?, model_sha256) WHERE id = ?').run(
       mode, mode, 'shadow', nowIso(), p.id, nowIso(), opts.model_sha256 ?? null, id,
     ));
-    (await ledger.append({ kind: 'admin', data: { event: 'detector.mode_changed', detector: id, version: d.version, from: d.mode, to: mode, reason: opts.reason, shadow_period_skipped: override, actor: p.id } }));
+    (await ledger.append({ kind: 'admin', data: { event: 'detector.mode_changed', detector: id, version: d.version, from: d.mode, to: mode, reason: opts.reason, shadow_period_skipped: override, release_checks_skipped: skipped, actor: p.id } }));
   }));
+  if (mode === 'active') await benchmarks.markActivated(id);
   hub.publish('bundle', { reason: 'detector.mode_changed', detector: id });
   return (await db.prepare('SELECT * FROM detector WHERE id = ?').get(id));
 }
