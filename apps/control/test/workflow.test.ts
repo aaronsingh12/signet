@@ -16,6 +16,9 @@ const workflow = await import('../src/workflow');
 const approvals = await import('../src/approvals');
 const { putSecret } = await import('../src/secrets');
 const { registerTool } = await import('../src/tools');
+const attacklab = await import('../src/attacklab');
+// T1/T2 seals need passing attack evidence for the current manifest (BP 6 Stage 4): a passing report.
+const passAttacks = (lcId: string, p: Parameters<typeof attacklab.importReport>[2]) => attacklab.importReport(lcId, { tool: 'json', report: JSON.stringify({ results: (Object.keys(attacklab.THRESHOLD)).flatMap((suite) => Array.from({ length: 50 }, (_, i) => ({ suite, passed: true, id: `${suite}-${i}` }))) }) }, p);
 type Role = Parameters<typeof permissionsFor>[0][number];
 
 const person = (id: string, roles: Role[], authAgeS = 10) => ({
@@ -97,6 +100,7 @@ test('T2 lifecycle: assessments gate, Risk confirms, matrix needs Owner + Securi
   await assert.rejects(async () => (await workflow.submitAssess(lc.id, owner)), /high_gaps_mitigated_or_accepted/);
   for (const g of gaps.filter((x) => x.status === 'open')) (await workflow.updateGap(g.id, { status: 'mitigated', mitigation: 'retrained on refund FAQ' }, owner));
   (await workflow.submitAssess(lc.id, owner));
+  await passAttacks(lc.id, owner);
   const passed = (await workflow.runTests(lc.id, owner, { functional_score: 92 }));
   assert.equal(passed.passed, true);
 
@@ -129,6 +133,7 @@ test('a rejection needs a reason; a send-back returns the lifecycle to Assess', 
     (await workflow.saveAssessment(lc.id, a.type, a.type === 'questionnaire' ? { ...content, answers: Object.fromEntries(Object.keys(content.answers ?? {}).map((k) => [k, { answer: 'yes' }])) } : { summary: 'done' }, true, owner));
   }
   (await workflow.submitAssess(lc.id, owner));
+  await passAttacks(lc.id, owner);
   (await workflow.runTests(lc.id, owner, { functional_score: 92 }));
   const id = (await workflow.get(lc.id)).data.approval_id!;
   await assert.rejects(async () => (await approvals.decide(id, security, { decision: 'reject' })), /reason is required/);
@@ -150,6 +155,7 @@ test('single-operator mode: the one admin confirms and approves every slot, and 
       await workflow.saveAssessment(lc.id, a.type, a.type === 'questionnaire' ? { ...a.content, answers: Object.fromEntries(Object.keys(a.content.answers ?? {}).map((k) => [k, { answer: 'yes' }])) } : { summary: 'done' }, true, solo);
     }
     await workflow.submitAssess(lc.id, solo);
+    await passAttacks(lc.id, solo);
     await workflow.runTests(lc.id, solo, { functional_score: 92 });
     const id = (await workflow.get(lc.id)).data.approval_id!;
     const decided = await approvals.decide(id, solo, { decision: 'approve' }); // one decision fills owner, security and risk
@@ -172,6 +178,7 @@ test('administrator can approve an owned certificate after lifecycle checks with
     await workflow.saveAssessment(lc.id, a.type, content, true, owner);
   }
   await workflow.submitAssess(lc.id, owner);
+  await passAttacks(lc.id, owner);
   await workflow.runTests(lc.id, owner, { functional_score: 92 });
   const id = (await workflow.get(lc.id)).data.approval_id!;
   const administrator = person(owner.id, ['tenant_admin'], 10);

@@ -686,6 +686,13 @@ ALTER TABLE control_mapping ADD COLUMN IF NOT EXISTS reviewed_at TEXT;
 ALTER TABLE control_mapping ADD COLUMN IF NOT EXISTS proposed_by TEXT;
 ALTER TABLE control_mapping ADD COLUMN IF NOT EXISTS proposed_at TEXT;
 CREATE TABLE IF NOT EXISTS library_state (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
+-- Test Lab attack runs (BP 6 Stage 4): Signet's probes against the agent's test address, or imported
+-- garak / promptfoo / PyRIT reports. suites holds per-suite counts and pass rates.
+CREATE TABLE IF NOT EXISTS attack_run (
+  id TEXT PRIMARY KEY, lifecycle_id TEXT NOT NULL REFERENCES lifecycle(id), agent_id TEXT NOT NULL REFERENCES agent(id), source TEXT NOT NULL,
+  status TEXT NOT NULL, suites TEXT NOT NULL, target_url TEXT, manifest_sha256 TEXT NOT NULL, report_sha256 TEXT, error TEXT,
+  actor TEXT NOT NULL, started_at TEXT NOT NULL, finished_at TEXT
+);
 CREATE TABLE IF NOT EXISTS external_agent_mapping (
   connection_id TEXT NOT NULL REFERENCES external_connection(id) ON DELETE CASCADE,
   external_id TEXT NOT NULL, agent_id TEXT NOT NULL REFERENCES agent(id) ON DELETE CASCADE,

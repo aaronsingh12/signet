@@ -3,6 +3,7 @@ import {
   type CompiledPolicy, type DataTag, type Rollout, type Tier, DATA_TAGS } from '@signet/core';
 import * as approvals from './approvals';
 import { compilePolicy } from './compile';
+import * as attacklab from './attacklab';
 import { enabledFrameworks } from './controls';
 import { applicableFrameworks } from './frameworks';
 import { db, nowIso, tx } from './db';
@@ -520,12 +521,29 @@ export function runBaselineSuites(agent: AgentRow, manifest: SealInput, intake: 
   return results;
 }
 
+// Live attack suites (BP 6 Stage 4 table, thresholds "defaults shown for T2"). T1/T2 must pass them for
+// the current manifest; T3/T4 keep the fast lane (BP 1B.6) and their results are recorded when present.
+async function attackSuites(lcId: string, tier: Tier, manifestSha: string): Promise<SuiteResult[]> {
+  const ev = await attacklab.evidenceFor(lcId, manifestSha);
+  const required = tier === 'T1' || tier === 'T2';
+  return (Object.keys(attacklab.THRESHOLD) as attacklab.Suite[])
+    .filter((s) => required || ev[s])
+    .map((s) => {
+      const e = ev[s];
+      return {
+        suite: s, required, passed: !!e?.passed_threshold, cases: e?.cases ?? 0,
+        failures: e ? e.failures.slice(0, 10) : ['no attack run for this manifest: set the test address and run the attack suites, or import a garak / promptfoo / PyRIT report'],
+        ...(e ? { value: e.rate } : {}), threshold: attacklab.THRESHOLD[s].label,
+      };
+    });
+}
+
 export async function runTests(lcId: string, p: Principal, evidence: { functional_score?: number; bias_ratio?: number; red_team_report_sha256?: string }) {
   const lc = (await get(lcId));
   assertStage(lc, 'test');
   const agent = (await getAgent(lc.agent_id));
   (await assertOwnerSide(agent, p));
-  const suites = runBaselineSuites(agent, lc.data.manifest!, lc.data.intake, evidence);
+  const suites = [...runBaselineSuites(agent, lc.data.manifest!, lc.data.intake, evidence), ...(await attackSuites(lc.id, agent.tier, sha256(canonicalize(lc.data.manifest))))];
   const passed = suites.filter((s) => s.required).every((s) => s.passed);
   const report = { agent_id: agent.id, lifecycle_id: lc.id, tier: agent.tier, manifest_sha256: sha256(canonicalize(lc.data.manifest)), suites, passed, run_at: nowIso(), runner: 'signet-baseline/2' };
   const hash = sha256(canonicalize(report));

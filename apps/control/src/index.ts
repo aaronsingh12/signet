@@ -31,6 +31,7 @@ import * as libraryImport from './library-import';
 import * as scim from './scim';
 import * as saml from './saml';
 import * as aibom from './aibom';
+import * as attacklab from './attacklab';
 import * as hitl from './hitl';
 import * as notify from './notify';
 import * as servicenow from './servicenow';
@@ -67,7 +68,7 @@ app.post('/api/v1/connection-webhooks/:id', express.raw({ type: 'application/jso
 // Log uploads for discovery have their own, larger limit on their route.
 const jsonBody = express.json({ limit: '1mb' });
 const edgeResultBody = express.json({ limit: '6mb' });
-app.use((req, res, next) => req.path.startsWith('/api/v1/edge/runners/') && req.path.endsWith('/result') ? edgeResultBody(req, res, next) : req.path === '/api/v1/discovery/logs' || req.path === '/api/v1/library/import/oscal' || req.path === '/api/v1/library/import/sheet' || req.path.startsWith('/api/v1/scim/v2') || req.path === '/api/v1/auth/saml/acs' || /^\/api\/v1\/agents\/[^/]+\/aibom$/.test(req.path) ? next() : jsonBody(req, res, next));
+app.use((req, res, next) => req.path.startsWith('/api/v1/edge/runners/') && req.path.endsWith('/result') ? edgeResultBody(req, res, next) : req.path === '/api/v1/discovery/logs' || req.path === '/api/v1/library/import/oscal' || req.path === '/api/v1/library/import/sheet' || req.path.startsWith('/api/v1/scim/v2') || req.path === '/api/v1/auth/saml/acs' || /^\/api\/v1\/agents\/[^/]+\/aibom$/.test(req.path) || /^\/api\/v1\/lifecycles\/[^/]+\/attack-reports$/.test(req.path) ? next() : jsonBody(req, res, next));
 app.use((_req, res, next) => {
   // BP 18.5 security headers
   res.setHeader('x-content-type-options', 'nosniff');
@@ -375,6 +376,11 @@ api.post('/lifecycles/:id/gaps', requires('agents.read'), route(async (req, res)
 api.patch('/gaps/:id', requires('agents.read'), route(async (req, res) => (await workflow.updateGap(req.params.id!, req.body ?? {}, principalOf(res)))));
 api.post('/gaps/:id/acceptance', requires('agents.read'), route(async (req, res) => [201, (await workflow.requestAcceptance(req.params.id!, principalOf(res), req.body ?? {}))]));
 api.post('/lifecycles/:id/stages/assess/submit', requires('agents.read'), route(async (req, res) => (await workflow.submitAssess(req.params.id!, principalOf(res)))));
+// Test Lab attack suites (BP 6 Stage 4).
+api.post('/lifecycles/:id/attack-target', requires('agents.write'), route(async (req, res) => (await attacklab.setTarget(req.params.id!, req.body ?? {}, principalOf(res)))));
+api.post('/lifecycles/:id/attack-runs', requires('agents.write'), route(async (req, res) => [202, (await attacklab.startRun(req.params.id!, principalOf(res)))]));
+api.get('/lifecycles/:id/attack-runs', requires('agents.read'), route(async (req) => ({ items: (await attacklab.runsFor(req.params.id!)), probe_set: attacklab.PROBE_SET, thresholds: attacklab.THRESHOLD })));
+api.post('/lifecycles/:id/attack-reports', requires('agents.write'), express.json({ limit: '25mb' }), route(async (req, res) => [201, (await attacklab.importReport(req.params.id!, req.body ?? {}, principalOf(res)))]));
 api.post('/lifecycles/:id/test-runs', requires('agents.read'), route(async (req, res) => [201, (await workflow.runTests(req.params.id!, principalOf(res), req.body ?? {}))]));
 api.post('/lifecycles/:id/deploy', requires('agents.read'), route(async (req, res) => (await workflow.advanceDeploy(req.params.id!, principalOf(res), req.body ?? {}))));
 api.post('/agents/:id/attest', requires('agents.read'), route(async (req, res) => (await workflow.attest(req.params.id!, principalOf(res), req.body ?? {}))));
