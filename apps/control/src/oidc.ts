@@ -4,6 +4,7 @@ import type { NextFunction, Request, Response } from 'express';
 import { checkTimes, devSecret, env, keyFromJwk, sha256, signJws, verifyJws, verifyJwtSignature, decodeJwt } from '@signet/core';
 import { db, nowIso } from './db';
 import { PolicyError } from './errors';
+import { isDeactivated } from './scim';
 import { permissionsFor, rolesFor, type Principal } from './rbac';
 import { tenant } from './tenant';
 import { keys } from './keys';
@@ -295,6 +296,8 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
       }
     }
     const p = res.locals.principal as Principal | undefined;
+    // A person deactivated in the identity provider (SCIM) cannot use Signet, even with a live session.
+    if (p && p.kind === 'human' && (await isDeactivated(p.id))) throw new PolicyError('AUTH', 'this account has been deactivated in your identity provider', 401);
     if (p && p.kind === 'human' && tenant.settings.require_mfa && !p.mfa) {
       throw new PolicyError('AUTH-MFA', 'this tenant requires MFA at the identity provider', 403);
     }

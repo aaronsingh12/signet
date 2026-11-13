@@ -321,6 +321,18 @@ CREATE OR REPLACE TRIGGER anchor_no_update BEFORE UPDATE ON evidence_anchor FOR 
 CREATE OR REPLACE TRIGGER anchor_no_delete BEFORE DELETE ON evidence_anchor FOR EACH ROW EXECUTE FUNCTION signet_append_only();
 CREATE OR REPLACE TRIGGER anchor_no_truncate BEFORE TRUNCATE ON evidence_anchor FOR EACH STATEMENT EXECUTE FUNCTION signet_append_only();
 
+-- SCIM 2.0 provisioning (BP 11.4): people and groups pushed by the identity provider.
+CREATE TABLE IF NOT EXISTS scim_token (id TEXT PRIMARY KEY, token_sha256 TEXT NOT NULL, created_by TEXT NOT NULL, created_at TEXT NOT NULL, revoked_at TEXT);
+CREATE TABLE IF NOT EXISTS scim_user (
+  id TEXT PRIMARY KEY, external_id TEXT, user_name TEXT NOT NULL, display_name TEXT, emails TEXT NOT NULL,
+  active INTEGER NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS scim_user_name ON scim_user(user_name);
+CREATE TABLE IF NOT EXISTS scim_group (id TEXT PRIMARY KEY, external_id TEXT, display_name TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS scim_group_member (group_id TEXT NOT NULL REFERENCES scim_group(id), user_id TEXT NOT NULL REFERENCES scim_user(id), PRIMARY KEY (group_id, user_id));
+-- When the owner was deactivated (BP 6 Stage 7); cleared when a new owner is named.
+ALTER TABLE agent ADD COLUMN IF NOT EXISTS owner_left_at TEXT;
+
 
 -- One lifecycle per agent version being onboarded (BP 6). data holds intake, manifest draft and deploy plan.
 CREATE TABLE IF NOT EXISTS lifecycle (

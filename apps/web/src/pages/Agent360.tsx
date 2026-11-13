@@ -64,6 +64,14 @@ export function Agent360() {
           )}</div>
         }
       />
+      {agent.owner_left_at && !killed && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-300 bg-amber-50 px-4 py-2.5 text-sm text-amber-900">
+          <span>The owner ({agent.owner}) left on {date(agent.owner_left_at)}. Name a new owner by {date(new Date(Date.parse(agent.owner_left_at) + 14 * 86_400_000).toISOString())}, or the agent will be paused.</span>
+          {(me.principal.id === String(agent.sponsor).toLowerCase() || can('certificates.approve')) && (
+            <button className="btn-primary" onClick={() => { const owner = window.prompt('New owner (email or user name):'); const reason = owner && window.prompt('Reason (recorded in the ledger):'); if (owner && reason) void api(`/agents/${agent.id}/owner`, { method: 'POST', body: { owner, reason } }).then(() => reload()).catch((e) => alert(e.message)); }}>Name a new owner</button>
+          )}
+        </div>
+      )}
       {killed && <div className="mb-4 rounded-md border border-bad/30 bg-bad-50 px-4 py-2.5 text-sm text-bad">This agent is permanently stopped. It must go through a new approval process before it can return.</div>}
       {data.lifecycle?.lifecycle.status === 'in_progress' && data.lifecycle.lifecycle.kind === 'initial' && data.lifecycle.lifecycle.stage !== 'monitor' && <div className="note mb-4 flex flex-wrap items-center justify-between gap-3"><span>{agent.name} isn't finished yet. It's at the {data.lifecycle.lifecycle.stage === 'deploy' ? 'connect and shadow' : data.lifecycle.lifecycle.stage} step.</span><Link className="btn-primary" data-testid="continue-setup" to={`/agents/${agent.id}/setup`}>Continue setup</Link></div>}
       <Tabs

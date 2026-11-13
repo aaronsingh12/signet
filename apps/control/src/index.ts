@@ -28,6 +28,7 @@ import * as approvals from './approvals';
 import * as controls from './controls';
 import * as oscal from './oscal';
 import * as libraryImport from './library-import';
+import * as scim from './scim';
 import * as hitl from './hitl';
 import * as notify from './notify';
 import * as servicenow from './servicenow';
@@ -64,7 +65,7 @@ app.post('/api/v1/connection-webhooks/:id', express.raw({ type: 'application/jso
 // Log uploads for discovery have their own, larger limit on their route.
 const jsonBody = express.json({ limit: '1mb' });
 const edgeResultBody = express.json({ limit: '6mb' });
-app.use((req, res, next) => req.path.startsWith('/api/v1/edge/runners/') && req.path.endsWith('/result') ? edgeResultBody(req, res, next) : req.path === '/api/v1/discovery/logs' || req.path === '/api/v1/library/import/oscal' || req.path === '/api/v1/library/import/sheet' ? next() : jsonBody(req, res, next));
+app.use((req, res, next) => req.path.startsWith('/api/v1/edge/runners/') && req.path.endsWith('/result') ? edgeResultBody(req, res, next) : req.path === '/api/v1/discovery/logs' || req.path === '/api/v1/library/import/oscal' || req.path === '/api/v1/library/import/sheet' || req.path.startsWith('/api/v1/scim/v2') ? next() : jsonBody(req, res, next));
 app.use((_req, res, next) => {
   // BP 18.5 security headers
   res.setHeader('x-content-type-options', 'nosniff');
@@ -158,6 +159,38 @@ runners.get('/:runnerId/tools/:alias/credential', route(async (req, res) => {
 runners.get('/:runnerId/jobs/:jobId/lease', route(async (req) => (await edge.lease(req.params.runnerId!, req.params.jobId!))));
 runners.post('/:runnerId/jobs/:jobId/result', route(async (req) => (await edge.complete(req.params.runnerId!, req.params.jobId!, req.body))));
 api.use('/edge/runners', runners);
+
+// SCIM 2.0 provisioning (BP 11.4): called by the identity provider with its own bearer token.
+const scimApi = express.Router();
+const scimBase = (req: Request) => `${String(req.headers['x-forwarded-proto'] ?? req.protocol).split(',')[0]}://${req.headers['x-forwarded-host'] ?? req.get('host')}/api/v1/scim/v2`;
+const scimRoute = (fn: (req: Request) => Promise<unknown> | unknown, status = 200) => async (req: Request, res: Response) => {
+  try {
+    await scim.checkToken(req.headers.authorization);
+    const out = await fn(req);
+    res.status(out === undefined ? 204 : status).type('application/scim+json');
+    if (out === undefined) res.end(); else res.send(JSON.stringify(out));
+  } catch (e) {
+    const err = e instanceof scim.ScimError ? e : new scim.ScimError(500, 'internal error');
+    if (!(e instanceof scim.ScimError)) console.error('[control] SCIM error', e);
+    res.status(err.status).type('application/scim+json').send(JSON.stringify(err.body()));
+  }
+};
+scimApi.use(express.json({ type: ['application/json', 'application/scim+json'], limit: '1mb' }));
+scimApi.get('/ServiceProviderConfig', scimRoute(() => scim.serviceProviderConfig()));
+scimApi.get('/ResourceTypes', scimRoute(() => scim.resourceTypes()));
+scimApi.get('/Users', scimRoute((req) => scim.listUsers(req.query as Record<string, string>, scimBase(req))));
+scimApi.post('/Users', scimRoute((req) => scim.createUser(req.body ?? {}, scimBase(req)), 201));
+scimApi.get('/Users/:id', scimRoute((req) => scim.getUser(req.params.id!, scimBase(req))));
+scimApi.put('/Users/:id', scimRoute((req) => scim.replaceUser(req.params.id!, req.body ?? {}, scimBase(req))));
+scimApi.patch('/Users/:id', scimRoute((req) => scim.patchUser(req.params.id!, req.body ?? {}, scimBase(req))));
+scimApi.delete('/Users/:id', scimRoute(async (req) => { await scim.deleteUser(req.params.id!); return undefined; }));
+scimApi.get('/Groups', scimRoute((req) => scim.listGroups(req.query as Record<string, string>, scimBase(req))));
+scimApi.post('/Groups', scimRoute((req) => scim.createGroup(req.body ?? {}, scimBase(req)), 201));
+scimApi.get('/Groups/:id', scimRoute((req) => scim.getGroup(req.params.id!, scimBase(req))));
+scimApi.put('/Groups/:id', scimRoute((req) => scim.replaceGroup(req.params.id!, req.body ?? {}, scimBase(req))));
+scimApi.patch('/Groups/:id', scimRoute((req) => scim.patchGroup(req.params.id!, req.body ?? {}, scimBase(req))));
+scimApi.delete('/Groups/:id', scimRoute(async (req) => { await scim.deleteGroup(req.params.id!); return undefined; }));
+api.use('/scim/v2', scimApi);
 
 // --- everything below needs a signed-in person or an approved machine client ---
 api.use(oidc.authenticate, signedIn, idempotency);
@@ -467,6 +500,9 @@ api.post('/tools', requires('tools.manage'), route(async (req, res) => {
   return [201, t];
 }));
 api.get('/secrets', requires('secrets.manage'), route(async () => ({ items: (await secrets.listSecrets()) })));
+api.post('/scim/token', requires('tenant.admin'), route(async (_req, res) => { res.setHeader('cache-control', 'no-store'); return scim.issueToken(principalOf(res)); }));
+api.get('/scim/status', requires('tenant.read'), route(async () => (await scim.status())));
+api.post('/agents/:id/owner', requires('agents.read'), route(async (req, res) => (await scim.reassignOwner(req.params.id!, req.body ?? {}, principalOf(res)))));
 api.get('/secrets/key-service', requires('secrets.manage'), route(async () => (await secrets.keyStatus())));
 api.post('/secrets/rewrap', requires('secrets.manage'), route(async (_req, res) => (await secrets.rewrapAll(principalOf(res)))));
 api.post('/secrets', requires('secrets.manage'), route(async (req, res) => {
@@ -621,6 +657,14 @@ const every = (ms: number, name: string, fn: () => unknown) => {
 every(15_000, 'ladder sweep', async () => (await enforcement.sweepExpired()));
 every(5_000, 'approval sweep', async () => (await approvals.sweep()));
 every(10 * 60_000, 'lifecycle sweep', async () => (await workflow.sweep()))();
+// Owners who left (SCIM): after the grace period with no new owner, the agent is quarantined (BP 6 Stage 7).
+every(10 * 60_000, 'ownerless agents', async () => {
+  for (const a of await scim.overdueOwnerless()) {
+    const level = await enforcement.agentLevel(a.id);
+    if (level === 'quarantined' || level === 'killed') continue;
+    await enforcement.applyLadder({ agentId: a.id }, 'quarantine', { actor: 'system', automatic: true, rule_id: 'BP-6-S7-OWNER', reason: `owner left on ${a.owner_left_at.slice(0, 10)} and no new owner was named within ${scim.OWNER_GRACE_DAYS} days` });
+  }
+})();
 every(10 * 60_000, 'control evaluation', async () => (await controls.evaluate()))();
 every(3_000, 'connector worker', async () => (await servicenow.work()));
 every(30_000, 'external connection sync', async () => (await externalConnections.work()));

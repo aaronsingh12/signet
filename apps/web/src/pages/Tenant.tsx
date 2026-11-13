@@ -4,6 +4,37 @@ import { api, useApi } from '../lib/api';
 import { ROLE_LABEL, useMe } from '../lib/auth';
 import { ago } from '../lib/format';
 
+// SCIM provisioning (BP 11.4): the identity provider keeps people and groups in step; leavers' agents
+// are flagged until the sponsor names a new owner.
+function Provisioning({ canEdit }: { canEdit: boolean }) {
+  const { data, reload } = useApi<any>('/scim/status');
+  const [token, setToken] = useState<string | null>(null);
+  if (!data) return null;
+  const url = `${window.location.origin}${data.base_path}`;
+  return (
+    <Card title="User provisioning (SCIM)">
+      <KV
+        rows={[
+          ['SCIM base URL', <Mono key="u">{url}</Mono>],
+          ['Token', data.token ? `created ${ago(data.token.created_at)} by ${data.token.created_by}` : 'not created yet'],
+          ['People', `${data.active_users} active of ${data.users}`],
+          ['Groups', String(data.groups)],
+        ]}
+      />
+      {token && <div className="mt-2 rounded-md bg-amber-50 p-2 text-xs">Copy this token into your identity provider now; it is not shown again: <Mono>{token}</Mono></div>}
+      {canEdit && <button className="btn-ghost mt-2" onClick={() => { if (!data.token || window.confirm('A new token stops the current one. Continue?')) void api<any>('/scim/token', { method: 'POST' }).then((r) => { setToken(r.token); void reload(); }); }}>{data.token ? 'Replace token' : 'Create token'}</button>}
+      {data.agents_without_owner.length > 0 && (
+        <div className="mt-3 text-sm">
+          <div className="font-medium">Agents whose owner left</div>
+          <ul className="mt-1 space-y-1 text-xs">
+            {data.agents_without_owner.map((a: any) => <li key={a.id}><a className="hover:underline" href={`/agents/${a.id}`}>{a.handle}</a> · owner {a.owner} · sponsor {a.sponsor} · name a new owner by {a.reassign_by.slice(0, 10)}</li>)}
+          </ul>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 export function Tenant() {
   const me = useMe();
   const { data: gws } = useApi<any>('/gateways');
@@ -33,6 +64,7 @@ export function Tenant() {
           />
         </Card>
         <ModelPricing canEdit={me.principal.permissions.includes('tenant.admin')} />
+        <Provisioning canEdit={me.principal.permissions.includes('tenant.admin')} />
         <Card title="Group to role mapping" pad={false}>
           <table className="w-full">
             <tbody>
