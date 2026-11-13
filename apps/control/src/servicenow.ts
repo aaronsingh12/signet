@@ -236,7 +236,7 @@ export async function pullLibrary(id: string, p: Principal) {
       if (d.sys_updated_on > watermark) watermark = d.sys_updated_on;
     }
     for (const ct of cits) {
-      (await db.prepare('INSERT INTO framework_requirement (id, framework_id, external_id, summary) VALUES (?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET framework_id = EXCLUDED.framework_id, external_id = EXCLUDED.external_id, summary = EXCLUDED.summary').run(`sn:${ct.sys_id}`, `sn:${ct.authority_document}`, ct.reference ?? ct.name, ct.description ?? ct.name));
+      (await db.prepare('INSERT INTO framework_requirement (id, framework_id, external_id, summary, source) VALUES (?, ?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET framework_id = EXCLUDED.framework_id, external_id = EXCLUDED.external_id, summary = EXCLUDED.summary').run(`sn:${ct.sys_id}`, `sn:${ct.authority_document}`, ct.reference ?? ct.name, ct.description ?? ct.name, 'servicenow'));
       if (ct.sys_updated_on > watermark) watermark = ct.sys_updated_on;
     }
     (await db.prepare('UPDATE connector SET watermark = ?, last_sync_at = ? WHERE id = ?').run(watermark, nowIso(), id));

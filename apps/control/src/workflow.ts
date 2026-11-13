@@ -3,6 +3,8 @@ import {
   type CompiledPolicy, type DataTag, type Rollout, type Tier, DATA_TAGS } from '@signet/core';
 import * as approvals from './approvals';
 import { compilePolicy } from './compile';
+import { enabledFrameworks } from './controls';
+import { applicableFrameworks } from './frameworks';
 import { db, nowIso, tx } from './db';
 import * as enforcement from './enforcement';
 import { PolicyError, forbidden, invalid, notFound } from './errors';
@@ -222,9 +224,8 @@ async function writeClassification(lc: Lifecycle, overrides: Partial<Record<Fact
     reasons.push('decisions about individuals: at least T2 (RB-INV-14)');
   }
   const category = i.prohibited_practice ? 'eu_ai_act:prohibited' : annex ? 'eu_ai_act:high_risk' : i.users_affected.some((u) => u !== 'internal') ? 'eu_ai_act:limited_risk' : 'eu_ai_act:minimal_risk';
-  const frameworks = ['NIST AI RMF 1.0', 'OWASP LLM Top 10', 'ISO/IEC 42001'];
-  if (category !== 'eu_ai_act:minimal_risk') frameworks.push('EU AI Act');
-  if (i.data_touched.some((t) => t === 'personal' || t === 'special_category')) frameworks.push('GDPR');
+  // Framework selection (BP 6 Stage 2): the tenant's enabled frameworks that fit this agent's profile.
+  const frameworks = applicableFrameworks(await enabledFrameworks(), { eu_ai_act: category !== 'eu_ai_act:minimal_risk', personal_data: i.data_touched.some((t) => t === 'personal' || t === 'special_category') });
   (await db.prepare(
     `INSERT INTO classification (lifecycle_id, factors, score, tier, regulatory_category, frameworks, reasons, overrides, confirmed_by, confirmed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(lifecycle_id) DO UPDATE SET factors = excluded.factors, score = excluded.score, tier = excluded.tier, regulatory_category = excluded.regulatory_category,

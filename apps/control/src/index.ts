@@ -26,6 +26,8 @@ import { agentRemovalPreview, removeAgent } from './agent-removal';
 import { reloadSettings, setAgentModel, setModelPrice, tenant } from './tenant';
 import * as approvals from './approvals';
 import * as controls from './controls';
+import * as oscal from './oscal';
+import * as libraryImport from './library-import';
 import * as hitl from './hitl';
 import * as notify from './notify';
 import * as servicenow from './servicenow';
@@ -62,7 +64,7 @@ app.post('/api/v1/connection-webhooks/:id', express.raw({ type: 'application/jso
 // Log uploads for discovery have their own, larger limit on their route.
 const jsonBody = express.json({ limit: '1mb' });
 const edgeResultBody = express.json({ limit: '6mb' });
-app.use((req, res, next) => req.path.startsWith('/api/v1/edge/runners/') && req.path.endsWith('/result') ? edgeResultBody(req, res, next) : req.path === '/api/v1/discovery/logs' ? next() : jsonBody(req, res, next));
+app.use((req, res, next) => req.path.startsWith('/api/v1/edge/runners/') && req.path.endsWith('/result') ? edgeResultBody(req, res, next) : req.path === '/api/v1/discovery/logs' || req.path === '/api/v1/library/import/oscal' || req.path === '/api/v1/library/import/sheet' ? next() : jsonBody(req, res, next));
 app.use((_req, res, next) => {
   // BP 18.5 security headers
   res.setHeader('x-content-type-options', 'nosniff');
@@ -362,6 +364,15 @@ api.post('/notifications/read', route(async (_req, res) => ((await notify.markRe
 api.get('/library', requires('compliance.read'), route(async () => (await controls.library())));
 api.post('/library/evaluate', requires('compliance.read'), route(async () => ({ results: (await controls.evaluate()) })));
 api.get('/compliance/scores', requires('compliance.read'), route(async () => ({ items: (await controls.scores()) })));
+api.post('/library/frameworks/:id/enabled', requires('library.edit'), route(async (req, res) => (await controls.setFrameworkEnabled(req.params.id!, req.body?.enabled, principalOf(res), req.body?.reason))));
+// OSCAL catalogs are large (NIST 800-53 is about 10 MB), so this route has its own body limit.
+api.post('/library/import/oscal', requires('library.edit'), express.json({ limit: '25mb' }), route(async (req, res) => [201, (await oscal.importOscal(req.body ?? {}, principalOf(res)))]));
+// Spreadsheet import (BP 9.4): the browser reads the CSV/XLSX file and sends the matched rows.
+api.post('/library/import/sheet', requires('library.edit'), express.json({ limit: '10mb' }), route(async (req, res) => [201, (await libraryImport.importSheet(req.body ?? {}, principalOf(res)))]));
+api.get('/library/suggestions', requires('compliance.read'), route(async (req) => ({ items: (await libraryImport.suggestMappings(String(req.query.requirement_id ?? ''))) })));
+api.post('/library/mappings', requires('library.edit'), route(async (req, res) => [201, (await libraryImport.proposeMapping(req.body ?? {}, principalOf(res)))]));
+api.post('/library/mappings/confirm', requires('library.edit'), route(async (req, res) => (await libraryImport.confirmMapping(req.body ?? {}, principalOf(res)))));
+api.post('/library/mappings/remove', requires('library.edit'), route(async (req, res) => (await libraryImport.removeMapping(req.body ?? {}, principalOf(res)))));
 
 // Connectors (BP 10)
 api.get('/connectors', requires('connectors.manage', 'compliance.read'), route(async () => ({ items: (await servicenow.list()) })));

@@ -15,15 +15,15 @@ export const PERMISSIONS = [
   'ladder.step_up', 'ladder.throttle', 'ladder.quarantine', 'ladder.kill', 'ladder.release', 'circuit_breaker.arm',
   'ledger.read', 'ledger.verify', 'evidence.export', 'evidence.payload.read',
   'tools.manage', 'secrets.manage', 'discovery.read', 'discovery.write', 'detectors.manage',
-  'gateways.read', 'tenant.read', 'tenant.admin', 'compliance.read', 'connectors.manage',
+  'gateways.read', 'tenant.read', 'tenant.admin', 'compliance.read', 'connectors.manage', 'library.edit',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
 const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   tenant_admin: ['compliance.read', 'tenant.read', 'tenant.admin', 'agents.read', 'agents.delete', 'ledger.read', 'gateways.read'],
   platform_admin: ['connectors.manage', 'compliance.read', 'agents.read', 'identity.bootstrap', 'tools.manage', 'secrets.manage', 'discovery.read', 'discovery.write', 'detectors.manage', 'ledger.read', 'gateways.read', 'tenant.read'],
-  governance_board: ['compliance.read', 'agents.read', 'certificates.approve', 'ladder.quarantine', 'circuit_breaker.arm', 'ledger.read', 'ledger.verify', 'gateways.read', 'tenant.read'],
-  risk_officer: ['compliance.read', 'agents.read', 'certificates.approve', 'ladder.quarantine', 'ladder.release', 'ledger.read', 'ledger.verify', 'evidence.export', 'discovery.read', 'gateways.read', 'tenant.read'],
+  governance_board: ['compliance.read', 'library.edit', 'agents.read', 'certificates.approve', 'ladder.quarantine', 'circuit_breaker.arm', 'ledger.read', 'ledger.verify', 'gateways.read', 'tenant.read'],
+  risk_officer: ['compliance.read', 'library.edit', 'agents.read', 'certificates.approve', 'ladder.quarantine', 'ladder.release', 'ledger.read', 'ledger.verify', 'evidence.export', 'discovery.read', 'gateways.read', 'tenant.read'],
   security_officer: ['compliance.read', 
     'agents.read', 'certificates.approve', 'ladder.step_up', 'ladder.throttle', 'ladder.quarantine', 'ladder.kill', 'ladder.release',
     'circuit_breaker.arm', 'ledger.read', 'ledger.verify', 'evidence.export', 'evidence.payload.read', 'discovery.read', 'discovery.write',

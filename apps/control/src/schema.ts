@@ -635,6 +635,22 @@ UPDATE external_connection SET updated_at = created_at WHERE updated_at = '';
 ALTER TABLE external_connection ADD COLUMN IF NOT EXISTS webhook_secret_id TEXT REFERENCES secret(id);
 ALTER TABLE external_connection ADD COLUMN IF NOT EXISTS webhook_mapping TEXT;
 ALTER TABLE external_connection ADD COLUMN IF NOT EXISTS sync_failures INTEGER NOT NULL DEFAULT 0;
+-- Compliance framework catalogue (BP 9.1, 9.3, 9.4): licence and source per framework, per-tenant enable,
+-- requirements in or out of the score (OSCAL imports bring the full catalogue), OLIR-style mappings.
+ALTER TABLE framework ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'other';
+ALTER TABLE framework ADD COLUMN IF NOT EXISTS source_url TEXT;
+ALTER TABLE framework ADD COLUMN IF NOT EXISTS ships TEXT NOT NULL DEFAULT 'summaries';
+ALTER TABLE framework ADD COLUMN IF NOT EXISTS enabled INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE framework ADD COLUMN IF NOT EXISTS notes TEXT;
+ALTER TABLE framework_requirement ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'signet';
+ALTER TABLE framework_requirement ADD COLUMN IF NOT EXISTS in_scope INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE control_mapping ADD COLUMN IF NOT EXISTS coverage_note TEXT;
+ALTER TABLE control_mapping ADD COLUMN IF NOT EXISTS origin TEXT NOT NULL DEFAULT 'signet';
+ALTER TABLE control_mapping ADD COLUMN IF NOT EXISTS reviewed_by TEXT;
+ALTER TABLE control_mapping ADD COLUMN IF NOT EXISTS reviewed_at TEXT;
+ALTER TABLE control_mapping ADD COLUMN IF NOT EXISTS proposed_by TEXT;
+ALTER TABLE control_mapping ADD COLUMN IF NOT EXISTS proposed_at TEXT;
+CREATE TABLE IF NOT EXISTS library_state (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS external_agent_mapping (
   connection_id TEXT NOT NULL REFERENCES external_connection(id) ON DELETE CASCADE,
   external_id TEXT NOT NULL, agent_id TEXT NOT NULL REFERENCES agent(id) ON DELETE CASCADE,
