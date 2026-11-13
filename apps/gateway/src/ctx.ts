@@ -7,6 +7,7 @@ import { appendRecord } from './ledgerclient';
 import * as limits from './limits';
 import type { DlpEvent } from './policy';
 import * as state from './state';
+import { exportSpan, traceFrom, traceparentOf, type TraceContext } from './otel';
 
 // Shared request context and steps 1-5 and 14 of the gateway pipeline (BP 5.2). Steps 6-13 differ for
 // model calls (chat.ts) and tool calls (toolcall.ts). Every request, allowed or not, ends with a ledger
@@ -29,6 +30,8 @@ export interface Ctx {
   requestId: string;
   clientAddress: string;
   started: number;
+  startedAt: number; // wall clock, for trace spans
+  trace: TraceContext; // W3C trace context (BP 8.2 trace_id / span_id)
   lastMark: number;
   actionType: 'llm_call' | 'tool_call';
   steps: Step[];
@@ -77,7 +80,7 @@ const clientAddressOf = (headers: IncomingHttpHeaders) => String(headers['x-forw
 export function newCtx(actionType: Ctx['actionType'], target: string, headers: IncomingHttpHeaders): Ctx {
   const now = performance.now();
   return {
-    requestId: newId('req'), clientAddress: clientAddressOf(headers), started: now, lastMark: now, actionType, steps: [], rules: [], reasons: [], sessionId: '',
+    requestId: newId('req'), clientAddress: clientAddressOf(headers), started: now, startedAt: Date.now(), trace: traceFrom(headers), lastMark: now, actionType, steps: [], rules: [], reasons: [], sessionId: '',
     callerUserId: typeof headers['x-signet-user'] === 'string' ? headers['x-signet-user'] : null,
     dlp: [], detectors: [], decision: 'allow', tokensIn: 0, tokensOut: 0, costUsd: 0, upstreamMs: 0, target, approverGroups: [], extra: {},
     shadow: false, rollout: null, wouldBlock: [],
@@ -245,6 +248,9 @@ export async function finish(ctx: Ctx, err: Halt | null, okBody: unknown): Promi
     outcome: refusal ? refusal.ledgerOutcome : 'success',
     error_code: refusal?.code ?? null,
     steps: ctx.steps,
+    trace_id: ctx.trace.traceId,
+    span_id: ctx.trace.spanId,
+    parent_span_id: ctx.trace.parentSpanId,
     ...ctx.extra,
   };
   // Refusals without a valid token come from anyone on the internet: record the first few per
@@ -266,9 +272,43 @@ export async function finish(ctx: Ctx, err: Halt | null, okBody: unknown): Promi
     'x-signet-record-id': recordId,
     'x-signet-decision': err ? err.outcome : data.policy_decision,
     'x-signet-gateway-ms': String(data.latency_ms_gateway),
+    traceparent: traceparentOf(ctx.trace),
   };
+  exportDecisionSpan(ctx, data, refusal, recordId);
   if (err) return errorDone(ctx, err, recordId, headers);
   return { status: 200, body: okBody, headers, recordId };
+}
+
+// One span per decision with the OpenTelemetry GenAI conventions and Signet's decision; metadata only.
+function exportDecisionSpan(ctx: Ctx, data: { policy_decision: string; policy_rule_ids: string[]; outcome: string; error_code: string | null; data_classes_in: string[]; latency_ms_gateway: number }, refusal: Halt | null, recordId: string) {
+  const tool = ctx.actionType === 'tool_call';
+  exportSpan({
+    trace: ctx.trace,
+    name: tool ? `execute_tool ${ctx.target}` : `chat ${ctx.target}`,
+    startMs: ctx.startedAt,
+    endMs: Date.now(),
+    error: refusal ? `${refusal.code}: ${refusal.message}`.slice(0, 300) : null,
+    attributes: {
+      'gen_ai.operation.name': tool ? 'execute_tool' : 'chat',
+      ...(tool ? { 'gen_ai.tool.name': ctx.target } : { 'gen_ai.request.model': ctx.target }),
+      'gen_ai.usage.input_tokens': ctx.tokensIn || null,
+      'gen_ai.usage.output_tokens': ctx.tokensOut || null,
+      'gen_ai.agent.id': ctx.claims?.agent_id ?? null,
+      'signet.agent_id': ctx.claims?.agent_id ?? null,
+      'signet.cert_id': ctx.cert?.cert_id ?? null,
+      'signet.tier': ctx.cert?.tier ?? null,
+      'signet.decision': refusal ? refusal.outcome : data.policy_decision,
+      'signet.outcome': data.outcome,
+      'signet.error_code': data.error_code,
+      'signet.rule_ids': data.policy_rule_ids,
+      'signet.data_classes_in': data.data_classes_in,
+      'signet.cost_usd': ctx.costUsd || null,
+      'signet.latency_ms_gateway': data.latency_ms_gateway,
+      'signet.rollout': ctx.rollout,
+      'signet.request_id': ctx.requestId,
+      'signet.record_id': recordId,
+    },
+  });
 }
 
 export function errorDone(ctx: Ctx, err: Halt, recordId: string | null, headers: Record<string, string> = {}): Done {
