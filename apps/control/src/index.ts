@@ -1,6 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
 import express, { type NextFunction, type Request, type Response } from 'express';
-import { devOverridesAllowed, devSecret, env, newId, toJwk, verifyJws, type CertificateBody } from '@signet/core';
+import { MIN_BASELINE_DAYS, MIN_BASELINE_RECORDS, baselineReady, devOverridesAllowed, devSecret, env, newId, toJwk, verifyJws, type CertificateBody } from '@signet/core';
 import { db, nowIso } from './db';
 import * as detectors from './detectors';
 import * as anomaly from './anomaly';
@@ -518,6 +518,11 @@ api.get('/secrets', requires('secrets.manage'), route(async () => ({ items: (awa
 api.post('/scim/token', requires('tenant.admin'), route(async (_req, res) => { res.setHeader('cache-control', 'no-store'); return scim.issueToken(principalOf(res)); }));
 api.get('/scim/status', requires('tenant.read'), route(async () => (await scim.status())));
 // AI Bill of Materials (BP 6 Stage 3): optional uploaded SBOM (CycloneDX or SPDX JSON) is merged in.
+api.get('/agents/:id/behaviour', requires('agents.read'), route(async (req) => {
+  const modes = Object.fromEntries(((await db.prepare("SELECT id, mode FROM detector WHERE id IN ('DET-ANOM', 'DET-GROUND')").all()) as { id: string; mode: string }[]).map((r) => [r.id, r.mode]));
+  const b = await anomaly.baselineFor(req.params.id!);
+  return { anomaly: { mode: modes['DET-ANOM'] ?? 'off', ready: !!b && baselineReady(b), min_days: MIN_BASELINE_DAYS, min_records: MIN_BASELINE_RECORDS, baseline: b }, groundedness: { mode: modes['DET-GROUND'] ?? 'off', ...(await grounding.forAgent(req.params.id!)) } };
+}));
 api.get('/agents/:id/groundedness', requires('agents.read'), route(async (req) => (await grounding.forAgent(req.params.id!))));
 api.get('/agents/:id/aibom', requires('agents.read'), route(async (req) => (await aibom.latest(req.params.id!))));
 api.post('/agents/:id/aibom', requires('agents.write'), express.json({ limit: '10mb' }), route(async (req, res) => [201, (await aibom.generate(req.params.id!, { sbom: req.body?.sbom }, principalOf(res)))]));

@@ -9,6 +9,7 @@ import { dropTestDatabase } from './database';
 // Security plus AI Assurance sign-off by two different people before a version may become active.
 process.env.SIGNET_DATA_DIR = mkdtempSync(join(tmpdir(), 'signet-bench-'));
 process.env.SIGNET_DB_SCHEMA = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+process.env.SIGNET_SINGLE_OPERATOR = 'false'; // a team install: separation of duties applies
 const core = await import('@signet/core');
 const detectors = await import('../src/detectors');
 const benchmarks = await import('../src/benchmarks');
@@ -64,4 +65,18 @@ test('a challenger must beat the champion on the same set', async () => {
   assert.equal(g.checks.find((c) => c.what === 'benchmark')!.ok, true, 'meets the absolute targets');
   assert.equal(g.checks.find((c) => c.what === 'champion')!.ok, false, 'but does not beat the champion');
   await assert.rejects(detectors.setMode('DET-ANOM', 'active', admin, { reason: 'v2' }), /does not beat/);
+});
+
+test('single-operator install: the one administrator gives both sign-offs, recorded as a waiver', async () => {
+  process.env.SIGNET_SINGLE_OPERATOR = 'true';
+  try {
+    await db.prepare("DELETE FROM detector_approval WHERE detector_id = 'DET-ANOM'").run();
+    await benchmarks.approve('DET-ANOM', admin, { as: 'security', reason: 'solo' });
+    const g = await benchmarks.approve('DET-ANOM', admin, { as: 'ai_assurance', reason: 'solo' });
+    assert.match(g.checks.find((c) => c.what === 'AI Assurance approval')!.detail, /waived/);
+    const last = JSON.parse(((await db.prepare("SELECT data FROM ledger_record WHERE kind = 'admin' ORDER BY seq DESC LIMIT 1").get()) as { data: string }).data);
+    assert.equal(last.separation_of_duties, 'waived_single_operator');
+  } finally {
+    process.env.SIGNET_SINGLE_OPERATOR = 'false';
+  }
 });

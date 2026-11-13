@@ -3,7 +3,7 @@ import { db, nowIso } from './db';
 import { PolicyError, forbidden, invalid, notFound } from './errors';
 import * as grounding from './grounding';
 import * as ledger from './ledger';
-import type { Principal } from './rbac';
+import { singleOperator, singleOperatorMode, type Principal } from './rbac';
 import { askTenantModel } from './tenant-model';
 
 // Detector release process (DA 6 mechanism 4, SGC-SELF-004 / 005):
@@ -86,13 +86,15 @@ export async function approve(detectorId: string, p: Principal, body: { as?: str
   if (p.kind !== 'human') throw forbidden('RB-INV-10', 'detector promotion approvals are human-only');
   const as = body.as === 'security' || body.as === 'ai_assurance' ? body.as : null;
   if (!as) throw invalid("as must be 'security' or 'ai_assurance'");
-  if (!p.roles.includes(ROLE_FOR[as])) throw forbidden('DA-6', `${as === 'security' ? 'Security' : 'AI Assurance'} approval needs the ${ROLE_FOR[as]} role`);
+  // Single-operator installs: the one administrator gives each sign-off; the ledger records the waiver.
+  const solo = singleOperator(p);
+  if (!solo && !p.roles.includes(ROLE_FOR[as])) throw forbidden('DA-6', `${as === 'security' ? 'Security' : 'AI Assurance'} approval needs the ${ROLE_FOR[as]} role`);
   if (!body.reason?.trim()) throw invalid('a reason is required');
   const d = (await db.prepare('SELECT version, model_sha256 FROM detector WHERE id = ?').get(detectorId)) as { version: string; model_sha256: string | null } | undefined;
   if (!d?.model_sha256) throw notFound(`pinned detector ${detectorId}`);
   await db.prepare('INSERT INTO detector_approval (detector_id, version, sha256, role, approver, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (detector_id, sha256, role) DO UPDATE SET approver = excluded.approver, reason = excluded.reason, created_at = excluded.created_at')
     .run(detectorId, d.version, d.model_sha256, as, p.id, body.reason.trim(), nowIso());
-  await ledger.append({ kind: 'admin', data: { event: 'detector.promotion_approved', detector: detectorId, version: d.version, sha256: d.model_sha256, as, actor: p.id, reason: body.reason.trim() } });
+  await ledger.append({ kind: 'admin', data: { event: 'detector.promotion_approved', detector: detectorId, version: d.version, sha256: d.model_sha256, as, actor: p.id, reason: body.reason.trim(), ...(solo ? { separation_of_duties: 'waived_single_operator' } : {}) } });
   return gate(detectorId);
 }
 
@@ -121,7 +123,8 @@ export async function gate(detectorId: string): Promise<{ ok: boolean; checks: {
   const sec = approvals.find((a) => a.role === 'security');
   const ai = approvals.find((a) => a.role === 'ai_assurance');
   checks.push({ what: 'Security approval', ok: !!sec, detail: sec ? `by ${sec.approver}` : `needed from a security_officer within ${APPROVAL_DAYS} days` });
-  checks.push({ what: 'AI Assurance approval', ok: !!ai && ai.approver !== sec?.approver, detail: !ai ? `needed from a risk_officer within ${APPROVAL_DAYS} days` : ai.approver === sec?.approver ? 'must be a different person from the Security approver' : `by ${ai.approver}` });
+  const samePerson = !!ai && ai.approver === sec?.approver && !singleOperatorMode();
+  checks.push({ what: 'AI Assurance approval', ok: !!ai && !samePerson, detail: !ai ? `needed from a risk_officer within ${APPROVAL_DAYS} days` : samePerson ? 'must be a different person from the Security approver' : `by ${ai.approver}${ai.approver === sec?.approver ? ' (single operator: separation of duties waived)' : ''}` });
   return { ok: checks.every((c) => c.ok), checks };
 }
 

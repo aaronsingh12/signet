@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { SupplyChain } from '../components/SupplyChain';
+import { AgentBehaviour } from '../components/AgentBehaviour';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { AgentInsights } from '../components/AgentInsights';
 import { ScanHistory } from '../components/ScanHistory';
@@ -84,6 +85,7 @@ export function Agent360() {
           { id: 'manifest', label: 'What it can do' },
           { id: 'ledger', label: 'Activity' },
           { id: 'connection', label: 'Connection' },
+          { id: 'behaviour', label: 'Behaviour' },
           { id: 'supply', label: 'Supply chain' },
           { id: 'lifecycle', label: 'Seal & history' },
         ]}
@@ -159,6 +161,7 @@ export function Agent360() {
         </details>
       )}
       {tab === 'ledger' && <AgentLedger agentId={agent.id} />}
+      {tab === 'behaviour' && <AgentBehaviour agentId={agent.id} />}
       {tab === 'supply' && <SupplyChain agentId={agent.id} canEdit={can('agents.write')} />}
       {tab === 'scans' && can('ledger.read') && <ScanHistory key={agent.id} agentId={agent.id} />}
       {tab === 'lifecycle' && <LifecycleTab data={data} onChange={() => void reload()} />}
