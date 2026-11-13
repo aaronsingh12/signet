@@ -5,7 +5,8 @@ import { detectInjection, notDeployed } from './detectors';
 import { evaluate } from './engine';
 import * as limits from './limits';
 import * as outage from './outage';
-import { cleanResponseText, inspectPrompt, newTextOf, textOf } from './policy';
+import { cleanResponseText, inspectPrompt, newTextOf, textOf, textsOf } from './policy';
+import { detectPii } from './pii';
 import { chatCompletion, credentialAttached, UpstreamRejected, UpstreamUnavailable, type ChatResponse } from './provider';
 import * as state from './state';
 import { taint, trackPending } from './taint';
@@ -64,7 +65,10 @@ async function run(ctx: Ctx, headers: IncomingHttpHeaders, body: Record<string, 
   step(ctx, 7, 'pass', `${model!.model} (${model!.family})`);
 
   // 8. DLP inbound on prompt, context and tool results; detectors on new text only (RB-DET-05).
-  const inspection = inspectPrompt(messages, policy, model!, (value, tag) => tokenise(value, tag, claims.agent_id, ctx.sessionId));
+  // DET-PII (Presidio) finds names and addresses in free text; only an active detector changes the prompt.
+  const pii = await detectPii(textsOf(messages));
+  if (pii.result.status === 'shadow' && pii.result.found) ctx.reasons.push(`DET-PII (shadow) found ${pii.result.found} name(s) or address(es); not masked`);
+  const inspection = inspectPrompt(messages, policy, model!, (value, tag) => tokenise(value, tag, claims.agent_id, ctx.sessionId), pii.result.status === 'ok' ? pii.findings : undefined);
   ctx.dlp.push(...inspection.events);
   ctx.promptHash = sha256(canonicalize(inspection.messages));
   if (inspection.exfiltration) {
@@ -80,7 +84,7 @@ async function run(ctx: Ctx, headers: IncomingHttpHeaders, body: Record<string, 
   const injCfg = state.detectors.get('DET-INJ');
   const scoring = injCfg && injCfg.mode !== 'off' ? Promise.all([detectInjection(fresh.user, cert.tier, 'prompt'), fresh.tool ? detectInjection(fresh.tool, cert.tier, 'tool') : null]) : null;
   if (scoring) trackPending(sessionKey(ctx), scoring);
-  ctx.detectors = [{ id: 'DET-INJ', version: injCfg?.version ?? 'unknown', status: scoring ? 'pending' : 'unavailable' }, ...notDeployed()];
+  ctx.detectors = [{ id: 'DET-INJ', version: injCfg?.version ?? 'unknown', status: scoring ? 'pending' : 'unavailable' }, ...notDeployed().filter((d) => d.id !== 'DET-PII'), pii.result];
   const safeIn = await contentSafety(ctx, canonicalize(inspection.messages), 8);
   if (safeIn) ctx.detectors.push(safeIn);
   step(ctx, 8, 'pass', `${inspection.tokenised ? `${inspection.tokenised} value(s) tokenised` : 'no sensitive data'}; DET-INJ ${scoring ? 'scoring in parallel' : 'off'}`);
@@ -149,7 +153,7 @@ async function run(ctx: Ctx, headers: IncomingHttpHeaders, body: Record<string, 
   // Detector verdict, applied before anything reaches the agent (DA 4 decision matrix; stricter wins).
   if (scoring) {
     const [injUser, injTool] = await scoring;
-    ctx.detectors = [injUser, ...(injTool ? [{ ...injTool, id: 'DET-INJ.tool' }] : []), ...notDeployed(), ...(safeIn ? [safeIn] : [])];
+    ctx.detectors = [injUser, ...(injTool ? [{ ...injTool, id: 'DET-INJ.tool' }] : []), ...notDeployed().filter((d) => d.id !== 'DET-PII'), pii.result, ...(safeIn ? [safeIn] : [])];
     if (injTool?.status === 'ok' && injTool.band && injTool.band !== 'low') {
       await taint(sessionKey(ctx), injTool.band, `tool result in llm_call ${ctx.requestId}`);
       ctx.reasons.push(`DET-INJ ${injTool.band} on tool content in the conversation: session tainted (RB-BL-12)`);
