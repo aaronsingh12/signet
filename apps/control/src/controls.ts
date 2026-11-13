@@ -118,7 +118,23 @@ const CONTROLS: ControlDef[] = [
     check: async () => { const certs = (await all<{ body: string }>("SELECT body FROM certificate WHERE status = 'active'")); const bad = (await Promise.all(certs.map(async (c) => { const h = JSON.parse(c.body).evidence_refs?.test_report_sha256; return !h || !(await one<{ n: number }>("SELECT COUNT(*) n FROM test_run WHERE report_sha256 = ? AND status = 'passed'", h)).n; }))).filter(Boolean).length; return ratio(bad, certs.length, 'active seals'); },
   },
   { id: 'SGC-SEC-002', domain: 'SEC', severity: 'high', type: 'semi_automated', objective: 'Independent red team for T1', test: 'Every T1 seal references a red-team report' },
-  { id: 'SGC-SUPPLY-001', domain: 'SUPPLY', severity: 'medium', type: 'automated', objective: 'AIBOM maintained (Phase 3, E16)', test: 'Every agent version has an AIBOM under 30 days old' },
+  {
+    id: 'SGC-SUPPLY-001', domain: 'SUPPLY', severity: 'medium', type: 'automated', objective: 'AIBOM maintained and scanned',
+    test: 'Every sealed agent has an AIBOM scanned in the last 30 days',
+    check: async () => {
+      const r = (await all<{ scanned: string | null }>("SELECT (SELECT MAX(COALESCE(b.scanned_at, b.created_at)) FROM aibom b WHERE b.agent_id = a.id) AS scanned FROM agent a WHERE a.status = 'sealed'"));
+      return ratio(r.filter((x) => !x.scanned || x.scanned < since(30 * DAY)).length, r.length, 'sealed agents');
+    },
+  },
+  {
+    id: 'SGC-SUPPLY-002', domain: 'SUPPLY', severity: 'high', type: 'automated', objective: 'No known-exploited or critical vulnerability left open on an active agent',
+    test: '0 open findings that are on the CISA KEV list or critical, for sealed agents',
+    check: async () => {
+      const r = (await one<{ n: number; kev: number | null }>("SELECT COUNT(*) n, SUM(f.kev) kev FROM vulnerability_finding f JOIN agent a ON a.id = f.agent_id WHERE a.status = 'sealed' AND f.status = 'open' AND (f.kev = 1 OR f.severity = 'critical')"));
+      const scanned = (await one<{ n: number }>("SELECT COUNT(*) n FROM aibom WHERE scanned_at IS NOT NULL")).n;
+      return !Number(scanned) ? { status: 'not_tested', detail: 'no AIBOM scanned yet' } : Number(r.n) ? { status: 'ineffective', detail: `${r.n} open critical finding(s), ${r.kev ?? 0} on the CISA KEV list` } : { status: 'effective', detail: 'no open critical or known-exploited vulnerabilities' };
+    },
+  },
   {
     id: 'SGC-MON-001', domain: 'MON', severity: 'critical', type: 'automated', objective: 'Every transaction logged and chained',
     test: 'Hash chain verifies end to end',

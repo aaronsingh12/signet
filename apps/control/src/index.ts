@@ -30,6 +30,7 @@ import * as oscal from './oscal';
 import * as libraryImport from './library-import';
 import * as scim from './scim';
 import * as saml from './saml';
+import * as aibom from './aibom';
 import * as hitl from './hitl';
 import * as notify from './notify';
 import * as servicenow from './servicenow';
@@ -66,7 +67,7 @@ app.post('/api/v1/connection-webhooks/:id', express.raw({ type: 'application/jso
 // Log uploads for discovery have their own, larger limit on their route.
 const jsonBody = express.json({ limit: '1mb' });
 const edgeResultBody = express.json({ limit: '6mb' });
-app.use((req, res, next) => req.path.startsWith('/api/v1/edge/runners/') && req.path.endsWith('/result') ? edgeResultBody(req, res, next) : req.path === '/api/v1/discovery/logs' || req.path === '/api/v1/library/import/oscal' || req.path === '/api/v1/library/import/sheet' || req.path.startsWith('/api/v1/scim/v2') || req.path === '/api/v1/auth/saml/acs' ? next() : jsonBody(req, res, next));
+app.use((req, res, next) => req.path.startsWith('/api/v1/edge/runners/') && req.path.endsWith('/result') ? edgeResultBody(req, res, next) : req.path === '/api/v1/discovery/logs' || req.path === '/api/v1/library/import/oscal' || req.path === '/api/v1/library/import/sheet' || req.path.startsWith('/api/v1/scim/v2') || req.path === '/api/v1/auth/saml/acs' || /^\/api\/v1\/agents\/[^/]+\/aibom$/.test(req.path) ? next() : jsonBody(req, res, next));
 app.use((_req, res, next) => {
   // BP 18.5 security headers
   res.setHeader('x-content-type-options', 'nosniff');
@@ -506,6 +507,9 @@ api.post('/tools', requires('tools.manage'), route(async (req, res) => {
 api.get('/secrets', requires('secrets.manage'), route(async () => ({ items: (await secrets.listSecrets()) })));
 api.post('/scim/token', requires('tenant.admin'), route(async (_req, res) => { res.setHeader('cache-control', 'no-store'); return scim.issueToken(principalOf(res)); }));
 api.get('/scim/status', requires('tenant.read'), route(async () => (await scim.status())));
+// AI Bill of Materials (BP 6 Stage 3): optional uploaded SBOM (CycloneDX or SPDX JSON) is merged in.
+api.get('/agents/:id/aibom', requires('agents.read'), route(async (req) => (await aibom.latest(req.params.id!))));
+api.post('/agents/:id/aibom', requires('agents.write'), express.json({ limit: '10mb' }), route(async (req, res) => [201, (await aibom.generate(req.params.id!, { sbom: req.body?.sbom }, principalOf(res)))]));
 api.post('/agents/:id/owner', requires('agents.read'), route(async (req, res) => (await scim.reassignOwner(req.params.id!, req.body ?? {}, principalOf(res)))));
 api.get('/secrets/key-service', requires('secrets.manage'), route(async () => (await secrets.keyStatus())));
 api.post('/secrets/rewrap', requires('secrets.manage'), route(async (_req, res) => (await secrets.rewrapAll(principalOf(res)))));
@@ -661,6 +665,8 @@ const every = (ms: number, name: string, fn: () => unknown) => {
 every(15_000, 'ladder sweep', async () => (await enforcement.sweepExpired()));
 every(5_000, 'approval sweep', async () => (await approvals.sweep()));
 every(10 * 60_000, 'lifecycle sweep', async () => (await workflow.sweep()))();
+// Nightly AIBOM refresh: new advisories reach agents that have not changed (BP 6 Stage 7).
+every(24 * 3_600_000, 'AIBOM vulnerability rescan', async () => (await aibom.nightly({ id: 'system', name: 'Signet', kind: 'service', roles: [], permissions: [], groups: [], mfa: false, auth: 'bearer', auth_time: null })));
 // Owners who left (SCIM): after the grace period with no new owner, the agent is quarantined (BP 6 Stage 7).
 every(10 * 60_000, 'ownerless agents', async () => {
   for (const a of await scim.overdueOwnerless()) {
