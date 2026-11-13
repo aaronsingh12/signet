@@ -7,6 +7,7 @@ import * as anomaly from './anomaly';
 import * as grounding from './grounding';
 import * as replay from './replay';
 import * as benchmarks from './benchmarks';
+import * as auditpack from './auditpack';
 import * as discovery from './discovery';
 import * as enforcement from './enforcement';
 import { PolicyError, invalid } from './errors';
@@ -598,6 +599,22 @@ api.get('/ledger/roots', requires('ledger.read'), route(async () => ({ items: (a
 api.get('/evidence/storage', requires('ledger.read'), route(async () => (await evidence.storageStatus())));
 api.post('/evidence/anchor', requires('ledger.verify'), route(async () => (await evidence.anchorPending())));
 api.post('/ledger/roots/seal', requires('ledger.verify'), route(async (req) => (req.body?.day ? { sealed: [(await evidence.sealDay(String(req.body.day)))] } : { sealed: (await evidence.sealFinishedDays()) })));
+// Audit packs (BP 9.6): signed exports per framework (or the board pack), by date range and agent set.
+api.post('/audit-packs', requires('evidence.export'), route(async (req, res) => [201, await auditpack.generate(req.body ?? {}, principalOf(res))]));
+api.get('/audit-packs', requires('evidence.export'), route(async () => ({ items: await auditpack.list() })));
+api.get('/audit-packs/:id', requires('evidence.export'), async (req, res, next) => {
+  try {
+    const file = await auditpack.get(req.params.id!, principalOf(res));
+    if (req.query.format === 'csv') {
+      res.setHeader('content-type', 'text/csv; charset=utf-8');
+      res.setHeader('content-disposition', `attachment; filename="${req.params.id}-requirements.csv"`);
+      return void res.send(auditpack.requirementsCsv(file.pack));
+    }
+    res.setHeader('content-disposition', `attachment; filename="signet-audit-pack-${file.pack.framework.id}-${file.pack.scope.to}.json"`);
+    res.json(file);
+  } catch (e) { next(e); }
+});
+api.post('/audit-packs/verify', requires('evidence.export'), route(async (req) => auditpack.verify(req.body ?? {})));
 api.get('/ledger/export', requires('evidence.export'), async (req, res) => {
   const p = principalOf(res);
   res.setHeader('content-type', 'application/gzip');
