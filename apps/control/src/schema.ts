@@ -338,6 +338,8 @@ CREATE TABLE IF NOT EXISTS vulnerability_finding (
   kev INTEGER NOT NULL DEFAULT 0, summary TEXT, cvss TEXT, status TEXT NOT NULL, first_seen TEXT NOT NULL, last_seen TEXT NOT NULL, aibom_id TEXT,
   PRIMARY KEY (agent_id, component, vuln_id)
 );
+-- DET-ANOM baselines (DA 3): per-agent statistics from the last 14 days of the ledger, rebuilt nightly.
+CREATE TABLE IF NOT EXISTS agent_baseline (agent_id TEXT PRIMARY KEY, data TEXT NOT NULL, computed_at TEXT NOT NULL);
 -- SAML request IDs: each response must answer a request Signet sent, and only once.
 CREATE TABLE IF NOT EXISTS saml_request (id TEXT PRIMARY KEY, value TEXT NOT NULL, expires_ms BIGINT NOT NULL);
 -- When the owner was deactivated (BP 6 Stage 7); cleared when a new owner is named.

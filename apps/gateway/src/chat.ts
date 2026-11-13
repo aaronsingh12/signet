@@ -84,7 +84,7 @@ async function run(ctx: Ctx, headers: IncomingHttpHeaders, body: Record<string, 
   const injCfg = state.detectors.get('DET-INJ');
   const scoring = injCfg && injCfg.mode !== 'off' ? Promise.all([detectInjection(fresh.user, cert.tier, 'prompt'), fresh.tool ? detectInjection(fresh.tool, cert.tier, 'tool') : null]) : null;
   if (scoring) trackPending(sessionKey(ctx), scoring);
-  ctx.detectors = [{ id: 'DET-INJ', version: injCfg?.version ?? 'unknown', status: scoring ? 'pending' : 'unavailable' }, ...notDeployed().filter((d) => d.id !== 'DET-PII'), pii.result];
+  ctx.detectors = [{ id: 'DET-INJ', version: injCfg?.version ?? 'unknown', status: scoring ? 'pending' : 'unavailable' }, ...notDeployed().filter((d) => d.id !== 'DET-PII'), pii.result, ...(ctx.anom ? [ctx.anom] : [])];
   const safeIn = await contentSafety(ctx, canonicalize(inspection.messages), 8);
   if (safeIn) ctx.detectors.push(safeIn);
   step(ctx, 8, 'pass', `${inspection.tokenised ? `${inspection.tokenised} value(s) tokenised` : 'no sensitive data'}; DET-INJ ${scoring ? 'scoring in parallel' : 'off'}`);
@@ -153,7 +153,7 @@ async function run(ctx: Ctx, headers: IncomingHttpHeaders, body: Record<string, 
   // Detector verdict, applied before anything reaches the agent (DA 4 decision matrix; stricter wins).
   if (scoring) {
     const [injUser, injTool] = await scoring;
-    ctx.detectors = [injUser, ...(injTool ? [{ ...injTool, id: 'DET-INJ.tool' }] : []), ...notDeployed().filter((d) => d.id !== 'DET-PII'), pii.result, ...(safeIn ? [safeIn] : [])];
+    ctx.detectors = [injUser, ...(injTool ? [{ ...injTool, id: 'DET-INJ.tool' }] : []), ...notDeployed().filter((d) => d.id !== 'DET-PII'), pii.result, ...(safeIn ? [safeIn] : []), ...(ctx.anom ? [ctx.anom] : [])];
     if (injTool?.status === 'ok' && injTool.band && injTool.band !== 'low') {
       await taint(sessionKey(ctx), injTool.band, `tool result in llm_call ${ctx.requestId}`);
       ctx.reasons.push(`DET-INJ ${injTool.band} on tool content in the conversation: session tainted (RB-BL-12)`);

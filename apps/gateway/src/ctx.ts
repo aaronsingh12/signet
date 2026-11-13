@@ -5,6 +5,7 @@ import {
 } from '@signet/core';
 import { appendRecord } from './ledgerclient';
 import * as limits from './limits';
+import { anomalyEnabled, anomalyResult, runaway, type AnomalyResult } from './anomaly';
 import type { DlpEvent } from './policy';
 import * as state from './state';
 import { exportSpan, traceFrom, traceparentOf, type TraceContext } from './otel';
@@ -44,6 +45,7 @@ export interface Ctx {
   callerUserId: string | null;
   dlp: DlpEvent[];
   detectors: DetectorResult[];
+  anom?: AnomalyResult | null; // DET-ANOM, scored at step 5
   decision: Outcome;
   tokensIn: number;
   tokensOut: number;
@@ -110,9 +112,9 @@ export function wouldBlock(ctx: Ctx, n: number, rules: string[], reason: string)
 }
 
 // Automatic ladder action from a gateway rule (RB-INV-05: always cites the rule).
-export async function ladder(ctx: Ctx, action: 'kill' | 'quarantine', ruleId: string, reason: string, evidence: Record<string, unknown> = {}) {
+export async function ladder(ctx: Ctx, action: 'kill' | 'quarantine' | 'throttle', ruleId: string, reason: string, evidence: Record<string, unknown> = {}) {
   const c = ctx.claims!;
-  state.applyScope(`agent:${c.agent_id}`, { level: action === 'kill' ? 'killed' : 'quarantined' }); // effective on this node at once
+  if (action !== 'throttle') state.applyScope(`agent:${c.agent_id}`, { level: action === 'kill' ? 'killed' : 'quarantined' }); // effective on this node at once
   ctx.extra.ladder = { action, rule_id: ruleId };
   try {
     await state.internal('/internal/enforce', {
@@ -190,7 +192,19 @@ export async function preflight(ctx: Ctx, headers: IncomingHttpHeaders) {
 
   // 5. Rate, volume and cost limits; a throttle scales them down (ladder level 3).
   const rpm = cert!.limits.rpm * eff.throttleFactor;
-  const used = await limits.takeRequest(claims.agent_id, rpm);
+  const used = await limits.takeRequest(claims.agent_id, rpm, anomalyEnabled() ? { tier: cert!.tier, tool: ctx.actionType === 'tool_call' ? ctx.target : undefined } : undefined);
+  ctx.anom = anomalyResult(used.anomaly);
+  // Runaway (DA 4 kill condition): over 200% of a seal limit while DET-ANOM has been High for 10 minutes.
+  const runawayWhy = runaway(ctx.anom, used, cert!.limits);
+  if (runawayWhy) {
+    await ladder(ctx, 'kill', 'RB-KILL-03', `runaway: ${runawayWhy}; DET-ANOM High for ${Math.round((ctx.anom!.high_for_ms ?? 0) / 60_000)} minutes`, { anomaly: ctx.anom });
+    halt(ctx, 5, 403, 'runaway', `${runawayWhy} while behaviour has been anomalous for 10 minutes; the agent has been killed`, 'kill', ['RB-KILL-03', 'DET-ANOM']);
+  }
+  if (ctx.anom?.status === 'shadow' && ctx.anom.band && ctx.anom.band !== 'low') ctx.reasons.push(`DET-ANOM (shadow) ${ctx.anom.band}: ${ctx.anom.feature} ${ctx.anom.features?.[ctx.anom.feature ?? ''] ?? ''} SD above baseline`);
+  // A cost anomaly on a T3/T4 agent throttles it (BP 7 ladder level 3: "cost anomaly"); T1/T2 go through the decision matrix.
+  if (ctx.anom?.status === 'ok' && ctx.anom.band === 'high' && ctx.anom.feature === 'cost' && (cert!.tier === 'T3' || cert!.tier === 'T4') && eff.throttleFactor >= 1) {
+    await ladder(ctx, 'throttle', 'DET-ANOM', `cost ${ctx.anom.features?.cost} SD above this agent's baseline`, { anomaly: ctx.anom });
+  }
   if (!used.allowed) halt(ctx, 5, 429, 'rate_limited', `over ${Math.floor(rpm)} requests per minute${eff.throttleFactor < 1 ? ' (throttled)' : ''}`, 'throttle', ['BP-5.2-5']);
   if (used.tokens >= cert!.limits.tokens_per_day * eff.throttleFactor) halt(ctx, 5, 429, 'token_budget_exhausted', 'daily token limit reached', 'throttle', ['BP-5.2-5']);
   if (cert!.limits.usd_per_day > 0 && used.usd >= cert!.limits.usd_per_day * eff.throttleFactor) halt(ctx, 5, 429, 'cost_budget_exhausted', 'daily cost limit reached', 'throttle', ['BP-5.2-5']);
@@ -275,6 +289,7 @@ export async function finish(ctx: Ctx, err: Halt | null, okBody: unknown): Promi
     traceparent: traceparentOf(ctx.trace),
   };
   exportDecisionSpan(ctx, data, refusal, recordId);
+  if (refusal && ctx.claims) limits.recordFailure(ctx.claims.agent_id); // DET-ANOM error-rate feature
   if (err) return errorDone(ctx, err, recordId, headers);
   return { status: 200, body: okBody, headers, recordId };
 }

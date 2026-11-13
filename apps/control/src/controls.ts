@@ -1,4 +1,4 @@
-import { combine, sha256 } from '@signet/core';
+import { baselineReady, combine, sha256 } from '@signet/core';
 import { db, nowIso, tx } from './db';
 import { PolicyError, invalid, notFound } from './errors';
 import { FRAMEWORKS, PLACEHOLDERS, REQUIREMENTS } from './frameworks';
@@ -140,7 +140,16 @@ const CONTROLS: ControlDef[] = [
     test: 'Hash chain verifies end to end',
     check: async () => { const r = await ledger.verifyIncremental(); return r.ok ? { status: 'effective', detail: `chain intact up to record ${r.head_seq} (${r.checked} checked this run${r.full ? ', full re-check' : ''})` } : { status: 'ineffective', detail: `chain broken at seq ${r.error?.seq}: ${r.error?.reason}` }; },
   },
-  { id: 'SGC-MON-004', domain: 'MON', severity: 'medium', type: 'automated', objective: 'Behaviour baseline monitored (DET-ANOM, later phase)', test: 'Every prod agent has a baseline' },
+  {
+    id: 'SGC-MON-004', domain: 'MON', severity: 'medium', type: 'automated', objective: 'Behaviour baseline monitored (DET-ANOM, DA 3)', test: 'Every agent with traffic in the last 14 days has a DET-ANOM baseline past the 7-day floor, and DET-ANOM is on',
+    check: async () => {
+      const det = (await all<{ mode: string }>("SELECT mode FROM detector WHERE id = 'DET-ANOM'"))[0];
+      if (!det || det.mode === 'off') return { status: 'ineffective', detail: 'DET-ANOM is off' };
+      const r = await all<{ agent_id: string; data: string | null }>(`SELECT DISTINCT l.agent_id, b.data FROM ledger_record l LEFT JOIN agent_baseline b ON b.agent_id = l.agent_id WHERE l.kind = 'transaction' AND l.ts >= ? AND l.agent_id IS NOT NULL`, since(14 * DAY));
+      const learning = r.filter((x) => !x.data || !baselineReady(JSON.parse(x.data))).length;
+      return !r.length ? { status: 'not_tested', detail: 'no agent traffic in 14 days' } : learning ? { status: 'partially_effective', detail: `${learning} of ${r.length} agent(s) still building a baseline; DET-ANOM ${det.mode}` } : { status: 'effective', detail: `${r.length} agent(s) with baselines; DET-ANOM ${det.mode}` };
+    },
+  },
   { id: 'SGC-MON-005', domain: 'MON', severity: 'medium', type: 'automated', objective: 'Groundedness sampled (Tier 2 evaluator, Phase 3)', test: 'Weekly 1% sample' },
   { id: 'SGC-RESP-001', domain: 'RESP', severity: 'high', type: 'automated', objective: 'Kill capability tested (Kill Drills, Phase 3)', test: 'Drill within schedule' },
   {

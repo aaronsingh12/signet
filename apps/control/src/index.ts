@@ -3,6 +3,7 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import { devOverridesAllowed, devSecret, env, newId, toJwk, verifyJws, type CertificateBody } from '@signet/core';
 import { db, nowIso } from './db';
 import * as detectors from './detectors';
+import * as anomaly from './anomaly';
 import * as discovery from './discovery';
 import * as enforcement from './enforcement';
 import { PolicyError, invalid } from './errors';
@@ -603,9 +604,36 @@ int.post('/ledger', route(async (req) => {
   }
   return Array.isArray(req.body?.records) ? { records: records.map((r) => ({ record_id: r.record_id, seq: r.seq })) } : { record: records[0] };
 }));
+const SYSTEM_PRINCIPAL = { id: 'system', name: 'Signet', kind: 'service' as const, roles: [], permissions: [], groups: [], mfa: false, auth: 'bearer' as const, auth_time: null };
+// Owners who left (SCIM): after the grace period with no new owner, the agent is quarantined (BP 6 Stage 7).
+async function quarantineOwnerless(): Promise<number> {
+  let n = 0;
+  for (const a of await scim.overdueOwnerless()) {
+    const level = await enforcement.agentLevel(a.id);
+    if (level === 'quarantined' || level === 'killed') continue;
+    await enforcement.applyLadder({ agentId: a.id }, 'quarantine', { actor: 'system', automatic: true, rule_id: 'BP-6-S7-OWNER', reason: `owner left on ${a.owner_left_at.slice(0, 10)} and no new owner was named within ${scim.OWNER_GRACE_DAYS} days` });
+    n++;
+  }
+  return n;
+}
 // Shared limit counters for gateways (rate per minute, daily usage, out-of-manifest attempts).
-int.post('/limits/take', route(async (req) => (await counters.takeRequest(String(req.body?.agent_id)))));
-int.post('/limits/usage', route(async (req) => ((await counters.addUsage(String(req.body?.agent_id), Number(req.body?.tokens) || 0, Number(req.body?.usd) || 0)), { ok: true })));
+int.post('/limits/take', route(async (req) => {
+  const agentId = String(req.body?.agent_id);
+  const taken = await counters.takeRequest(agentId);
+  if (!req.body?.anomaly) return taken;
+  // DET-ANOM is scored on the same call, so it costs no extra round trip (DA 3: 2 ms budget).
+  await anomaly.countRequest(agentId);
+  const tier = ['T1', 'T2', 'T3', 'T4'].includes(req.body?.tier) ? req.body.tier : 'T2';
+  return { ...taken, anomaly: await anomaly.live(agentId, tier, typeof req.body?.tool === 'string' ? req.body.tool : undefined) };
+}));
+int.post('/limits/usage', route(async (req) => {
+  const agentId = String(req.body?.agent_id);
+  await counters.addUsage(agentId, Number(req.body?.tokens) || 0, Number(req.body?.usd) || 0);
+  await anomaly.countOutcome(agentId, Number(req.body?.usd) || 0, false);
+  return { ok: true };
+}));
+// A refused or failed request, for the DET-ANOM error-rate feature.
+int.post('/limits/outcome', route(async (req) => ((await anomaly.countOutcome(String(req.body?.agent_id), 0, req.body?.error === true)), { ok: true })));
 int.post('/limits/out-of-manifest', route(async (req) => ({ attempts: await counters.recordOutOfManifest(String(req.body?.agent_id)) })));
 int.post('/limits/taint', route(async (req) => ({ band: await counters.setTaint(String(req.body?.session), req.body?.band === 'high' ? 'high' : 'elevated') })));
 int.post('/limits/taint/read', route(async (req) => ({ taint: await counters.readTaint(String(req.body?.session)) })));
@@ -642,6 +670,9 @@ int.post('/maintenance/connectors', route(async () => { await servicenow.work();
 int.post('/maintenance/connections', route(async () => { await externalConnections.work(); return { ok: true }; }));
 int.post('/maintenance/edge', route(async () => { await edge.sweep(); return { ok: true }; }));
 int.post('/maintenance/platform-usage', route(async () => { await platforms.sweepUsage(); return { ok: true }; }));
+int.post('/maintenance/baselines', route(async () => (await anomaly.nightly())));
+int.post('/maintenance/aibom', route(async () => (await aibom.nightly(SYSTEM_PRINCIPAL))));
+int.post('/maintenance/ownerless', route(async () => ({ quarantined: await quarantineOwnerless() })));
 int.post('/maintenance/counters', route(async () => { await counters.sweep(); return { ok: true }; }));
 int.post('/maintenance/roots', route(async () => ({ sealed: await evidence.sealFinishedDays(), anchored: await evidence.anchorPending() })));
 app.use('/internal', int);
@@ -672,15 +703,10 @@ every(15_000, 'ladder sweep', async () => (await enforcement.sweepExpired()));
 every(5_000, 'approval sweep', async () => (await approvals.sweep()));
 every(10 * 60_000, 'lifecycle sweep', async () => (await workflow.sweep()))();
 // Nightly AIBOM refresh: new advisories reach agents that have not changed (BP 6 Stage 7).
-every(24 * 3_600_000, 'AIBOM vulnerability rescan', async () => (await aibom.nightly({ id: 'system', name: 'Signet', kind: 'service', roles: [], permissions: [], groups: [], mfa: false, auth: 'bearer', auth_time: null })));
-// Owners who left (SCIM): after the grace period with no new owner, the agent is quarantined (BP 6 Stage 7).
-every(10 * 60_000, 'ownerless agents', async () => {
-  for (const a of await scim.overdueOwnerless()) {
-    const level = await enforcement.agentLevel(a.id);
-    if (level === 'quarantined' || level === 'killed') continue;
-    await enforcement.applyLadder({ agentId: a.id }, 'quarantine', { actor: 'system', automatic: true, rule_id: 'BP-6-S7-OWNER', reason: `owner left on ${a.owner_left_at.slice(0, 10)} and no new owner was named within ${scim.OWNER_GRACE_DAYS} days` });
-  }
-})();
+every(24 * 3_600_000, 'AIBOM vulnerability rescan', async () => (await aibom.nightly(SYSTEM_PRINCIPAL)));
+// DET-ANOM baselines from the last 14 days of the ledger (DA 3).
+every(24 * 3_600_000, 'behaviour baselines', async () => (await anomaly.nightly()));
+every(10 * 60_000, 'ownerless agents', quarantineOwnerless)();
 every(10 * 60_000, 'control evaluation', async () => (await controls.evaluate()))();
 every(3_000, 'connector worker', async () => (await servicenow.work()));
 every(30_000, 'external connection sync', async () => (await externalConnections.work()));

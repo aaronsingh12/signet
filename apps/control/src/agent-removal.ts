@@ -7,6 +7,7 @@ import { forgetAgent } from './live';
 import type { Principal } from './rbac';
 import { eraseAgentLedger } from './erasure-ledger';
 import { eraseAgent as eraseAgentCounters } from './counters';
+import { eraseAgent as eraseAgentBaseline } from './anomaly';
 import { eraseDeploymentArtifacts, eraseEvidenceFiles } from './erasure-files';
 
 function assertAdministrator(actor: Principal): void {
@@ -52,6 +53,9 @@ export async function removeAgent(agentRef: string, confirmation: string, actor:
     (await db.prepare('DELETE FROM enforcement_event WHERE agent_id = ?').run(agent.id));
     (await db.prepare('DELETE FROM enforcement_state WHERE agent_id = ?').run(agent.id));
     await eraseAgentCounters(agent.id);
+    await eraseAgentBaseline(agent.id);
+    (await db.prepare('DELETE FROM vulnerability_finding WHERE agent_id = ?').run(agent.id));
+    (await db.prepare('DELETE FROM aibom WHERE agent_id = ?').run(agent.id));
     (await db.prepare('DELETE FROM revoked_jti WHERE jti IN (SELECT jti FROM issued_token WHERE agent_id = ?)').run(agent.id));
     (await db.prepare('DELETE FROM issued_token WHERE agent_id = ?').run(agent.id));
     (await db.prepare('DELETE FROM deployment_credential WHERE agent_id = ?').run(agent.id));
@@ -76,7 +80,7 @@ export async function removeAgent(agentRef: string, confirmation: string, actor:
     (await db.prepare('DELETE FROM hitl_grant WHERE agent_id = ?').run(agent.id));
     (await db.prepare('DELETE FROM approval_decision WHERE request_id IN (SELECT id FROM approval_request WHERE agent_id = ?)').run(agent.id));
     (await db.prepare('DELETE FROM approval_request WHERE agent_id = ?').run(agent.id));
-    for (const table of ['stage_record', 'classification', 'assessment', 'gap', 'test_run']) (await db.prepare(`DELETE FROM ${table} WHERE lifecycle_id IN (SELECT id FROM lifecycle WHERE agent_id = ?)`).run(agent.id));
+    for (const table of ['stage_record', 'classification', 'assessment', 'gap', 'test_run', 'attack_run']) (await db.prepare(`DELETE FROM ${table} WHERE lifecycle_id IN (SELECT id FROM lifecycle WHERE agent_id = ?)`).run(agent.id));
     (await db.prepare('DELETE FROM lifecycle WHERE agent_id = ?').run(agent.id));
     (await db.prepare('DELETE FROM attestation WHERE agent_id = ?').run(agent.id));
     (await db.prepare('DELETE FROM discovered_asset WHERE agent_id = ?').run(agent.id));
