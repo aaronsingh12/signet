@@ -1,7 +1,7 @@
 import type { IncomingHttpHeaders } from 'node:http';
 import { canonicalize, combine, combineWithDetectorOutageAudit, sha256, strictest, type Outcome } from '@signet/core';
-import { type Ctx, type Done, Halt, finish, halt, humanApproval, ladder, maskArgs, newCtx, preflight, recordOutOfManifest, sessionKey, step, wouldBlock } from './ctx';
-import { detectInjection, notDeployed } from './detectors';
+import { type Ctx, type Done, Halt, decisionInputs, finish, halt, humanApproval, ladder, maskArgs, newCtx, preflight, recordOutOfManifest, sessionKey, step, wouldBlock } from './ctx';
+import { detectInjection, detectJailbreak, notDeployed } from './detectors';
 import { evaluate } from './engine';
 import * as limits from './limits';
 import * as outage from './outage';
@@ -14,6 +14,7 @@ import { blockedAnswer, reviewProposedCalls } from './toolreview';
 import { detokenise, tokenise } from './vault';
 import { maybeEvaluate } from './evaluate';
 import { contentSafety, withholdIfHighRisk } from './content-safety';
+import { maybeSample } from './grounding';
 
 // Model calls to an approved LLM (BP 5.2 steps 6-13 for llm_call).
 
@@ -84,7 +85,11 @@ async function run(ctx: Ctx, headers: IncomingHttpHeaders, body: Record<string, 
   const injCfg = state.detectors.get('DET-INJ');
   const scoring = injCfg && injCfg.mode !== 'off' ? Promise.all([detectInjection(fresh.user, cert.tier, 'prompt'), fresh.tool ? detectInjection(fresh.tool, cert.tier, 'tool') : null]) : null;
   if (scoring) trackPending(sessionKey(ctx), scoring);
-  ctx.detectors = [{ id: 'DET-INJ', version: injCfg?.version ?? 'unknown', status: scoring ? 'pending' : 'unavailable' }, ...notDeployed().filter((d) => d.id !== 'DET-PII'), pii.result];
+  // DET-JB (jailbreak) scores the new user text the same way, in its own isolated process.
+  const jbCfg = state.detectors.get('DET-JB');
+  const jbScoring = jbCfg && jbCfg.mode !== 'off' && jbCfg.version !== 'not-deployed' ? detectJailbreak(fresh.user, cert.tier) : null;
+  const jbPending = jbScoring ? [{ id: 'DET-JB', version: jbCfg!.version, status: 'pending' as const }] : [];
+  ctx.detectors = [{ id: 'DET-INJ', version: injCfg?.version ?? 'unknown', status: scoring ? 'pending' : 'unavailable' }, ...jbPending, ...notDeployed().filter((d) => d.id !== 'DET-PII'), pii.result, ...(ctx.anom ? [ctx.anom] : [])];
   const safeIn = await contentSafety(ctx, canonicalize(inspection.messages), 8);
   if (safeIn) ctx.detectors.push(safeIn);
   step(ctx, 8, 'pass', `${inspection.tokenised ? `${inspection.tokenised} value(s) tokenised` : 'no sensitive data'}; DET-INJ ${scoring ? 'scoring in parallel' : 'off'}`);
@@ -100,6 +105,7 @@ async function run(ctx: Ctx, headers: IncomingHttpHeaders, body: Record<string, 
     ? combineWithDetectorOutageAudit(r.decision as Outcome, ctx.detectors, cert.tier)
     : combine(r.decision as Outcome, ctx.detectors, cert.tier);
   ctx.decision = combined.outcome;
+  ctx.extra.decision_inputs = decisionInputs(cert.tier, r.decision, cert.detector_unavailability === 'audit' ? 'outage_audit' : 'strict', ctx.detectors, combined.outcome);
   ctx.rules.push(...r.rule_ids);
   ctx.reasons.push(...r.details, ...combined.reasons, ...r.obligations.map((o) => `obligation: ${o}`));
   if (combined.outcome === 'deny' && !wouldBlock(ctx, 9, r.rule_ids, r.details.join('; ') || 'denied by policy')) halt(ctx, 9, 403, 'policy_denied', r.details.join('; ') || 'denied by policy', 'deny', r.rule_ids);
@@ -151,9 +157,11 @@ async function run(ctx: Ctx, headers: IncomingHttpHeaders, body: Record<string, 
   step(ctx, 12, 'pass', `${resp.model} in ${ctx.upstreamMs} ms`);
 
   // Detector verdict, applied before anything reaches the agent (DA 4 decision matrix; stricter wins).
+  const jb = jbScoring ? await jbScoring : null;
+  if (jb && !scoring) ctx.detectors = ctx.detectors.map((d) => (d.id === 'DET-JB' ? jb : d));
   if (scoring) {
     const [injUser, injTool] = await scoring;
-    ctx.detectors = [injUser, ...(injTool ? [{ ...injTool, id: 'DET-INJ.tool' }] : []), ...notDeployed().filter((d) => d.id !== 'DET-PII'), pii.result, ...(safeIn ? [safeIn] : [])];
+    ctx.detectors = [injUser, ...(injTool ? [{ ...injTool, id: 'DET-INJ.tool' }] : []), ...(jb ? [jb] : []), ...notDeployed().filter((d) => d.id !== 'DET-PII'), pii.result, ...(safeIn ? [safeIn] : []), ...(ctx.anom ? [ctx.anom] : [])];
     if (injTool?.status === 'ok' && injTool.band && injTool.band !== 'low') {
       await taint(sessionKey(ctx), injTool.band, `tool result in llm_call ${ctx.requestId}`);
       ctx.reasons.push(`DET-INJ ${injTool.band} on tool content in the conversation: session tainted (RB-BL-12)`);
@@ -166,6 +174,16 @@ async function run(ctx: Ctx, headers: IncomingHttpHeaders, body: Record<string, 
     if (injUser.status === 'ok' && injUser.band === 'elevated') {
       if (high) halt(ctx, 13, 403, 'response_withheld', `DET-INJ elevated (${injUser.score}); the answer needs approval and is withheld`, 'require_approval', ['DA-4', 'RB-INV-11']);
       ctx.reasons.push(`DET-INJ elevated (${injUser.score}) on the prompt (DA 4: step-up)`);
+      ctx.decision = strictest(ctx.decision, 'step_up');
+    }
+  }
+  // DET-JB verdict (DA 3: block the response or step up; a jailbreak score alone never quarantines).
+  if (jb?.band && jb.band !== 'low') {
+    if (jb.status === 'shadow') ctx.reasons.push(`DET-JB (shadow) ${jb.band} (${jb.score}): would ${jb.band === 'high' ? 'block the answer' : 'step up'}`);
+    if (jb.status === 'ok' && jb.band === 'high') halt(ctx, 13, 403, 'response_withheld', `jailbreak attempt detected (DET-JB ${jb.score}); the answer is withheld`, 'deny', ['DA-4', 'DET-JB']);
+    if (jb.status === 'ok' && jb.band === 'elevated') {
+      if (cert.tier === 'T1' || cert.tier === 'T2') halt(ctx, 13, 403, 'response_withheld', `DET-JB elevated (${jb.score}); the answer needs approval and is withheld`, 'require_approval', ['DA-4', 'DET-JB', 'RB-INV-11']);
+      ctx.reasons.push(`DET-JB elevated (${jb.score}) on the prompt (DA 4: step-up)`);
       ctx.decision = strictest(ctx.decision, 'step_up');
     }
   }
@@ -189,6 +207,8 @@ async function run(ctx: Ctx, headers: IncomingHttpHeaders, body: Record<string, 
     }
   }
 
+  // The answer as the model wrote it (still tokenised), for DET-GROUND sampling below.
+  const modelAnswer = typeof resp.choices?.[0]?.message?.content === 'string' ? resp.choices[0].message.content : '';
   // 13. DLP outbound: restore tokens for this caller, redact secrets, mask cards.
   const allowedActions = new Set(Object.keys(policy.actions).map((k) => k.split('.').pop()));
   for (const choice of resp.choices ?? []) {
@@ -208,6 +228,8 @@ async function run(ctx: Ctx, headers: IncomingHttpHeaders, body: Record<string, 
   }
   const outActions = ctx.dlp.filter((d) => d.direction === 'out' && d.action !== 'allow').length;
   step(ctx, 13, 'pass', outActions ? `${outActions} value(s) redacted or masked` : 'clean');
+  // DET-GROUND (Tier 2, offline): a sample of answers with sources goes to the judge; findings only.
+  if (!ctx.softBlock && maybeSample(claims.agent_id, ctx.requestId, cert.tier, inspection.messages as never, modelAnswer)) ctx.reasons.push('sampled for groundedness review (DET-GROUND)');
 
   return resp;
 }

@@ -14,14 +14,22 @@ COPY --from=opa /opa /usr/local/bin/opa
 RUN opa test policy/ && opa build -t wasm -e signet/decision/result policy/signet.rego -o /tmp/policy-bundle.tar.gz \
   && mkdir -p policy/dist && tar -xzf /tmp/policy-bundle.tar.gz -C policy/dist /policy.wasm && chmod 644 policy/dist/policy.wasm && rm /tmp/policy-bundle.tar.gz
 RUN npm ci --ignore-scripts && npm run build
+# Model detectors (DET-INJ, DET-JB) are opt-in: they add about 1.2 GB to the image and need about 1.5 GB
+# of memory. With SIGNET_DETECTOR_MODELS=1 the models are downloaded from their pinned revisions and the
+# build stops if a hash does not match the pin. Without them the detectors report unavailable (fail safe).
+ARG SIGNET_DETECTOR_MODELS=0
+RUN mkdir -p /src/models && if [ "$SIGNET_DETECTOR_MODELS" = "1" ]; then npx tsx scripts/fetch-models.mts --dir /src/models; fi
 
 FROM node:24-slim
+ARG SIGNET_DETECTOR_MODELS=0
 ENV NODE_ENV=production VERCEL=1 SIGNET_HOME=/app SIGNET_DATA_DIR=/tmp/signet NODE_USE_SYSTEM_CA=1
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
-RUN npm init -y >/dev/null && npm install --omit=dev --ignore-scripts express@4.22.3 @open-policy-agent/opa-wasm@1.10.0 && npm cache clean --force
+RUN npm init -y >/dev/null && npm install --omit=dev --ignore-scripts express@4.22.3 @open-policy-agent/opa-wasm@1.10.0 \
+  && if [ "$SIGNET_DETECTOR_MODELS" = "1" ]; then npm install --omit=dev @huggingface/transformers@3.8.1; fi && npm cache clean --force
 COPY --from=build /src/dist/gateway.mjs /src/dist/detector-worker.mjs ./
 COPY --from=build /src/dist/policy ./policy
+COPY --from=build /src/models ./models
 USER node
 EXPOSE 3000
 CMD ["node", "gateway.mjs"]

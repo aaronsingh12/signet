@@ -2,7 +2,8 @@
 // Stateless: nothing is kept between calls. No network code, no tools, no instruction channel.
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
-import { existsSync } from 'node:fs';
+import { createReadStream, existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 
 const modelDir = process.argv[2];
 const { AutoTokenizer, AutoModelForSequenceClassification, env } = await import('@huggingface/transformers');
@@ -13,7 +14,8 @@ const name = modelDir.split(/[\\/]/).pop();
 const quantized = process.argv[3] !== 'fp32' && existsSync(join(modelDir, 'onnx', 'model_quantized.onnx'));
 const tokenizer = await AutoTokenizer.from_pretrained(name);
 const model = await AutoModelForSequenceClassification.from_pretrained(name, { dtype: quantized ? 'q8' : 'fp32' });
-const injIndex = Number(Object.entries(model.config.id2label).find(([, l]) => /inject/i.test(l))?.[0] ?? 1);
+// The class to score: injection, jailbreak or malicious, whatever the model calls it.
+const injIndex = Number(Object.entries(model.config.id2label).find(([, l]) => /inject|jailbreak|malicious/i.test(l))?.[0] ?? 1);
 
 const softmax = (xs) => {
   const m = Math.max(...xs);
@@ -29,7 +31,15 @@ async function scoreText(text) {
 }
 
 await scoreText('warm up'); // first run compiles the graph
-process.stdout.write(`${JSON.stringify({ ready: true, info: `${name} ${quantized ? 'int8' : 'fp32'}` })}\n`);
+// The hash of the weights actually loaded, checked against the pin in the policy bundle (DA 3). A model
+// whose weights sit in a separate .onnx.data file is hashed over both files, graph first.
+const file = join(modelDir, 'onnx', quantized ? 'model_quantized.onnx' : 'model.onnx');
+const h = createHash('sha256');
+for (const f of [file, `${file}.data`].filter((f) => existsSync(f))) {
+  await new Promise((resolve, reject) => createReadStream(f).on('data', (d) => h.update(d)).on('end', resolve).on('error', reject));
+}
+const sha256 = h.digest('hex');
+process.stdout.write(`${JSON.stringify({ ready: true, info: `${name} ${quantized ? 'int8' : 'fp32'}`, sha256 })}\n`);
 
 for await (const line of createInterface({ input: process.stdin })) {
   let msg;

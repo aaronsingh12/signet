@@ -1,6 +1,6 @@
 import type { IncomingHttpHeaders } from 'node:http';
 import { canonicalize, combine, sha256, type Outcome, type ToolAlias } from '@signet/core';
-import { type Ctx, type Done, Halt, finish, halt, humanApproval, ladder, maskArgs, newCtx, preflight, recordOutOfManifest, sessionKey, step, wouldBlock } from './ctx';
+import { type Ctx, type Done, Halt, decisionInputs, finish, halt, humanApproval, ladder, maskArgs, newCtx, preflight, recordOutOfManifest, sessionKey, step, wouldBlock } from './ctx';
 import { detectInjection, notDeployed } from './detectors';
 import { evaluate } from './engine';
 import { appendRecord } from './ledgerclient';
@@ -82,11 +82,15 @@ async function run(ctx: Ctx, headers: IncomingHttpHeaders, req: ToolRequest): Pr
     action: { key, args: req.args },
     context: { tainted: !!t, step_up: eff.stepUp, tool_calls_in_session: await limits.toolCallsIn(sessionKey(ctx)), tool_calls_limit: cert.limits.tool_calls_per_session ?? null },
   });
-  ctx.detectors = notDeployed();
+  ctx.detectors = [...notDeployed(), ...(ctx.anom ? [ctx.anom] : [])];
   let outcome = r.decision as Outcome;
   if (di.approval && outcome !== 'deny') outcome = 'require_approval';
-  const combined = combine(outcome, [], cert.tier); // detectors score tool responses (step 13), not arguments
+  // DET-INJ scores tool responses (step 13), not arguments. DET-ANOM (tool mix, volume) applies here once it
+  // is active; in shadow or while learning it is recorded but does not hold tool calls.
+  const combinedOn = ctx.anom?.status === 'ok' ? [ctx.anom] : [];
+  const combined = combine(outcome, combinedOn, cert.tier);
   ctx.decision = combined.outcome;
+  ctx.extra.decision_inputs = decisionInputs(cert.tier, outcome, 'strict', combinedOn, combined.outcome);
   ctx.rules.push(...r.rule_ids, ...(di.approval ? [di.approval.rule] : []));
   ctx.approverGroups = r.approver_groups;
   if (r.decision === 'deny') {
@@ -148,8 +152,8 @@ async function run(ctx: Ctx, headers: IncomingHttpHeaders, req: ToolRequest): Pr
       await appendRecord({ kind: 'transaction', agent_id: claims.agent_id, cert_id: cert.cert_id, data: { action_type: 'detector_score', request_id: requestId, target: key, session_id: ctx.sessionId, node_id: state.NODE_ID, detector: inj, applied, policy_decision: applied ? 'taint' : inj.status === 'shadow' ? 'would_taint' : 'none' } }).catch(() => {});
     });
     trackPending(sessionKey(ctx), scoring);
-    ctx.detectors = [{ id: 'DET-INJ', version: cfg.version, status: 'pending' }, ...notDeployed()];
-  } else ctx.detectors = [{ id: 'DET-INJ', version: cfg?.version ?? 'unknown', status: 'unavailable' }, ...notDeployed()];
+    ctx.detectors = [{ id: 'DET-INJ', version: cfg.version, status: 'pending' }, ...notDeployed(), ...(ctx.anom ? [ctx.anom] : [])];
+  } else ctx.detectors = [{ id: 'DET-INJ', version: cfg?.version ?? 'unknown', status: 'unavailable' }, ...notDeployed(), ...(ctx.anom ? [ctx.anom] : [])];
   const cleaned = cleanJson(result, ctx.dlp);
   ctx.responseHash = sha256(canonicalize(cleaned ?? null));
   if (ctx.decision === 'allow' && ctx.dlp.some((d) => d.direction === 'out' && d.action !== 'allow')) ctx.decision = 'allow_with_obligations';

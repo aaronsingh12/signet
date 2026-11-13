@@ -1,4 +1,6 @@
-import { DEV_OVERRIDE_DISABLED, devOverridesAllowed, type DetectorMode } from '@signet/core';
+import { DEV_OVERRIDE_DISABLED, MODEL_DETECTORS, devOverridesAllowed, knownPin, specHash, type DetectorMode } from '@signet/core';
+import { GROUND_SPEC } from './grounding';
+import * as benchmarks from './benchmarks';
 import { db, nowIso, tx } from './db';
 import { PolicyError, forbidden, invalid, notFound } from './errors';
 import * as hub from './hub';
@@ -6,14 +8,18 @@ import * as ledger from './ledger';
 import type { Principal } from './rbac';
 
 // Detector registry (DA 3, 6; E38-E40). A new detector version runs in shadow (scores logged, never
-// enforced) for at least 14 days before a person promotes it (RB-MOD-03, RB-INV-10). The DA 3
-// detectors start off: DET-INJ ships as a ready-made open model; DET-JB and DET-PII models are later.
+// enforced) for at least 14 days before a person promotes it (RB-MOD-03, RB-INV-10). DET-INJ and DET-JB
+// are small open models run in the gateway (core MODEL_DETECTORS); a replacement for an active version
+// runs beside it as a challenger (DA 6 champion/challenger).
 
 const SHADOW_DAYS = 14;
+const modelNotes = (id: 'DET-INJ' | 'DET-JB') => `${MODEL_DETECTORS[id].repo} (${MODEL_DETECTORS[id].licence}): ${MODEL_DETECTORS[id].notes}`;
 
 const SEED = [
-  { id: 'DET-INJ', version: 'deberta-v3-base-injection-v2-fp32', notes: 'protectai/deberta-v3-base-prompt-injection-v2 (Apache-2.0), fp32 ONNX; int8 dynamic quantisation was rejected (scored a planted instruction 0.10 vs 1.00)' },
-  { id: 'DET-JB', version: 'not-deployed', notes: 'model not selected yet (E39)' },
+  { id: 'DET-INJ', version: MODEL_DETECTORS['DET-INJ'].version, notes: modelNotes('DET-INJ') },
+  { id: 'DET-JB', version: MODEL_DETECTORS['DET-JB'].version, notes: modelNotes('DET-JB') },
+  { id: 'DET-ANOM', version: 'baseline-zscore-v1', notes: 'statistics, no neural network: per-agent baselines of volume, cost and errors by hour of day plus tool mix from the last 14 days of the ledger (DA 3)' },
+  { id: 'DET-GROUND', version: 'tenant-llm-judge-v1', notes: 'Tier 2, offline: the approved cloud model of the tenant judges a sample of answers (1%, 5% for T1) against their sources; findings only, never changes a decision (DA 3)' },
   { id: 'DET-PII', version: 'presidio-analyzer-2', notes: 'Microsoft Presidio (MIT) for names and addresses in free text; gateway calls SIGNET_PRESIDIO_URL. Pattern DLP still covers structured identifiers.' },
   // DET-SAFE was blocking unsafe content before it was registered here, so it starts active (recorded as
   // grandfathered in the ledger) rather than silently dropping to shadow. It uses the cloud LLM as a
@@ -32,6 +38,43 @@ for (const d of SEED) {
   (await db.prepare("UPDATE detector SET shadow_since = COALESCE(shadow_since, ?) WHERE id = ? AND mode = 'shadow'").run(nowIso(), d.id));
 }
 
+// Model upgrades for existing installs. A detector that is not active moves to the new version and starts
+// its 14 days in shadow again (RB-MOD-03). An active one keeps running and the new version becomes its
+// challenger, so protection never drops while the new version proves itself.
+for (const id of ['DET-INJ', 'DET-JB'] as const) {
+  const want = MODEL_DETECTORS[id];
+  const d = (await db.prepare('SELECT version, mode, challenger_version FROM detector WHERE id = ?').get(id)) as { version: string; mode: DetectorMode; challenger_version: string | null } | undefined;
+  if (!d || d.version === want.version || d.challenger_version === want.version) continue;
+  if (d.mode === 'active') {
+    (await db.prepare('UPDATE detector SET challenger_version = ?, challenger_sha256 = ?, challenger_since = ? WHERE id = ?').run(want.version, want.sha256, nowIso(), id));
+    (await ledger.append({ kind: 'admin', data: { event: 'detector.challenger_started', detector: id, champion: d.version, challenger: want.version, sha256: want.sha256, actor: 'system' } }));
+  } else {
+    (await db.prepare("UPDATE detector SET version = ?, model_sha256 = ?, mode = 'shadow', shadow_since = ?, notes = ? WHERE id = ?").run(want.version, want.sha256, nowIso(), modelNotes(id), id));
+    (await ledger.append({ kind: 'admin', data: { event: 'detector.version_changed', detector: id, from: d.version, to: want.version, sha256: want.sha256, mode: 'shadow', reason: d.version === 'not-deployed' ? 'model deployed' : 'replaced: the previous version failed the benchmark', actor: 'system' } }));
+  }
+}
+
+// Pin every detector version Signet knows from code (DA 3): model weights for DET-INJ, the specification
+// hash for the others. A pin is set once per version; a different hash for the same version is refused
+// by the gateway (the detector reports unavailable) until a person pins a new release.
+const pinFor = (id: string, version: string) => knownPin(id, version) ?? (id === 'DET-GROUND' && version === GROUND_SPEC.version ? specHash(GROUND_SPEC) : null);
+for (const d of (await db.prepare('SELECT id, version, model_sha256 FROM detector').all()) as { id: string; version: string; model_sha256: string | null }[]) {
+  const pin = pinFor(d.id, d.version);
+  if (!pin) continue;
+  if (!d.model_sha256) {
+    (await db.prepare('UPDATE detector SET model_sha256 = ? WHERE id = ? AND model_sha256 IS NULL').run(pin, d.id));
+    (await ledger.append({ kind: 'admin', data: { event: 'detector.pinned', detector: d.id, version: d.version, sha256: pin, actor: 'system' } }));
+  }
+  (await db.prepare('INSERT INTO detector_pin (detector_id, version, sha256, pinned_by, pinned_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING').run(d.id, d.version, d.model_sha256 ?? pin, 'system', nowIso()));
+}
+// A version already active (DET-SAFE, grandfathered) is the champion a new version must beat.
+(await db.prepare("UPDATE detector_pin SET activated_at = ? WHERE activated_at IS NULL AND (detector_id, sha256) IN (SELECT id, model_sha256 FROM detector WHERE mode = 'active')").run(nowIso()));
+
+/** Hashes each detector has ever been pinned to (Replay checks recorded hashes against these). */
+export async function pinsOf(id: string): Promise<Set<string>> {
+  return new Set(((await db.prepare('SELECT sha256 FROM detector_pin WHERE detector_id = ?').all(id)) as { sha256: string }[]).map((r) => r.sha256));
+}
+
 export const list = async () => (await db.prepare('SELECT * FROM detector ORDER BY id').all());
 
 export async function setMode(id: string, mode: DetectorMode, p: Principal, opts: { reason: string; dev_override?: boolean; model_sha256?: string }) {
@@ -42,6 +85,7 @@ export async function setMode(id: string, mode: DetectorMode, p: Principal, opts
   if (!d) throw notFound(`detector ${id}`);
   if (d.version === 'not-deployed' && mode !== 'off') throw new PolicyError('E39', `${id} has no model deployed`, 409);
   let override = false;
+  let skipped: string[] = [];
   if (mode === 'active') {
     const days = d.shadow_since ? (Date.now() - Date.parse(d.shadow_since)) / 86_400_000 : 0;
     if (d.mode !== 'shadow') throw new PolicyError('RB-MOD-03', `${id} must run in shadow before it is promoted`, 409);
@@ -52,13 +96,78 @@ export async function setMode(id: string, mode: DetectorMode, p: Principal, opts
       }
       override = true;
     }
+    // Release gate (DA 6 mechanism 4, SGC-SELF-004): benchmark passed, beats the champion, Security and AI Assurance approved.
+    const g = await benchmarks.gate(id);
+    if (!g.ok) {
+      const failed = g.checks.filter((c) => !c.ok);
+      if (!(opts.dev_override && devOverridesAllowed())) throw new PolicyError('SGC-SELF-004', `${id} cannot be promoted: ${failed.map((c) => `${c.what}: ${c.detail}`).join('; ')}`, 409);
+      override = true;
+      skipped = failed.map((c) => c.what);
+    }
   }
   (await tx(async () => {
     (await db.prepare('UPDATE detector SET mode = ?, shadow_since = CASE WHEN ? = ? THEN ? ELSE shadow_since END, promoted_by = ?, promoted_at = ?, model_sha256 = COALESCE(?, model_sha256) WHERE id = ?').run(
       mode, mode, 'shadow', nowIso(), p.id, nowIso(), opts.model_sha256 ?? null, id,
     ));
-    (await ledger.append({ kind: 'admin', data: { event: 'detector.mode_changed', detector: id, version: d.version, from: d.mode, to: mode, reason: opts.reason, shadow_period_skipped: override, actor: p.id } }));
+    (await ledger.append({ kind: 'admin', data: { event: 'detector.mode_changed', detector: id, version: d.version, from: d.mode, to: mode, reason: opts.reason, shadow_period_skipped: override, release_checks_skipped: skipped, actor: p.id } }));
   }));
+  if (mode === 'active') await benchmarks.markActivated(id);
   hub.publish('bundle', { reason: 'detector.mode_changed', detector: id });
   return (await db.prepare('SELECT * FROM detector WHERE id = ?').get(id));
 }
+
+// --- Champion / challenger (DA 6 mechanism 4) -----------------------------------------------------------
+/** Run a new version beside the current one, scoring only. Only versions Signet can pin are accepted. */
+export async function startChallenger(id: string, version: string, p: Principal, reason: string) {
+  if (p.kind !== 'human') throw forbidden('RB-INV-10', 'detector changes are human-only');
+  if (!reason?.trim()) throw invalid('a reason is required');
+  const d = (await db.prepare('SELECT version FROM detector WHERE id = ?').get(id)) as { version: string } | undefined;
+  if (!d) throw notFound(`detector ${id}`);
+  if (d.version === version) throw invalid(`${version} is already the current version`);
+  const sha = pinFor(id, version);
+  if (!sha) throw invalid(`${version} is not a version Signet can pin for ${id}`);
+  (await db.prepare('UPDATE detector SET challenger_version = ?, challenger_sha256 = ?, challenger_since = ? WHERE id = ?').run(version, sha, nowIso(), id));
+  (await db.prepare('INSERT INTO detector_pin (detector_id, version, sha256, pinned_by, pinned_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING').run(id, version, sha, p.id, nowIso()));
+  (await ledger.append({ kind: 'admin', data: { event: 'detector.challenger_started', detector: id, champion: d.version, challenger: version, sha256: sha, reason, actor: p.id } }));
+  hub.publish('bundle', { reason: 'detector.challenger_started', detector: id });
+  return (await db.prepare('SELECT * FROM detector WHERE id = ?').get(id));
+}
+
+/** The challenger replaces the champion: 14 days beside it, benchmark passed and better, two sign-offs. */
+export async function promoteChallenger(id: string, p: Principal, opts: { reason: string; dev_override?: boolean }) {
+  if (p.kind !== 'human') throw forbidden('RB-INV-10', 'detector promotion is human-only');
+  if (!opts.reason?.trim()) throw invalid('a reason is required');
+  const d = (await db.prepare('SELECT * FROM detector WHERE id = ?').get(id)) as { version: string; mode: DetectorMode; challenger_version: string | null; challenger_sha256: string | null; challenger_since: string | null } | undefined;
+  if (!d?.challenger_version || !d.challenger_sha256) throw notFound(`challenger for ${id}`);
+  const skipped: string[] = [];
+  const days = d.challenger_since ? (Date.now() - Date.parse(d.challenger_since)) / 86_400_000 : 0;
+  const allowSkip = opts.dev_override && devOverridesAllowed();
+  if (days < SHADOW_DAYS) {
+    if (!allowSkip) throw new PolicyError('RB-MOD-03', `the challenger has run beside ${d.version} for ${days.toFixed(1)} days; promotion needs ${SHADOW_DAYS}`, 409);
+    skipped.push('shadow period');
+  }
+  const g = await benchmarks.gate(id, { version: d.challenger_version, sha256: d.challenger_sha256 });
+  if (!g.ok) {
+    const failed = g.checks.filter((c) => !c.ok);
+    if (!allowSkip) throw new PolicyError('SGC-SELF-004', `${d.challenger_version} cannot replace ${d.version}: ${failed.map((c) => `${c.what}: ${c.detail}`).join('; ')}`, 409);
+    skipped.push(...failed.map((c) => c.what));
+  }
+  (await tx(async () => {
+    (await db.prepare("UPDATE detector SET version = ?, model_sha256 = ?, mode = 'active', promoted_by = ?, promoted_at = ?, challenger_version = NULL, challenger_sha256 = NULL, challenger_since = NULL WHERE id = ?").run(d.challenger_version, d.challenger_sha256, p.id, nowIso(), id));
+    (await ledger.append({ kind: 'admin', data: { event: 'detector.challenger_promoted', detector: id, from: d.version, to: d.challenger_version, sha256: d.challenger_sha256, reason: opts.reason, release_checks_skipped: skipped, actor: p.id } }));
+  }));
+  await benchmarks.markActivated(id);
+  hub.publish('bundle', { reason: 'detector.challenger_promoted', detector: id });
+  return (await db.prepare('SELECT * FROM detector WHERE id = ?').get(id));
+}
+
+export async function stopChallenger(id: string, p: Principal, reason: string) {
+  if (!reason?.trim()) throw invalid('a reason is required');
+  const d = (await db.prepare('SELECT challenger_version FROM detector WHERE id = ?').get(id)) as { challenger_version: string | null } | undefined;
+  if (!d?.challenger_version) throw notFound(`challenger for ${id}`);
+  (await db.prepare('UPDATE detector SET challenger_version = NULL, challenger_sha256 = NULL, challenger_since = NULL WHERE id = ?').run(id));
+  (await ledger.append({ kind: 'admin', data: { event: 'detector.challenger_stopped', detector: id, challenger: d.challenger_version, reason, actor: p.id } }));
+  hub.publish('bundle', { reason: 'detector.challenger_stopped', detector: id });
+  return (await db.prepare('SELECT * FROM detector WHERE id = ?').get(id));
+}
+

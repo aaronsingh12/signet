@@ -1,4 +1,4 @@
-import { combine, sha256 } from '@signet/core';
+import { baselineReady, combine, sha256 } from '@signet/core';
 import { db, nowIso, tx } from './db';
 import { PolicyError, invalid, notFound } from './errors';
 import { FRAMEWORKS, PLACEHOLDERS, REQUIREMENTS } from './frameworks';
@@ -140,8 +140,25 @@ const CONTROLS: ControlDef[] = [
     test: 'Hash chain verifies end to end',
     check: async () => { const r = await ledger.verifyIncremental(); return r.ok ? { status: 'effective', detail: `chain intact up to record ${r.head_seq} (${r.checked} checked this run${r.full ? ', full re-check' : ''})` } : { status: 'ineffective', detail: `chain broken at seq ${r.error?.seq}: ${r.error?.reason}` }; },
   },
-  { id: 'SGC-MON-004', domain: 'MON', severity: 'medium', type: 'automated', objective: 'Behaviour baseline monitored (DET-ANOM, later phase)', test: 'Every prod agent has a baseline' },
-  { id: 'SGC-MON-005', domain: 'MON', severity: 'medium', type: 'automated', objective: 'Groundedness sampled (Tier 2 evaluator, Phase 3)', test: 'Weekly 1% sample' },
+  {
+    id: 'SGC-MON-004', domain: 'MON', severity: 'medium', type: 'automated', objective: 'Behaviour baseline monitored (DET-ANOM, DA 3)', test: 'Every agent with traffic in the last 14 days has a DET-ANOM baseline past the 7-day floor, and DET-ANOM is on',
+    check: async () => {
+      const det = (await all<{ mode: string }>("SELECT mode FROM detector WHERE id = 'DET-ANOM'"))[0];
+      if (!det || det.mode === 'off') return { status: 'ineffective', detail: 'DET-ANOM is off' };
+      const r = await all<{ agent_id: string; data: string | null }>(`SELECT DISTINCT l.agent_id, b.data FROM ledger_record l LEFT JOIN agent_baseline b ON b.agent_id = l.agent_id WHERE l.kind = 'transaction' AND l.ts >= ? AND l.agent_id IS NOT NULL`, since(14 * DAY));
+      const learning = r.filter((x) => !x.data || !baselineReady(JSON.parse(x.data))).length;
+      return !r.length ? { status: 'not_tested', detail: 'no agent traffic in 14 days' } : learning ? { status: 'partially_effective', detail: `${learning} of ${r.length} agent(s) still building a baseline; DET-ANOM ${det.mode}` } : { status: 'effective', detail: `${r.length} agent(s) with baselines; DET-ANOM ${det.mode}` };
+    },
+  },
+  {
+    id: 'SGC-MON-005', domain: 'MON', severity: 'medium', type: 'automated', objective: 'Groundedness sampled (DET-GROUND, Tier 2 evaluator, DA 3)', test: 'DET-GROUND is on and judged a sample of answers in the last 7 days',
+    check: async () => {
+      const det = (await all<{ mode: string }>("SELECT mode FROM detector WHERE id = 'DET-GROUND'"))[0];
+      if (!det || det.mode === 'off') return { status: 'ineffective', detail: 'DET-GROUND is off' };
+      const r = (await all<{ judged: number; ungrounded: number }>("SELECT COUNT(*) FILTER (WHERE status = 'judged') AS judged, COUNT(*) FILTER (WHERE verdict = 'ungrounded') AS ungrounded FROM ground_eval WHERE created_at >= ?", since(7 * DAY)))[0]!;
+      return Number(r.judged) ? { status: 'effective', detail: `${r.judged} answer(s) judged in 7 days, ${r.ungrounded} ungrounded; DET-GROUND ${det.mode}` } : { status: 'not_tested', detail: 'no sampled answers with sources in 7 days' };
+    },
+  },
   { id: 'SGC-RESP-001', domain: 'RESP', severity: 'high', type: 'automated', objective: 'Kill capability tested (Kill Drills, Phase 3)', test: 'Drill within schedule' },
   {
     id: 'SGC-RESP-002', domain: 'RESP', severity: 'high', type: 'automated', objective: 'Incident raised on level 4+ events',
@@ -230,13 +247,53 @@ const CONTROLS: ControlDef[] = [
   { id: 'SGC-RESP-003', domain: 'RESP', severity: 'high', type: 'manual', objective: 'Serious incidents reported to authorities on time (GDPR 72 h, NIS2 24 h, DORA, EU AI Act Art. 73)', test: 'Each level 4+ incident has a reporting decision and, where required, a report filed within the legal deadline' },
   {
     id: 'SGC-SELF-001', domain: 'SELF', severity: 'high', type: 'automated', objective: 'Every Signet detector in use is registered and pinned by hash (DA 7)',
-    test: 'Every detector in shadow or active mode has a recorded model hash',
-    check: async () => { const r = (await all<{ id: string; model_sha256: string | null }>("SELECT id, model_sha256 FROM detector WHERE mode != 'off'")); const bad = r.filter((d) => !d.model_sha256).map((d) => d.id); return !r.length ? { status: 'not_tested', detail: 'no detector in use' } : bad.length ? { status: 'partially_effective', detail: `no pinned model hash for ${bad.join(', ')}` } : { status: 'effective', detail: `${r.length} detector(s) pinned by hash` }; },
+    test: 'Every detector in shadow or active mode has a pinned hash, and every live gateway runs exactly the pinned hash',
+    check: async () => {
+      const r = await all<{ id: string; model_sha256: string | null }>("SELECT id, model_sha256 FROM detector WHERE mode != 'off'");
+      if (!r.length) return { status: 'not_tested', detail: 'no detector in use' };
+      const unpinned = r.filter((d) => !d.model_sha256).map((d) => d.id);
+      // Gateways report the hash of what they run; a difference means a node runs an unreleased version.
+      const nodes = await all<{ id: string; detectors: string | null }>('SELECT id, detectors FROM gateway_node WHERE last_seen >= ?', since(10 * 60_000));
+      const drift: string[] = [];
+      for (const n of nodes) {
+        const hashes = ((n.detectors ? JSON.parse(n.detectors) : {}) as { hashes?: Record<string, string> }).hashes ?? {};
+        for (const d of r) if (d.model_sha256 && hashes[d.id] && hashes[d.id] !== d.model_sha256) drift.push(`${d.id} on ${n.id}`);
+      }
+      if (drift.length) return { status: 'ineffective', detail: `running hash differs from the pin: ${drift.join(', ')} (those detectors report unavailable)` };
+      if (unpinned.length) return { status: 'partially_effective', detail: `no pinned hash for ${unpinned.join(', ')}` };
+      return { status: 'effective', detail: `${r.length} detector(s) pinned by hash${nodes.length ? `; ${nodes.length} live gateway(s) run the pinned versions` : ''}` };
+    },
   },
-  { id: 'SGC-SELF-004', domain: 'SELF', severity: 'high', type: 'semi_automated', objective: 'Detector versions meet benchmark targets before activation (DA 7)', test: 'Release record shows benchmark results above thresholds (benchmark records not built yet)' },
+  {
+    id: 'SGC-SELF-004', domain: 'SELF', severity: 'high', type: 'semi_automated', objective: 'Detector versions meet benchmark targets before activation (DA 7)', test: 'Every active detector version has a passing benchmark on its pinned hash (precision / recall targets, FPR <= 1%)',
+    check: async () => {
+      const act = await all<{ id: string; model_sha256: string | null }>("SELECT id, model_sha256 FROM detector WHERE mode = 'active'");
+      if (!act.length) return { status: 'not_tested', detail: 'no active detector' };
+      const missing: string[] = [];
+      for (const d of act) if (!(await all('SELECT 1 FROM detector_benchmark WHERE detector_id = ? AND sha256 = ? AND passed = 1', d.id, d.model_sha256 ?? '')).length) missing.push(d.id);
+      return missing.length ? { status: missing.length === act.length ? 'ineffective' : 'partially_effective', detail: `active without a passing benchmark: ${missing.join(', ')}` } : { status: 'effective', detail: `${act.length} active detector(s) passed their benchmark` };
+    },
+  },
   { id: 'SGC-SELF-006', domain: 'SELF', severity: 'medium', type: 'manual', objective: 'Detector drift reviewed monthly (DA 7)', test: 'Monthly human-labelled sample completed; findings tracked' },
-  { id: 'SGC-SELF-007', domain: 'SELF', severity: 'high', type: 'automated', objective: 'Decisions are reproducible (DA 7)', test: 'Replay of a random daily sample reproduces 100% of outcomes (Replay tool not built yet)' },
-  { id: 'SGC-SELF-008', domain: 'SELF', severity: 'high', type: 'semi_automated', objective: 'Detectors are isolated: no network, no tools, no memory (DA 7)', test: 'Configuration check of each gateway detector runtime' },
+  {
+    id: 'SGC-SELF-007', domain: 'SELF', severity: 'high', type: 'automated', objective: 'Decisions are reproducible (DA 7)', test: 'Replay of a random daily sample reproduces 100% of outcomes',
+    check: async () => {
+      const r = (await all<{ sampled: number; reproduced: number; mismatched: number; created_at: string }>('SELECT sampled, reproduced, mismatched, created_at FROM replay_run WHERE created_at >= ? ORDER BY created_at DESC LIMIT 1', since(2 * DAY)))[0];
+      if (!r) return { status: 'not_tested', detail: 'no replay sample in the last 2 days' };
+      if (!Number(r.sampled)) return { status: 'not_tested', detail: 'the last sample found no replayable decisions' };
+      return Number(r.mismatched) ? { status: 'ineffective', detail: `${r.mismatched} of ${r.sampled} replayed decisions did not reproduce (${r.created_at.slice(0, 10)})` } : { status: 'effective', detail: `${r.reproduced} of ${r.sampled} sampled decisions reproduced (${r.created_at.slice(0, 10)})` };
+    },
+  },
+  {
+    id: 'SGC-SELF-008', domain: 'SELF', severity: 'high', type: 'semi_automated', objective: 'Detectors are isolated: no network, no tools, no memory (DA 7)', test: 'Each live gateway reports its detector runtime: a separate process under the Node permission model, read-only files, no tools, no state between calls. Network egress is checked on the deployment (NetworkPolicy).',
+    check: async () => {
+      const nodes = await all<{ id: string; detectors: string | null }>('SELECT id, detectors FROM gateway_node WHERE last_seen >= ?', since(10 * 60_000));
+      const running = nodes.map((n) => ({ id: n.id, iso: ((n.detectors ? JSON.parse(n.detectors) : {}) as { isolation?: Record<string, unknown> }).isolation })).filter((n) => n.iso && n.iso.runtime === 'separate process');
+      if (!running.length) return { status: 'not_tested', detail: 'no live gateway runs the model detector runtime' };
+      const bad = running.filter((n) => n.iso!.node_permission_model !== true || n.iso!.fs_write !== false || n.iso!.tools !== false || n.iso!.state_between_calls !== false).map((n) => n.id);
+      return bad.length ? { status: 'ineffective', detail: `detector runtime not isolated on ${bad.join(', ')}` } : { status: 'partially_effective', detail: `${running.length} gateway(s): separate process, permission model, read-only, no tools, stateless; network egress must be confirmed on the deployment` };
+    },
+  },
   { id: 'SGC-SELF-009', domain: 'SELF', severity: 'medium', type: 'manual', objective: 'Detectors red-teamed every release (DA 7)', test: 'Red-team report linked to each detector release' },
   {
     id: 'SGC-SELF-010', domain: 'SELF', severity: 'critical', type: 'automated', objective: 'Fail-safe works when a detector is down (DA 2, 7)',

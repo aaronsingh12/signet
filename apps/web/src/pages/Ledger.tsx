@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Card, Empty, KV, Mono, PageHeader, Pill, Tabs } from '../components/ui';
 import { api, useApi } from '../lib/api';
+import { ReplayButton } from '../components/DetectorRelease';
 import { useCan } from '../lib/auth';
 import { dlpSummary, hash, time } from '../lib/format';
 import { Pipeline } from './LiveTraffic';
@@ -98,6 +99,7 @@ export function Ledger() {
                     <div className="mono mt-1 break-all">root {proof.merkle_root}</div>
                   </div>
                 )}
+                {sel.record.kind === 'transaction' && sel.record.data.decision_inputs && <ReplayButton key={sel.record.record_id} recordId={sel.record.record_id} />}
                 {sel.record.kind === 'transaction' && sel.record.data.steps ? <Pipeline r={sel.record} /> : <pre className="mono max-h-80 overflow-auto rounded-md bg-canvas p-2 text-xs">{JSON.stringify(sel.record.data, null, 2)}</pre>}
               </div>
             ) : (

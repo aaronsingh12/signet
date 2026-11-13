@@ -268,11 +268,13 @@ async function subscribe() {
 }
 
 const heartbeat = () =>
-  internal('/internal/heartbeat', { method: 'POST', body: JSON.stringify({ node_id: NODE_ID, url: `http://localhost:${PORT}`, bundle_version: bundle?.version ?? null, llm_status: heartbeatExtra() }) }).catch(() => {});
+  internal('/internal/heartbeat', { method: 'POST', body: JSON.stringify({ node_id: NODE_ID, url: `http://localhost:${PORT}`, bundle_version: bundle?.version ?? null, llm_status: heartbeatExtra(), detectors: detectorReport() }) }).catch(() => {});
 
 // Set by the provider module, which imports this one (avoids an import cycle).
 let heartbeatExtra: () => unknown = () => null;
 export const setHeartbeatExtra = (fn: () => unknown) => (heartbeatExtra = fn);
+let detectorReport: () => unknown = () => null;
+export const setDetectorReport = (fn: () => unknown) => (detectorReport = fn);
 
 export async function init() {
   for (let attempt = 1; ; attempt++) {

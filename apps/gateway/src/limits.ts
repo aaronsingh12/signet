@@ -1,4 +1,5 @@
 import * as state from './state';
+import type { LiveAnomaly } from './anomaly';
 
 // Limits and repeat-violation counters are shared through the control plane, so every gateway
 // instance (Vercel runs several and restarts them cold) counts against the same numbers. The local
@@ -19,15 +20,21 @@ export function eraseAgentLimits(agentId: string, sessions: string[]): void {
 }
 
 // Requests per minute (BP 5.2 step 5), reduced by a throttle (ladder level 3), plus today's usage.
-export async function takeRequest(agentId: string, rpm: number): Promise<{ allowed: boolean; tokens: number; usd: number }> {
+// With `anomaly`, the same call also scores DET-ANOM (DA 3) against the agent's baseline.
+export async function takeRequest(agentId: string, rpm: number, anomaly?: { tier: string; tool?: string }): Promise<{ allowed: boolean; in_minute: number; tokens: number; usd: number; anomaly: LiveAnomaly | null }> {
   const local = takeLocalRequest(agentId, rpm);
   try {
-    const shared = await state.internal<{ in_minute: number; tokens_today: number; usd_today: number }>('/internal/limits/take', { method: 'POST', body: JSON.stringify({ agent_id: agentId }) });
-    return { allowed: shared.in_minute <= Math.max(1, Math.floor(rpm)), tokens: shared.tokens_today, usd: shared.usd_today };
+    const shared = await state.internal<{ in_minute: number; tokens_today: number; usd_today: number; anomaly?: LiveAnomaly }>('/internal/limits/take', { method: 'POST', body: JSON.stringify({ agent_id: agentId, ...(anomaly ? { anomaly: true, tier: anomaly.tier, tool: anomaly.tool } : {}) }) });
+    return { allowed: shared.in_minute <= Math.max(1, Math.floor(rpm)), in_minute: shared.in_minute, tokens: shared.tokens_today, usd: shared.usd_today, anomaly: shared.anomaly ?? null };
   } catch {
     const u = usage(agentId);
-    return { allowed: local, tokens: u.tokens, usd: u.usd };
+    return { allowed: local, in_minute: (minute.get(agentId) ?? []).length, tokens: u.tokens, usd: u.usd, anomaly: null };
   }
+}
+
+/** A refused or failed request, for the DET-ANOM error-rate feature. Best effort. */
+export function recordFailure(agentId: string): void {
+  state.internal('/internal/limits/outcome', { method: 'POST', body: JSON.stringify({ agent_id: agentId, error: true }) }).catch(() => {});
 }
 
 function takeLocalRequest(agentId: string, rpm: number): boolean {

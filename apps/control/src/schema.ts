@@ -338,10 +338,36 @@ CREATE TABLE IF NOT EXISTS vulnerability_finding (
   kev INTEGER NOT NULL DEFAULT 0, summary TEXT, cvss TEXT, status TEXT NOT NULL, first_seen TEXT NOT NULL, last_seen TEXT NOT NULL, aibom_id TEXT,
   PRIMARY KEY (agent_id, component, vuln_id)
 );
+-- DET-ANOM baselines (DA 3): per-agent statistics from the last 14 days of the ledger, rebuilt nightly.
+CREATE TABLE IF NOT EXISTS agent_baseline (agent_id TEXT PRIMARY KEY, data TEXT NOT NULL, computed_at TEXT NOT NULL);
+-- DET-GROUND samples (DA 3 Tier 2): payload holds DLP-tokenised sources and answer only until judged (24 h at most).
+CREATE TABLE IF NOT EXISTS ground_eval (
+  id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, request_id TEXT NOT NULL, tier TEXT NOT NULL, payload TEXT NOT NULL, status TEXT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0, score REAL, verdict TEXT, rationale TEXT, unsupported TEXT, judge_model TEXT, created_at TEXT NOT NULL, judged_at TEXT
+);
+CREATE INDEX IF NOT EXISTS ground_eval_agent ON ground_eval(agent_id, created_at);
+CREATE INDEX IF NOT EXISTS ground_eval_status ON ground_eval(status, created_at);
+-- Detector pins (DA 3 "pinned and hashed"): every hash a detector version has been pinned to, so Replay
+-- can check the hash recorded on a past decision was a released one.
+CREATE TABLE IF NOT EXISTS detector_pin (detector_id TEXT NOT NULL, version TEXT NOT NULL, sha256 TEXT NOT NULL, pinned_by TEXT NOT NULL, pinned_at TEXT NOT NULL, PRIMARY KEY (detector_id, sha256));
+-- Replay samples (DA 6 mechanism 3, SGC-SELF-007): a random daily sample of decisions re-run from the ledger.
+CREATE TABLE IF NOT EXISTS replay_run (id TEXT PRIMARY KEY, sampled INTEGER NOT NULL, reproduced INTEGER NOT NULL, mismatched INTEGER NOT NULL, details TEXT NOT NULL, actor TEXT NOT NULL, created_at TEXT NOT NULL);
+-- Detector release records (DA 6 mechanism 4): benchmark results per version hash and the Security and
+-- AI Assurance sign-offs a promotion needs. detector_pin.activated_at marks the champion.
+CREATE TABLE IF NOT EXISTS detector_benchmark (id TEXT PRIMARY KEY, detector_id TEXT NOT NULL, version TEXT NOT NULL, sha256 TEXT NOT NULL, set_id TEXT NOT NULL, set_sha256 TEXT NOT NULL, metrics TEXT NOT NULL, passed INTEGER NOT NULL, failures TEXT NOT NULL, runner TEXT NOT NULL, ran_by TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS detector_benchmark_lookup ON detector_benchmark(detector_id, sha256, created_at);
+CREATE TABLE IF NOT EXISTS detector_approval (detector_id TEXT NOT NULL, version TEXT NOT NULL, sha256 TEXT NOT NULL, role TEXT NOT NULL, approver TEXT NOT NULL, reason TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (detector_id, sha256, role));
+ALTER TABLE detector_pin ADD COLUMN IF NOT EXISTS activated_at TEXT;
+-- Champion/challenger (DA 6): a new version runs beside the current one in shadow before it can replace it.
+ALTER TABLE detector ADD COLUMN IF NOT EXISTS challenger_version TEXT;
+ALTER TABLE detector ADD COLUMN IF NOT EXISTS challenger_sha256 TEXT;
+ALTER TABLE detector ADD COLUMN IF NOT EXISTS challenger_since TEXT;
 -- SAML request IDs: each response must answer a request Signet sent, and only once.
 CREATE TABLE IF NOT EXISTS saml_request (id TEXT PRIMARY KEY, value TEXT NOT NULL, expires_ms BIGINT NOT NULL);
 -- When the owner was deactivated (BP 6 Stage 7); cleared when a new owner is named.
 ALTER TABLE agent ADD COLUMN IF NOT EXISTS owner_left_at TEXT;
+-- What each gateway node's detectors run: hashes and isolation settings (DA 6, SGC-SELF-001 / 008).
+ALTER TABLE gateway_node ADD COLUMN IF NOT EXISTS detectors TEXT;
 
 
 -- One lifecycle per agent version being onboarded (BP 6). data holds intake, manifest draft and deploy plan.

@@ -25,6 +25,8 @@ export interface DetectorResult {
   status: DetectorStatus;
   score?: number;
   band?: 'low' | 'elevated' | 'high';
+  sha256?: string; // hash of the detector version that scored (DA 6 mechanism 3)
+  thresholds?: readonly [number, number]; // Elevated / High thresholds used, so Replay can re-band the score
 }
 
 // Decision combiner (DA 2, E37). Only the rule result can allow; detectors only tighten it.
