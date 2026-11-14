@@ -364,6 +364,8 @@ ALTER TABLE detector ADD COLUMN IF NOT EXISTS challenger_sha256 TEXT;
 ALTER TABLE detector ADD COLUMN IF NOT EXISTS challenger_since TEXT;
 -- Audit packs (BP 9.6): signed exports per framework; the content is kept so the same pack can be downloaded again.
 CREATE TABLE IF NOT EXISTS audit_pack (id TEXT PRIMARY KEY, framework_id TEXT NOT NULL, scope TEXT NOT NULL, sha256 TEXT NOT NULL, signature TEXT NOT NULL, content TEXT NOT NULL, created_by TEXT NOT NULL, created_at TEXT NOT NULL);
+-- NVD CVSS scores (BP 9.3 feeds), cached for 7 days because NVD rate-limits requests without an API key.
+CREATE TABLE IF NOT EXISTS cve_score (cve TEXT PRIMARY KEY, score REAL, severity TEXT NOT NULL, vector TEXT, version TEXT, fetched_at TEXT NOT NULL);
 -- SAML request IDs: each response must answer a request Signet sent, and only once.
 CREATE TABLE IF NOT EXISTS saml_request (id TEXT PRIMARY KEY, value TEXT NOT NULL, expires_ms BIGINT NOT NULL);
 -- When the owner was deactivated (BP 6 Stage 7); cleared when a new owner is named.

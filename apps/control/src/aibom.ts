@@ -19,6 +19,11 @@ const OSV = () => (process.env.SIGNET_OSV_URL ?? 'https://api.osv.dev').replace(
 const KEV = () => process.env.SIGNET_KEV_URL ?? 'https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json';
 const MAX_COMPONENTS = 5000;
 const MAX_DETAILS = 300;
+// NVD CVE API 2.0 (BP 9.3 feeds): official CVSS scores for CVEs that OSV.dev gives no severity for.
+// Without an API key NVD allows about 5 requests per 30 seconds, so each scan asks for a few CVEs and
+// the answers are cached for 7 days; later scans fill in the rest. SIGNET_NVD_API_KEY raises the limit.
+const NVD = () => (process.env.SIGNET_NVD_URL ?? 'https://services.nvd.nist.gov/rest/json/cves/2.0').replace(/\/$/, '');
+const NVD_CACHE_MS = 7 * 86_400_000;
 
 interface Component { 'bom-ref': string; type: string; name: string; version?: string; purl?: string; group?: string; supplier?: { name: string }; description?: string; properties?: { name: string; value: string }[] }
 interface Service { 'bom-ref': string; name: string; endpoints?: string[]; data?: { flow: string; classification: string }[]; properties?: { name: string; value: string }[] }
@@ -121,6 +126,40 @@ export async function kevIds(): Promise<Set<string>> {
   return kevCache.ids;
 }
 
+export interface NvdScore { score: number | null; severity: string; vector: string | null; version: string | null }
+
+/** CVSS from NVD for each CVE (cache first, then a rate-limited number of live lookups). */
+export async function nvdScores(cves: string[]): Promise<Map<string, NvdScore>> {
+  const out = new Map<string, NvdScore>();
+  const unique = [...new Set(cves)];
+  if (!unique.length) return out;
+  const since = new Date(Date.now() - NVD_CACHE_MS).toISOString();
+  for (const r of (await db.prepare(`SELECT cve, score, severity, vector, version FROM cve_score WHERE fetched_at >= ? AND cve IN (${unique.map(() => '?').join(', ')})`).all(since, ...unique)) as { cve: string; score: number | null; severity: string; vector: string | null; version: string | null }[]) {
+    out.set(r.cve, { score: r.score === null ? null : Number(r.score), severity: r.severity, vector: r.vector, version: r.version });
+  }
+  const key = process.env.SIGNET_NVD_API_KEY;
+  const budget = key ? 40 : 5;
+  const delay = Number(process.env.SIGNET_NVD_DELAY_MS ?? (key ? 700 : 6500));
+  const missing = unique.filter((c) => !out.has(c)).slice(0, budget);
+  for (const [i, cve] of missing.entries()) {
+    if (i && delay > 0) await new Promise((r) => setTimeout(r, delay));
+    try {
+      const r = await fetch(`${NVD()}?cveId=${encodeURIComponent(cve)}`, { headers: key ? { apiKey: key } : {}, signal: AbortSignal.timeout(20_000) });
+      if (!r.ok) { if (r.status === 403 || r.status === 429) break; continue; } // rate limited: try again next scan
+      const j = (await r.json()) as { vulnerabilities?: { cve?: { metrics?: Record<string, { cvssData?: { baseScore?: number; baseSeverity?: string; vectorString?: string; version?: string }; baseSeverity?: string }[]> } }[] };
+      const metrics = j.vulnerabilities?.[0]?.cve?.metrics ?? {};
+      const m = ['cvssMetricV40', 'cvssMetricV31', 'cvssMetricV30', 'cvssMetricV2'].map((k) => metrics[k]?.[0]).find(Boolean);
+      const s: NvdScore = m ? { score: m.cvssData?.baseScore ?? null, severity: String(m.cvssData?.baseSeverity ?? m.baseSeverity ?? 'unknown').toLowerCase(), vector: m.cvssData?.vectorString ?? null, version: m.cvssData?.version ?? null } : { score: null, severity: 'unknown', vector: null, version: null };
+      out.set(cve, s);
+      await db.prepare('INSERT INTO cve_score (cve, score, severity, vector, version, fetched_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (cve) DO UPDATE SET score = EXCLUDED.score, severity = EXCLUDED.severity, vector = EXCLUDED.vector, version = EXCLUDED.version, fetched_at = EXCLUDED.fetched_at')
+        .run(cve, s.score, s.severity, s.vector, s.version, nowIso());
+    } catch {
+      break; // NVD unreachable: keep OSV severities, try again next scan
+    }
+  }
+  return out;
+}
+
 const SEVERITY_RANK: Record<string, number> = { critical: 4, high: 3, moderate: 2, medium: 2, low: 1, unknown: 0 };
 const severityOf = (v: OsvVuln): string => {
   const s = (v.database_specific?.severity ?? '').toLowerCase();
@@ -149,6 +188,9 @@ export async function scanAibom(aibomId: string): Promise<{ scanned: number; fin
       const r = await fetch(`${OSV()}/v1/vulns/${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(20_000) });
       if (r.ok) details.set(id, (await r.json()) as OsvVuln);
     }
+    // CVEs whose OSV advisory has no severity get the official NVD CVSS score.
+    const cvesOf = (id: string) => { const v = details.get(id) ?? { id }; return [id, ...(v.aliases ?? [])].filter((a) => a.startsWith('CVE-')); };
+    const nvd = await nvdScores(ids.filter(({ id }) => severityOf(details.get(id) ?? { id }) === 'unknown').flatMap(({ id }) => cvesOf(id)));
     const now = nowIso();
     let critical = 0;
     let kevCount = 0;
@@ -157,7 +199,9 @@ export async function scanAibom(aibomId: string): Promise<{ scanned: number; fin
         const v = details.get(id) ?? { id };
         const cves = [id, ...(v.aliases ?? [])].filter((a) => a.startsWith('CVE-'));
         const inKev = cves.some((c) => kev.has(c));
-        const severity = inKev ? 'critical' : severityOf(v);
+        const fromNvd = cves.map((c) => nvd.get(c)).find((s) => s && s.severity !== 'unknown');
+        const osvSeverity = severityOf(v);
+        const severity = inKev ? 'critical' : osvSeverity !== 'unknown' ? osvSeverity : fromNvd ? (fromNvd.severity === 'moderate' ? 'medium' : fromNvd.severity) : 'unknown';
         if (severity === 'critical') critical++;
         if (inKev) kevCount++;
         await db.prepare(
@@ -165,14 +209,14 @@ export async function scanAibom(aibomId: string): Promise<{ scanned: number; fin
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)
            ON CONFLICT (agent_id, component, vuln_id) DO UPDATE SET aliases = EXCLUDED.aliases, severity = EXCLUDED.severity, kev = EXCLUDED.kev, summary = EXCLUDED.summary, cvss = EXCLUDED.cvss, last_seen = EXCLUDED.last_seen, aibom_id = EXCLUDED.aibom_id,
              status = CASE WHEN vulnerability_finding.status = 'fixed' THEN 'open' ELSE vulnerability_finding.status END`,
-        ).run(row.agent_id, purl, id, JSON.stringify(v.aliases ?? []), severity, inKev ? 1 : 0, (v.summary ?? v.details ?? '').slice(0, 300), v.severity?.[0]?.score ?? null, now, now, aibomId);
+        ).run(row.agent_id, purl, id, JSON.stringify(v.aliases ?? []), severity, inKev ? 1 : 0, (v.summary ?? v.details ?? '').slice(0, 300), v.severity?.[0]?.score ?? (fromNvd?.vector ? `${fromNvd.vector} (NVD ${fromNvd.score})` : null), now, now, aibomId);
       }
       // Components no longer affected: their open findings are closed as fixed.
       const current = new Set(ids.map((x) => `${x.purl} ${x.id}`));
       const open = (await db.prepare("SELECT component, vuln_id FROM vulnerability_finding WHERE agent_id = ? AND status = 'open'").all(row.agent_id)) as { component: string; vuln_id: string }[];
       for (const f of open.filter((o) => !current.has(`${o.component} ${o.vuln_id}`))) await db.prepare("UPDATE vulnerability_finding SET status = 'fixed', last_seen = ? WHERE agent_id = ? AND component = ? AND vuln_id = ?").run(now, row.agent_id, f.component, f.vuln_id);
       await db.prepare('UPDATE aibom SET scanned_at = ? WHERE id = ?').run(now, aibomId);
-      await ledger.append({ kind: 'lifecycle', agent_id: row.agent_id, data: { event: 'aibom.scanned', aibom_id: aibomId, packages: purls.length, findings: ids.length, critical, kev: kevCount, source: 'osv.dev + CISA KEV' } });
+      await ledger.append({ kind: 'lifecycle', agent_id: row.agent_id, data: { event: 'aibom.scanned', aibom_id: aibomId, packages: purls.length, findings: ids.length, critical, kev: kevCount, source: 'osv.dev + NVD + CISA KEV' } });
     });
     return { scanned: purls.length, findings: ids.length, critical, kev: kevCount };
   } catch (e) {
