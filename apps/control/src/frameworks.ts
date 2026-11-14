@@ -55,6 +55,9 @@ export const FRAMEWORKS: FrameworkDef[] = [
   { id: 'nist-csf', name: 'NIST Cybersecurity Framework 2.0', version: '2.0', licence: 'US government work, public domain', ships: 'full_text', category: 'security', source_url: 'https://doi.org/10.6028/NIST.CSWP.29', default_enabled: true, applies: 'always' },
   { id: 'nist-800-53', name: 'NIST SP 800-53 Rev. 5 (AI-relevant controls)', version: 'Rev. 5', licence: 'US government work, public domain; OSCAL catalogue on NIST GitHub', ships: 'full_text', category: 'security', source_url: 'https://github.com/usnistgov/oscal-content', default_enabled: true, applies: 'always', notes: 'Ships the controls relevant to AI agents. Import the full OSCAL catalogue to see every control; extra controls are kept out of the score.' },
   { id: 'fedramp-moderate', name: 'FedRAMP Rev. 5 Moderate (AI-relevant controls)', version: 'Rev. 5', licence: 'US government work, public domain; baseline from FedRAMP legacy workbook (OSCAL profiles discontinued)', ships: 'full_text', category: 'security', source_url: 'https://github.com/FedRAMP/docs-legacy/blob/main/overrides/assets/LEGACY%20FedRAMP_Security_Controls_Baseline.xlsx', default_enabled: false, applies: 'tenant', notes: 'Only for US federal work. Membership checked against the FedRAMP legacy Rev. 5 baseline workbook (June 2026). FedRAMP is replacing it with the Consolidated Rules for 2026 (fedramp.gov/2026); import the full workbook with the spreadsheet importer if you need every control.' },
+  { id: 'fedramp-high', name: 'FedRAMP Rev. 5 High (AI-relevant controls)', version: 'Rev. 5', licence: 'US government work, public domain; baseline from FedRAMP legacy workbook (OSCAL profiles discontinued)', ships: 'full_text', category: 'security', source_url: 'https://github.com/FedRAMP/docs-legacy/blob/main/overrides/assets/LEGACY%20FedRAMP_Security_Controls_Baseline.xlsx', default_enabled: false, applies: 'tenant', notes: 'Only for US federal work at high impact. Membership checked against the FedRAMP legacy Rev. 5 baseline workbook (June 2026); FedRAMP is replacing it with the Consolidated Rules for 2026.' },
+  { id: 'fedramp-low', name: 'FedRAMP Rev. 5 Low (AI-relevant controls)', version: 'Rev. 5', licence: 'US government work, public domain; baseline from FedRAMP legacy workbook (OSCAL profiles discontinued)', ships: 'full_text', category: 'security', source_url: 'https://github.com/FedRAMP/docs-legacy/blob/main/overrides/assets/LEGACY%20FedRAMP_Security_Controls_Baseline.xlsx', default_enabled: false, applies: 'tenant', notes: 'Only for US federal work at low impact. Membership checked against the FedRAMP legacy Rev. 5 baseline workbook (June 2026); FedRAMP is replacing it with the Consolidated Rules for 2026.' },
+  { id: 'fedramp-li-saas', name: 'FedRAMP Tailored LI-SaaS (AI-relevant controls)', version: 'Rev. 5', licence: 'US government work, public domain; baseline from FedRAMP legacy workbook (OSCAL profiles discontinued)', ships: 'full_text', category: 'security', source_url: 'https://github.com/FedRAMP/docs-legacy/blob/main/overrides/assets/LEGACY%20FedRAMP_Security_Controls_Baseline.xlsx', default_enabled: false, applies: 'tenant', notes: 'Low-impact SaaS. Each control shows its tailoring action from the FedRAMP legacy workbook (June 2026): Attest (the provider states it) or Document and Assess (an assessor tests it).' },
   { id: 'dora', name: 'DORA (Regulation (EU) 2022/2554)', version: '2022', licence: 'EU legal text, reuse permitted with attribution', ships: 'summaries', category: 'resilience', source_url: 'https://eur-lex.europa.eu/eli/reg/2022/2554/oj', default_enabled: false, applies: 'tenant', notes: 'EU financial entities.' },
   { id: 'nis2', name: 'NIS2 (Directive (EU) 2022/2555)', version: '2022', licence: 'EU legal text, reuse permitted with attribution', ships: 'summaries', category: 'resilience', source_url: 'https://eur-lex.europa.eu/eli/dir/2022/2555/oj', default_enabled: false, applies: 'tenant', notes: 'EU essential and important entities.' },
   { id: 'sg-model-ai-gov', name: 'Singapore Model AI Governance Framework', version: '2nd edition (2020)', licence: 'Singapore government publication; Signet summaries', ships: 'summaries', category: 'regional', source_url: 'https://www.pdpc.gov.sg/help-and-resources/2020/01/model-ai-governance-framework', default_enabled: false, applies: 'tenant' },
@@ -113,9 +116,9 @@ export const SP800_53_AI_SUBSET: [string, string, ...string[]][] = [
   ['SA-9', 'External System Services', 'SGC-MODEL-003'],
   ['SA-11', 'Developer Testing and Evaluation', 'SGC-SEC-001'],
   ['SC-7', 'Boundary Protection', 'SGC-TOOL-004', 'SGC-SELF-008'],
-  ['SC-8', 'Transmission Confidentiality and Integrity'],
+  ['SC-8', 'Transmission Confidentiality and Integrity', 'SGC-DATA-003'],
   ['SC-24', 'Fail in Known State', 'SGC-SELF-010'],
-  ['SC-28', 'Protection of Information at Rest'],
+  ['SC-28', 'Protection of Information at Rest', 'SGC-DATA-004'],
   ['SI-4', 'System Monitoring', 'SGC-MON-004'],
   ['SI-10', 'Information Input Validation', 'SGC-TOOL-004'],
   ['SI-12', 'Information Management and Retention', 'SGC-MON-001'],
@@ -127,6 +130,16 @@ export const SP800_53_AI_SUBSET: [string, string, ...string[]][] = [
 // built-in Moderate controls are in its Moderate Baseline sheet. FedRAMP no longer publishes OSCAL
 // profiles (the GSA fedramp-automation repository is gone); it is moving to the Consolidated Rules 2026.
 const NOT_IN_MODERATE = ['AU-10', 'IA-9', 'SC-24'];
+// The same workbook's High, Low and Tailored LI-SaaS sheets (checked 2026-11-14). IA-9 is in none of them.
+const NOT_IN_HIGH = ['IA-9'];
+const NOT_IN_LOW = ['AC-6', 'AU-10', 'IA-9', 'SA-11', 'SC-24', 'SI-10'];
+// LI-SaaS tailoring action per control: Attest = the provider attests; Document and Assess = an assessor tests it.
+const LI_SAAS_ACTION: Record<string, string> = {
+  'AC-2': 'Document and Assess', 'AC-3': 'Document and Assess', 'AU-2': 'Attest', 'AU-3': 'Document and Assess', 'AU-6': 'Document and Assess',
+  'AU-9': 'Attest', 'AU-12': 'Attest', 'CA-7': 'Document and Assess', 'CM-8': 'Document and Assess', 'IA-5': 'Attest', 'IR-4': 'Document and Assess',
+  'IR-6': 'Document and Assess', 'RA-3': 'Document and Assess', 'RA-5': 'Document and Assess', 'SA-9': 'Document and Assess', 'SC-7': 'Document and Assess',
+  'SC-8': 'Document and Assess', 'SC-28': 'Document and Assess', 'SI-4': 'Document and Assess', 'SI-12': 'Attest', 'SR-3': 'Attest',
+};
 
 export const REQUIREMENTS: RequirementDef[] = [
   ...group('nist-ai-rmf', [
@@ -321,6 +334,9 @@ export const REQUIREMENTS: RequirementDef[] = [
   ]),
   ...group('nist-800-53', SP800_53_AI_SUBSET),
   ...group('fedramp-moderate', SP800_53_AI_SUBSET.filter(([id]) => !NOT_IN_MODERATE.includes(id))),
+  ...group('fedramp-high', SP800_53_AI_SUBSET.filter(([id]) => !NOT_IN_HIGH.includes(id))),
+  ...group('fedramp-low', SP800_53_AI_SUBSET.filter(([id]) => !NOT_IN_LOW.includes(id))),
+  ...group('fedramp-li-saas', SP800_53_AI_SUBSET.filter(([id]) => LI_SAAS_ACTION[id]).map(([id, title, ...maps]) => [id, `${title} (LI-SaaS: ${LI_SAAS_ACTION[id]})`, ...maps] as [string, string, ...string[]])),
   ...group('dora', [
     ['Art. 5', 'Management body defines, approves and oversees the ICT risk framework', 'SGC-GOV-002'],
     ['Art. 6', 'ICT risk management framework', 'SGC-RISK-001'],
@@ -433,10 +449,6 @@ const LATER_MAPS: Record<string, string[]> = {
   'nist-csf|RS.AN': ['SGC-RESP-002~intersects', 'SGC-SELF-007~intersects~any decision can be replayed from the ledger'],
   'nist-csf|RC.RP': ['SGC-RESP-001~intersects~quarantine and kill are released only by people after investigation'],
   'nist-csf|RC.CO': ['SGC-RESP-003~intersects'],
-  'nist-800-53|SC-8': ['SGC-DATA-003'],
-  'nist-800-53|SC-28': ['SGC-DATA-004'],
-  'fedramp-moderate|SC-8': ['SGC-DATA-003'],
-  'fedramp-moderate|SC-28': ['SGC-DATA-004'],
   'uk-ai-principles|P5': ['SGC-HUMAN-005'],
   'au-ai-guardrails|G7': ['SGC-HUMAN-005'],
   'us-co-ai-act|Adverse decisions': ['SGC-HUMAN-005', 'SGC-RISK-002~intersects~the impact assessment records how decisions are explained'],

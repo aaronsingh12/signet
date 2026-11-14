@@ -197,7 +197,7 @@ export async function build(input: PackInput) {
     reqs = await requirementsOf(input.framework_id);
     if (input.framework_id === 'eu-ai-act') section = { eu_ai_act: await euAiAct(agents, reqs) };
     else if (input.framework_id === 'nist-ai-rmf') section = { nist_ai_rmf: rmfProfile(reqs) };
-    else if (input.framework_id === 'nist-800-53' || input.framework_id === 'fedramp-moderate') section = { sp800_53: sp80053(input.framework_id, reqs) };
+    else if (input.framework_id === 'nist-800-53' || input.framework_id.startsWith('fedramp-')) section = { sp800_53: sp80053(input.framework_id, reqs) };
   }
   const count = (s: string) => reqs.filter((r) => r.status === s).length;
   return {

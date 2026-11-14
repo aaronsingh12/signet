@@ -415,6 +415,8 @@ api.post('/library/evaluate', requires('compliance.read'), route(async () => ({ 
 api.get('/compliance/scores', requires('compliance.read'), route(async () => ({ items: (await controls.scores()) })));
 api.post('/library/frameworks/:id/enabled', requires('library.edit'), route(async (req, res) => (await controls.setFrameworkEnabled(req.params.id!, req.body?.enabled, principalOf(res), req.body?.reason))));
 // OSCAL catalogs are large (NIST 800-53 is about 10 MB), so this route has its own body limit.
+api.get('/library/official-sources', requires('compliance.read'), route(() => ({ items: Object.entries(oscal.OFFICIAL_SOURCES).map(([id, s]) => ({ id, ...s })) })));
+api.post('/library/import/official', requires('library.edit'), route(async (req, res) => [201, await oscal.loadOfficial(String(req.body?.source ?? ''), principalOf(res))]));
 api.post('/library/import/oscal', requires('library.edit'), express.json({ limit: '25mb' }), route(async (req, res) => [201, (await oscal.importOscal(req.body ?? {}, principalOf(res)))]));
 // Spreadsheet import (BP 9.4): the browser reads the CSV/XLSX file and sends the matched rows.
 api.post('/library/import/sheet', requires('library.edit'), express.json({ limit: '10mb' }), route(async (req, res) => [201, (await libraryImport.importSheet(req.body ?? {}, principalOf(res)))]));

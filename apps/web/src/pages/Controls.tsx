@@ -54,6 +54,12 @@ export function Controls() {
       setNote(`Imported ${r.controls} controls into ${r.framework_id}; ${r.in_scope} count toward the score.${r.built_in_not_in_profile?.length ? ` Not in the official baseline: ${r.built_in_not_in_profile.join(', ')}.` : ''}`);
     });
 
+  const loadNist = () =>
+    run(async () => {
+      const r = await api<any>('/library/import/official', { method: 'POST', body: { source: 'nist-800-53' } });
+      setNote(`Loaded the official NIST SP 800-53 catalog (${r.controls} controls, SHA-256 checked); ${r.in_scope} AI-relevant controls count toward the score.`);
+    });
+
   const items: any[] = scores.data?.items ?? [];
   const enabled = items.filter((f) => f.enabled);
   const off = items.filter((f) => !f.enabled);
@@ -179,7 +185,9 @@ export function Controls() {
         )}
         {can('library.edit') && (
           <Card title="Import an OSCAL catalog or profile">
-            <p className="mb-2 text-xs text-ink-3">For example the NIST SP 800-53 Rev. 5 catalog (usnistgov/oscal-content) or a FedRAMP baseline profile. By default only AI-relevant controls count toward the score.</p>
+            <p className="mb-2 text-xs text-ink-3">All 1,196 NIST SP 800-53 controls, or any other OSCAL catalog or profile. By default only AI-relevant controls count toward the score.</p>
+            <button className="btn-ghost mb-2 w-full" disabled={busy} onClick={() => void loadNist()}>Load the official NIST SP 800-53 Rev. 5.2.0 catalog</button>
+            <p className="mb-2 text-xs text-ink-3">Signet downloads it from NIST (fixed version, SHA-256 checked). Or upload your own file:</p>
             <OscalImport busy={busy} onImport={importOscal} />
           </Card>
         )}

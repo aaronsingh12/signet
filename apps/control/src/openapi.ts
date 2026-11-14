@@ -120,6 +120,8 @@ const ops: Record<string, Record<string, Op>> = {
   '/audit-packs': { post: { summary: 'Generate a signed audit pack: framework_id (or "board"), from, to (YYYY-MM-DD), agents (ids or handles)', permission: 'evidence.export' }, get: { summary: 'Audit packs generated so far', permission: 'evidence.export' } },
   '/audit-packs/{id}': { get: { summary: 'Download a pack (signed JSON) or its requirements as CSV (?format=csv)', permission: 'evidence.export' } },
   '/audit-packs/verify': { post: { summary: 'Check a downloaded pack: signature and content hash', permission: 'evidence.export' } },
+  '/library/official-sources': { get: { summary: 'Official framework files Signet can load itself (pinned commit and SHA-256)', permission: 'compliance.read' } },
+  '/library/import/official': { post: { summary: 'Download an official source (source: nist-800-53), check its SHA-256 and import it with the OSCAL importer', permission: 'library.edit' } },
   '/detectors': { get: { summary: 'Detector registry and modes', permission: 'agents.read' } },
   '/detectors/{id}/mode': { post: { summary: 'Move a detector between off, shadow and active (RB-MOD-03)', permission: 'detectors.manage' } },
   '/ledger/records': { get: { summary: 'Ledger records (filters agent, kind, decision; cursor pagination)', permission: 'ledger.read' } },
