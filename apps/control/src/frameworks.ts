@@ -44,6 +44,11 @@ export interface RequirementDef {
   maps: MappingDef[];
 }
 
+// Library pack version (BP 9.1, semantic versioning): raise it whenever frameworks, requirements, links or
+// control definitions change. Major: something removed or renamed; minor: added; patch: wording.
+export const LIBRARY_VERSION = '1.0.0';
+export const LIBRARY_RELEASED = '2026-11-14';
+
 export const FRAMEWORKS: FrameworkDef[] = [
   { id: 'nist-ai-rmf', name: 'NIST AI RMF 1.0', version: '1.0 (NIST AI 100-1)', licence: 'US government work, public domain', ships: 'summaries', category: 'ai_risk', source_url: 'https://doi.org/10.6028/NIST.AI.100-1', default_enabled: true, applies: 'always' },
   { id: 'nist-ai-600-1', name: 'NIST AI 600-1 Generative AI Profile', version: '2024', licence: 'US government work, public domain', ships: 'summaries', category: 'ai_risk', source_url: 'https://doi.org/10.6028/NIST.AI.600-1', default_enabled: true, applies: 'always' },

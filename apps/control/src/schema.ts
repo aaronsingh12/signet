@@ -366,6 +366,9 @@ ALTER TABLE detector ADD COLUMN IF NOT EXISTS challenger_since TEXT;
 CREATE TABLE IF NOT EXISTS audit_pack (id TEXT PRIMARY KEY, framework_id TEXT NOT NULL, scope TEXT NOT NULL, sha256 TEXT NOT NULL, signature TEXT NOT NULL, content TEXT NOT NULL, created_by TEXT NOT NULL, created_at TEXT NOT NULL);
 -- NVD CVSS scores (BP 9.3 feeds), cached for 7 days because NVD rate-limits requests without an API key.
 CREATE TABLE IF NOT EXISTS cve_score (cve TEXT PRIMARY KEY, score REAL, severity TEXT NOT NULL, vector TEXT, version TEXT, fetched_at TEXT NOT NULL);
+-- Library packs (BP 9.1, 9.4): the built-in library of each release and signed packs imported offline.
+-- status: available | adopted | superseded. content is the full library the pack would apply.
+CREATE TABLE IF NOT EXISTS library_pack (id TEXT PRIMARY KEY, version TEXT NOT NULL, released TEXT, sha256 TEXT NOT NULL, source TEXT NOT NULL, signer TEXT, content TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, adopted_at TEXT, adopted_by TEXT, notified_at TEXT);
 -- SAML request IDs: each response must answer a request Signet sent, and only once.
 CREATE TABLE IF NOT EXISTS saml_request (id TEXT PRIMARY KEY, value TEXT NOT NULL, expires_ms BIGINT NOT NULL);
 -- When the owner was deactivated (BP 6 Stage 7); cleared when a new owner is named.

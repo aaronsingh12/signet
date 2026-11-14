@@ -1,7 +1,7 @@
 import { baselineReady, combine, sha256 } from '@signet/core';
 import { db, nowIso, tx } from './db';
 import { PolicyError, invalid, notFound } from './errors';
-import { FRAMEWORKS, PLACEHOLDERS, REQUIREMENTS } from './frameworks';
+import { FRAMEWORKS, PLACEHOLDERS, REQUIREMENTS, type FrameworkDef, type PlaceholderDef, type RequirementDef } from './frameworks';
 import * as ledger from './ledger';
 import { correlation, enqueue } from './outbox';
 import type { Principal } from './rbac';
@@ -404,21 +404,31 @@ const req = (fw: string, ext: string) => `${fw}:${ext}`;
 
 export const CONTROL_IDS = new Set(CONTROLS.map((c) => c.id));
 
-// Loads the built-in catalogue. Framework rows keep the tenant's enabled choice; requirement text and
-// mappings follow the catalogue, so a new Signet release updates them. Imported (OSCAL, ServiceNow)
-// requirements and customer mappings are left alone.
-// The catalogue fingerprint: when it matches what this database last loaded, seeding is skipped, so a
-// cold start does not rewrite a few hundred rows.
-const catalogueHash = () => sha256(JSON.stringify({ c: CONTROLS.map(({ check: _check, ...c }) => c), f: FRAMEWORKS, r: REQUIREMENTS, x: PLACEHOLDERS }));
+/** The library content a pack carries (BP 9.1): controls (definitions only), frameworks, locked entries, requirements. */
+export interface ControlDefinition { id: string; domain: string; objective: string; test: string; type: ControlDef['type']; severity: ControlDef['severity'] }
+export interface LibraryContent { controls: ControlDefinition[]; frameworks: FrameworkDef[]; placeholders: PlaceholderDef[]; requirements: RequirementDef[] }
+export const builtInContent = (): LibraryContent => ({ controls: CONTROLS.map(({ check: _check, ...c }) => c), frameworks: FRAMEWORKS, placeholders: PLACEHOLDERS, requirements: REQUIREMENTS });
 
+/** The built-in library is a pack (library.ts): adopted automatically or after review. */
 export async function seed() {
-  const hash = catalogueHash();
-  const done = (await db.prepare("SELECT value FROM library_state WHERE key = 'catalogue_sha256'").get()) as { value: string } | undefined;
-  if (done?.value === hash) return;
+  const library = await import('./library');
+  await library.syncBuiltIn();
+}
+
+/** The fingerprint of the library this database last applied (skips re-applying on every cold start). */
+export async function appliedSha(): Promise<string | null> {
+  return ((await db.prepare("SELECT value FROM library_state WHERE key = 'catalogue_sha256'").get()) as { value: string } | undefined)?.value ?? null;
+}
+
+// Applies library content. Framework rows keep the tenant's enabled choice; requirement text and
+// mappings follow the library, so adopting a new pack updates them. Imported (OSCAL, ServiceNow,
+// spreadsheet) requirements and customer mappings are left alone.
+export async function applyContent(content: LibraryContent, hash: string) {
+  const { controls: CONTROL_DEFS, frameworks: FRAMEWORK_DEFS, placeholders: PLACEHOLDER_DEFS, requirements: REQUIREMENT_DEFS } = content;
   (await tx(async () => {
     // Licence-required frameworks: empty, locked entries. Signet-written content is removed; a copy the
     // organisation loaded itself (source 'sheet') is kept, and so is its enabled choice.
-    for (const ph of PLACEHOLDERS) {
+    for (const ph of PLACEHOLDER_DEFS) {
       (await db.prepare("DELETE FROM control_mapping WHERE requirement_id IN (SELECT id FROM framework_requirement WHERE framework_id = ? AND source = 'signet')").run(ph.id));
       (await db.prepare("DELETE FROM framework_requirement WHERE framework_id = ? AND source = 'signet'").run(ph.id));
       (await db.prepare(
@@ -430,17 +440,17 @@ export async function seed() {
            category = EXCLUDED.category, source_url = EXCLUDED.source_url, notes = EXCLUDED.notes`,
       ).run(ph.id, ph.name, ph.version, `Licence needed: ${ph.reason}`, ph.category, ph.source_url, ph.reason));
     }
-    for (const c of CONTROLS) {
+    for (const c of CONTROL_DEFS) {
       (await db.prepare('INSERT INTO control (id, domain, objective, test, test_type, applies_to, namespace, severity) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET domain = EXCLUDED.domain, objective = EXCLUDED.objective, test = EXCLUDED.test, test_type = EXCLUDED.test_type, applies_to = EXCLUDED.applies_to, namespace = EXCLUDED.namespace, severity = EXCLUDED.severity').run(c.id, c.domain, c.objective, c.test, c.type, 'tenant', 'signet', c.severity));
     }
-    for (const f of FRAMEWORKS) {
+    for (const f of FRAMEWORK_DEFS) {
       (await db.prepare(
         `INSERT INTO framework (id, name, version, licence, namespace, category, source_url, ships, enabled, notes) VALUES (?, ?, ?, ?, 'signet', ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, version = EXCLUDED.version, licence = EXCLUDED.licence, category = EXCLUDED.category, source_url = EXCLUDED.source_url, ships = EXCLUDED.ships, notes = EXCLUDED.notes`,
       ).run(f.id, f.name, f.version, f.licence, f.category, f.source_url, f.ships, f.default_enabled ? 1 : 0, f.notes ?? null));
     }
-    const ids = REQUIREMENTS.map((r) => req(r.framework_id, r.external_id));
-    for (const r of REQUIREMENTS) {
+    const ids = REQUIREMENT_DEFS.map((r) => req(r.framework_id, r.external_id));
+    for (const r of REQUIREMENT_DEFS) {
       const id = req(r.framework_id, r.external_id);
       (await db.prepare(
         `INSERT INTO framework_requirement (id, framework_id, external_id, summary, source, in_scope) VALUES (?, ?, ?, ?, 'signet', 1)

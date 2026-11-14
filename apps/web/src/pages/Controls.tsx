@@ -4,6 +4,7 @@ import { ApiError, api, useApi } from '../lib/api';
 import { useCan, useMe } from '../lib/auth';
 import { FrameworkSheetImport } from '../components/FrameworkSheetImport';
 import { AuditPacks } from '../components/AuditPacks';
+import { LibraryPacks } from '../components/LibraryPacks';
 import { ago } from '../lib/format';
 
 // Control Library & Compliance (BP 9): Signet Controls are the hub; framework requirements map to
@@ -151,6 +152,7 @@ export function Controls() {
       </Card>
 
       {can('evidence.export') && <AuditPacks frameworks={items} />}
+      <LibraryPacks onChange={() => { void lib.reload(); void scores.reload(); }} />
 
       <div className="grid gap-4 md:grid-cols-2">
         <Card title="Switched off for this organisation">
