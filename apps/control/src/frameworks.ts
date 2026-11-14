@@ -67,6 +67,10 @@ export const FRAMEWORKS: FrameworkDef[] = [
   { id: 'us-co-ai-act', name: 'Colorado AI Act (SB 24-205), deployer duties', version: '2024', licence: 'US state legislation; Signet summaries', ships: 'summaries', category: 'regional', source_url: 'https://leg.colorado.gov/bills/sb24-205', default_enabled: false, applies: 'tenant', notes: 'Effective date has been postponed; check the current date before relying on it.' },
   { id: 'us-nyc-ll144', name: 'New York City Local Law 144 (automated employment decision tools)', version: '2023', licence: 'US local law; Signet summaries', ships: 'summaries', category: 'regional', source_url: 'https://www.nyc.gov/site/dca/about/automated-employment-decision-tools.page', default_enabled: false, applies: 'tenant' },
   { id: 'us-ut-aipa', name: 'Utah Artificial Intelligence Policy Act', version: '2024', licence: 'US state legislation; Signet summaries', ships: 'summaries', category: 'regional', source_url: 'https://le.utah.gov/~2024/bills/static/SB0149.html', default_enabled: false, applies: 'tenant' },
+  { id: 'us-sr-26-2', name: 'US interagency guidance on model risk management (SR 26-2)', version: 'April 2026 (replaces SR 11-7)', licence: 'US government work (Federal Reserve, FDIC, OCC), public domain; Signet summaries', ships: 'summaries', category: 'regional', source_url: 'https://www.federalreserve.gov/supervisionreg/srletters/SR2602.htm', default_enabled: false, applies: 'tenant', notes: 'Banking sector; most relevant to banks over $30 billion in assets. Guidance only: not enforceable on its own. Its footnote 3 puts generative and agentic AI outside its scope, so links to AI agents are partial; it applies to statistical and non-generative AI models.' },
+  { id: 'uk-pra-ss1-23', name: 'UK PRA SS1/23 Model risk management principles for banks', version: 'April 2026 (updating May 2023)', licence: 'Bank of England publication; Signet summaries', ships: 'summaries', category: 'regional', source_url: 'https://www.bankofengland.co.uk/prudential-regulation/publication/2023/may/model-risk-management-principles-for-banks-ss', default_enabled: false, applies: 'tenant', notes: 'Banking sector; applies to UK banks, building societies and PRA-designated investment firms with internal model approval. Models are defined broadly (outputs may be qualitative), so AI agents used for business decisions fall within it.' },
+  { id: 'naic-ai-bulletin', name: 'NAIC Model Bulletin on the Use of AI Systems by Insurers', version: 'December 2023', licence: 'NAIC model bulletin, adopted by individual US states; Signet summaries', ships: 'summaries', category: 'regional', source_url: 'https://content.naic.org/sites/default/files/inline-files/2023-12-4%20Model%20Bulletin_Adopted_0.pdf', default_enabled: false, applies: 'tenant', notes: 'Insurance sector. Applies where a state insurance regulator has adopted the bulletin. Requirement numbers follow its Section 3 (the written AIS Program).' },
+  { id: 'sg-mas-ai-rm', name: 'MAS Guidelines on Artificial Intelligence Risk Management', version: '7 October 2026', licence: 'Monetary Authority of Singapore publication; Signet summaries', ships: 'summaries', category: 'regional', source_url: 'https://www.mas.gov.sg/regulation/guidelines/guidelines-on-artificial-intelligence-risk-management-for-financial-institutions', default_enabled: false, applies: 'tenant', notes: 'Financial sector, Singapore. Covers all AI including generative AI and AI agents. Takes effect 7 October 2027 (Sections 3-4) and 7 October 2028 (Sections 5-6). The FEAT principles continue to apply alongside it.' },
 ];
 
 // Licence-required frameworks (BP 9.3, 9.4). Signet ships only an empty, locked entry: name, version and
@@ -86,10 +90,10 @@ export const PLACEHOLDERS: PlaceholderDef[] = [
   { id: 'scf', name: 'Secure Controls Framework', version: 'current', category: 'security', reason: 'Creative Commons terms to be confirmed before redistribution', source_url: 'https://securecontrolsframework.com/' },
 ];
 
-// "SGC-X-001" or "SGC-X-001~intersects". Default relationship is subset_of.
+// "SGC-X-001", "SGC-X-001~intersects" or "SGC-X-001~intersects~coverage note". Default relationship is subset_of.
 const m = (spec: string): MappingDef => {
-  const [control, rel] = spec.split('~') as [string, Relationship | undefined];
-  return { control, rel: rel ?? 'subset_of' };
+  const [control, rel, note] = spec.split('~') as [string, Relationship | undefined, string | undefined];
+  return { control, rel: rel ?? 'subset_of', ...(note ? { note } : {}) };
 };
 const group = (fw: string, rows: [string, string, ...string[]][]): RequirementDef[] =>
   rows.map(([external_id, summary, ...maps]) => ({ framework_id: fw, external_id, summary, maps: maps.map(m) }));
@@ -403,6 +407,93 @@ export const REQUIREMENTS: RequirementDef[] = [
   ]),
   ...group('us-ut-aipa', [
     ['Disclosure', 'Disclose generative AI interaction when asked, and up front in regulated occupations', 'SGC-TRANS-001'],
+  ]),
+  // Sector guidance (BP 9.3 "sector regulator guidance (banking model risk, insurance)"). Numbers follow
+  // each document; summaries are Signet's own words. Links are "intersects" where Signet covers part.
+  ...group('us-sr-26-2', [
+    ['III', 'Manage model risk in proportion to its size: more complex, material or uncertain models get more rigour', 'SGC-RISK-001~intersects', 'SGC-RISK-002~intersects'],
+    ['IV Model development', 'Record each model\'s purpose, design, data and limits, and test it before use', 'SGC-LIFE-002~intersects', 'SGC-SEC-001~intersects'],
+    ['IV Model use', 'Users understand a model\'s limits; it is used only for its intended purpose and its outputs are challenged', 'SGC-TOOL-004~intersects', 'SGC-HUMAN-001~intersects'],
+    ['V Conceptual soundness', 'Before use, someone independent reviews the design, assumptions and data', 'SGC-LIFE-002~intersects'],
+    ['V Outcomes analysis', 'Outputs are compared with real outcomes and benchmarks', 'SGC-MON-005~intersects', 'SGC-SEC-001~intersects'],
+    ['V Ongoing monitoring', 'Performance and use are monitored after deployment and drift is investigated', 'SGC-MON-004', 'SGC-MON-001~intersects'],
+    ['VI Roles and responsibilities', 'Board and senior management oversee model risk with clear roles and independent challenge', 'SGC-GOV-001~intersects', 'SGC-GOV-002~intersects'],
+    ['VI Model inventory', 'A complete inventory of models in use, in development and retired', 'SGC-INV-001', 'SGC-INV-002~intersects', 'SGC-LIFE-004~intersects'],
+    ['VI Documentation', 'Models, their validation and their use are documented well enough for someone new to understand them', 'SGC-LIFE-002~intersects', 'SGC-MON-001~intersects'],
+    ['VII', 'Vendor and other third-party models: get documentation, validate as far as possible, and plan for the vendor failing', 'SGC-SUPPLY-001~intersects', 'SGC-MODEL-003~intersects', 'SGC-MODEL-002~intersects'],
+  ]),
+  ...group('uk-pra-ss1-23', [
+    ['1.1', 'Model definition: a clear definition of what counts as a model, including AI and complex rule-based methods', 'SGC-INV-001~intersects'],
+    ['1.2', 'Model inventory: a complete, up-to-date inventory of models and their uses', 'SGC-INV-001', 'SGC-INV-002~intersects'],
+    ['1.3', 'Model tiering: models are tiered by materiality and complexity, and the tier sets the rigour', 'SGC-RISK-001'],
+    ['2.1', 'Board responsibilities: the board sets model risk appetite and oversees the framework', 'SGC-GOV-002'],
+    ['2.2', 'A named senior manager (SMF) is accountable for the model risk management framework', 'SGC-GOV-001~intersects'],
+    ['2.3', 'Policies and procedures cover the whole model life cycle', 'SGC-GOV-002~intersects', 'SGC-LIFE-002~intersects'],
+    ['2.4', 'Roles and responsibilities for owners, developers, users and validators are clear', 'SGC-GOV-001~intersects', 'SGC-GOV-003~intersects'],
+    ['2.5', 'Internal audit assesses the model risk management framework', 'SGC-MON-001~intersects~the ledger and audit packs give internal audit the evidence'],
+    ['2.6', 'Externally developed and vendor models are held to the same standards', 'SGC-SUPPLY-001~intersects', 'SGC-MODEL-003~intersects'],
+    ['3.1', 'Model purpose and design are documented and justified', 'SGC-LIFE-002~intersects'],
+    ['3.2', 'Data used is suitable, of good quality and governed', 'SGC-DATA-001~intersects', 'SGC-DATA-005~intersects'],
+    ['3.3', 'Models are tested during development, including their limits', 'SGC-SEC-001'],
+    ['3.4', 'Model adjustments and expert judgement are controlled and recorded', 'SGC-LIFE-002~intersects~changes to an agent\'s seal go through the lifecycle again'],
+    ['3.5', 'Development documentation is complete enough to support validation', 'SGC-LIFE-002~intersects'],
+    ['3.6', 'Supporting systems that run models are controlled', 'SGC-SUPPLY-001~intersects', 'SGC-MODEL-002~intersects'],
+    ['4.1', 'An independent validation function with the authority and skills to challenge', 'SGC-LIFE-002~intersects~approval needs people independent of the build team'],
+    ['4.2', 'Independent review of each model before use, proportionate to its tier', 'SGC-LIFE-002~intersects'],
+    ['4.3', 'Process verification: the model works as intended in production', 'SGC-MON-001~intersects', 'SGC-SELF-007~intersects'],
+    ['4.4', 'Model performance is monitored against thresholds', 'SGC-MON-004', 'SGC-MON-005~intersects'],
+    ['4.5', 'Models are periodically revalidated', 'SGC-LIFE-001'],
+    ['5.1', 'A controlled process for adjustments made after the model (post-model adjustments)', 'SGC-LIFE-002~intersects'],
+    ['5.2', 'Use of a model can be restricted when it is not performing or not validated', 'SGC-TOOL-004', 'SGC-RESP-001~intersects~quarantine and kill stop an agent at once'],
+    ['5.3', 'Exceptions are recorded and escalated', 'SGC-RESP-002~intersects', 'SGC-HUMAN-003~intersects'],
+  ]),
+  ...group('naic-ai-bulletin', [
+    ['1.1', 'The AI program reduces the risk of adverse consumer outcomes, such as unfair discrimination or inaccurate decisions', 'SGC-FAIR-001', 'SGC-DATA-001~intersects'],
+    ['1.2', 'The program covers governance, risk controls and internal audit', 'SGC-GOV-002~intersects'],
+    ['1.3', 'Senior management is accountable for the program and reports to the board', 'SGC-GOV-001~intersects', 'SGC-GOV-002~intersects'],
+    ['1.4', 'The program is proportionate to how much the insurer uses and relies on AI', 'SGC-RISK-001~intersects'],
+    ['1.5', 'The program may sit inside enterprise risk management or stand alone', 'SGC-GOV-002~intersects'],
+    ['1.6', 'AI use is covered across the insurance life cycle (product, pricing, underwriting, claims, fraud)', 'SGC-INV-001~intersects'],
+    ['1.7', 'All phases of an AI system\'s life are covered, from design to retirement', 'SGC-LIFE-002', 'SGC-LIFE-004~intersects'],
+    ['1.8', 'AI used for regulated insurance practices gets particular attention', 'SGC-RISK-002~intersects'],
+    ['1.9', 'Consumers affected by AI are told it is used', 'SGC-TRANS-001'],
+    ['2.1', 'Policies and procedures, including risk management and controls, at each stage', 'SGC-GOV-002~intersects'],
+    ['2.2', 'Compliance with the program is documented', 'SGC-MON-001~intersects'],
+    ['2.3', 'A governance structure with committees, authority, independence, escalation and training', 'SGC-GOV-001~intersects', 'SGC-GOV-003~intersects', 'SGC-HUMAN-002~intersects'],
+    ['2.4', 'Predictive models: processes to detect and prevent unfair discrimination', 'SGC-FAIR-001'],
+    ['3.1', 'Oversight and approval of developing, adopting or buying AI systems', 'SGC-LIFE-002'],
+    ['3.2', 'Data practices: currency, lineage, quality, integrity and bias', 'SGC-DATA-001~intersects', 'SGC-FAIR-001~intersects'],
+    ['3.3', 'Predictive models: inventory, documentation and checks such as robustness and drift', 'SGC-INV-001~intersects', 'SGC-MON-004~intersects'],
+    ['3.4', 'AI outputs are validated, tested and retested', 'SGC-SEC-001', 'SGC-LIFE-001~intersects'],
+    ['3.5', 'Non-public consumer information is protected', 'SGC-DATA-002', 'SGC-DATA-001~intersects'],
+    ['3.6', 'Data and records are retained', 'SGC-MON-001~intersects'],
+    ['3.7', 'Predictive models: a written description of intended goals and use', 'SGC-LIFE-002~intersects'],
+    ['4.1', 'Due diligence on third parties and their AI systems and data', 'SGC-SUPPLY-001~intersects', 'SGC-MODEL-003'],
+    ['4.2', 'Contracts with AI vendors give audit rights and require cooperation with regulators', 'SGC-MODEL-003~intersects~contract terms are kept by the organisation; Signet records provider terms reviews'],
+    ['4.3', 'Those contract rights are actually used to confirm vendors comply', 'SGC-MODEL-003~intersects'],
+  ]),
+  ...group('sg-mas-ai-rm', [
+    ['3.1-3.4', 'The board oversees AI risk and makes sure existing risk frameworks cover AI', 'SGC-GOV-002'],
+    ['3.5', 'Senior management puts the AI risk framework into practice and reviews it regularly', 'SGC-GOV-001~intersects', 'SGC-GOV-002~intersects'],
+    ['4.2-4.4', 'AI use is identified consistently, including AI built into other tools; unidentified AI stays within risk appetite', 'SGC-INV-002', 'SGC-INV-001~intersects'],
+    ['4.5-4.9', 'An accurate inventory of AI use cases, systems and models with their key attributes', 'SGC-INV-001'],
+    ['4.10-4.13', 'Each AI use case is assessed for risk materiality, before and after controls', 'SGC-RISK-001', 'SGC-RISK-002'],
+    ['5.3', 'High-risk AI use cases have contingency plans', 'SGC-RESP-001', 'SGC-RESP-002~intersects'],
+    ['5.4', 'Data used across the AI life cycle is fit for purpose and protected', 'SGC-DATA-001', 'SGC-DATA-002~intersects'],
+    ['5.5-5.6', 'Transparency and explainability match the context of the use case', 'SGC-TRANS-001', 'SGC-SELF-007~intersects'],
+    ['5.7-5.8', 'Fair outcomes are defined and fairness is assessed where relevant', 'SGC-FAIR-001'],
+    ['5.9', 'Appropriate human oversight of AI, reviewed regularly', 'SGC-HUMAN-001', 'SGC-TOOL-006', 'SGC-HUMAN-003~intersects'],
+    ['5.10-5.11', 'Third-party AI is managed; the institution stays responsible for using it', 'SGC-SUPPLY-001', 'SGC-MODEL-003~intersects'],
+    ['5.12-5.13', 'AI systems and models are selected carefully; less understood ones get extra controls', 'SGC-MODEL-001~intersects', 'SGC-MODEL-002~intersects'],
+    ['5.14-5.15', 'Evaluation and testing proportionate to risk; known limits are mitigated', 'SGC-SEC-001', 'SGC-SEC-002~intersects'],
+    ['5.16', 'AI systems are secure and well governed (technology and cybersecurity risks)', 'SGC-SEC-004', 'SGC-DATA-003~intersects', 'SGC-IDN-001~intersects'],
+    ['5.17', 'The development process is documented for reproducibility and audit', 'SGC-MON-001', 'SGC-SELF-007~intersects'],
+    ['5.18-5.22', 'Pre-deployment reviews, independent for high-risk use cases, with findings resolved', 'SGC-LIFE-002'],
+    ['5.23-5.24', 'Post-deployment monitoring and revalidation', 'SGC-MON-004', 'SGC-MON-005~intersects', 'SGC-LIFE-001~intersects'],
+    ['5.25', 'Changes to AI are controlled', 'SGC-LIFE-002~intersects', 'SGC-MODEL-002~intersects'],
+    ['5.26', 'AI is retired or decommissioned in a controlled way', 'SGC-LIFE-004'],
+    ['6.1-6.2', 'Staff working with AI are competent and their skills are reviewed', 'SGC-HUMAN-002', 'SGC-GOV-003~intersects'],
+    ['6.3', 'Technology infrastructure is adequate for the AI in use', 'SGC-SUPPLY-001~intersects', 'SGC-DATA-004~intersects'],
   ]),
 ];
 
