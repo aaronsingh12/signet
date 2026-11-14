@@ -4,6 +4,7 @@ import { ApiError, api, useApi } from '../lib/api';
 import { useCan, useMe } from '../lib/auth';
 import { FrameworkSheetImport } from '../components/FrameworkSheetImport';
 import { AuditPacks } from '../components/AuditPacks';
+import { LibraryPacks } from '../components/LibraryPacks';
 import { ago } from '../lib/format';
 
 // Control Library & Compliance (BP 9): Signet Controls are the hub; framework requirements map to
@@ -52,6 +53,12 @@ export function Controls() {
       const document = JSON.parse(await file.text());
       const r = await api<any>('/library/import/oscal', { method: 'POST', body: { document, subset } });
       setNote(`Imported ${r.controls} controls into ${r.framework_id}; ${r.in_scope} count toward the score.${r.built_in_not_in_profile?.length ? ` Not in the official baseline: ${r.built_in_not_in_profile.join(', ')}.` : ''}`);
+    });
+
+  const loadNist = () =>
+    run(async () => {
+      const r = await api<any>('/library/import/official', { method: 'POST', body: { source: 'nist-800-53' } });
+      setNote(`Loaded the official NIST SP 800-53 catalog (${r.controls} controls, SHA-256 checked); ${r.in_scope} AI-relevant controls count toward the score.`);
     });
 
   const items: any[] = scores.data?.items ?? [];
@@ -145,6 +152,7 @@ export function Controls() {
       </Card>
 
       {can('evidence.export') && <AuditPacks frameworks={items} />}
+      <LibraryPacks onChange={() => { void lib.reload(); void scores.reload(); }} />
 
       <div className="grid gap-4 md:grid-cols-2">
         <Card title="Switched off for this organisation">
@@ -179,7 +187,9 @@ export function Controls() {
         )}
         {can('library.edit') && (
           <Card title="Import an OSCAL catalog or profile">
-            <p className="mb-2 text-xs text-ink-3">For example the NIST SP 800-53 Rev. 5 catalog (usnistgov/oscal-content) or a FedRAMP baseline profile. By default only AI-relevant controls count toward the score.</p>
+            <p className="mb-2 text-xs text-ink-3">All 1,196 NIST SP 800-53 controls, or any other OSCAL catalog or profile. By default only AI-relevant controls count toward the score.</p>
+            <button className="btn-ghost mb-2 w-full" disabled={busy} onClick={() => void loadNist()}>Load the official NIST SP 800-53 Rev. 5.2.0 catalog</button>
+            <p className="mb-2 text-xs text-ink-3">Signet downloads it from NIST (fixed version, SHA-256 checked). Or upload your own file:</p>
             <OscalImport busy={busy} onImport={importOscal} />
           </Card>
         )}

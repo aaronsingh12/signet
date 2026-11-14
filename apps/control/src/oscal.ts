@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { db, tx } from './db';
 import { invalid } from './errors';
 import { FRAMEWORKS, SP800_53_AI_SUBSET } from './frameworks';
@@ -118,7 +119,8 @@ export async function importOscal(input: OscalImportInput, p: Principal) {
   if (!ids.length) throw invalid('the profile selects no controls (imports[].include-controls[].with-ids)');
   if (ids.length > MAX_CONTROLS) throw invalid(`the profile selects ${ids.length} controls; the limit is ${MAX_CONTROLS}`);
   const title = profile.metadata?.title ?? input.name ?? 'Imported OSCAL profile';
-  const fw = input.framework_id ?? (/fedramp/i.test(title) && /moderate/i.test(title) ? 'fedramp-moderate' : slug(title));
+  const fedramp = /fedramp/i.test(title) ? (/li-?saas/i.test(title) ? 'fedramp-li-saas' : /moderate/i.test(title) ? 'fedramp-moderate' : /high/i.test(title) ? 'fedramp-high' : /low/i.test(title) ? 'fedramp-low' : null) : null;
+  const fw = input.framework_id ?? fedramp ?? slug(title);
   const builtIn = FRAMEWORKS.find((f) => f.id === fw);
   const selected = new Set(ids.map(displayId));
   let inScope = 0;
@@ -139,4 +141,32 @@ export async function importOscal(input: OscalImportInput, p: Principal) {
   });
   const notInProfile = builtIn ? ((await db.prepare("SELECT external_id FROM framework_requirement WHERE framework_id = ? AND source = 'signet'").all(fw)) as { external_id: string }[]).map((r) => r.external_id).filter((x) => !selected.has(x)) : [];
   return { framework_id: fw, kind: 'profile', controls: selected.size, in_scope: inScope, built_in_not_in_profile: notInProfile };
+}
+
+// --- Official sources (BP 9.3: NIST SP 800-53 "imported via OSCAL importer, full text") ---------------
+// Signet loads the official file itself instead of asking someone to download and upload it. Each
+// source is fixed to one upstream commit and checked against its SHA-256 before anything is imported.
+export const OFFICIAL_SOURCES = {
+  'nist-800-53': {
+    name: 'NIST SP 800-53 Rev. 5.2.0 catalog (OSCAL JSON)',
+    url: 'https://raw.githubusercontent.com/usnistgov/oscal-content/5006f18c8047643eaa70e35dd0d20a58bcc41856/nist.gov/SP800-53/rev5/json/NIST_SP-800-53_rev5_catalog.json',
+    sha256: '64ca6b4161de51ab6af098a7d101d326f14c95e1abf721396cd8a049e8115eeb',
+    framework_id: 'nist-800-53',
+  },
+} as const;
+export type OfficialSource = keyof typeof OFFICIAL_SOURCES;
+
+export async function loadOfficial(source: string, p: Principal, opts: { url?: string; sha256?: string } = {}) {
+  const s = OFFICIAL_SOURCES[source as OfficialSource];
+  if (!s) throw invalid(`unknown official source; known: ${Object.keys(OFFICIAL_SOURCES).join(', ')}`);
+  const url = opts.url ?? s.url;
+  const r = await fetch(url, { signal: AbortSignal.timeout(120_000) });
+  if (!r.ok) throw invalid(`could not download ${s.name}: HTTP ${r.status}`);
+  const bytes = Buffer.from(await r.arrayBuffer());
+  const got = createHash('sha256').update(bytes).digest('hex');
+  const want = opts.sha256 ?? s.sha256;
+  if (got !== want) throw invalid(`${s.name}: the downloaded file does not match the pinned SHA-256 (got ${got.slice(0, 12)}, expected ${want.slice(0, 12)}); nothing was imported`);
+  const result = await importOscal({ document: JSON.parse(bytes.toString('utf8')), framework_id: s.framework_id }, p);
+  await ledger.append({ kind: 'admin', data: { event: 'library.official_source_loaded', source, url, sha256: got, actor: p.id } });
+  return { source, sha256: got, ...result };
 }

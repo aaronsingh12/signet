@@ -44,26 +44,42 @@ export interface RequirementDef {
   maps: MappingDef[];
 }
 
+// Library pack version (BP 9.1, semantic versioning): raise it whenever frameworks, requirements, links or
+// control definitions change. Major: something removed or renamed; minor: added; patch: wording.
+export const LIBRARY_VERSION = '1.0.0';
+export const LIBRARY_RELEASED = '2026-11-14';
+
 export const FRAMEWORKS: FrameworkDef[] = [
   { id: 'nist-ai-rmf', name: 'NIST AI RMF 1.0', version: '1.0 (NIST AI 100-1)', licence: 'US government work, public domain', ships: 'summaries', category: 'ai_risk', source_url: 'https://doi.org/10.6028/NIST.AI.100-1', default_enabled: true, applies: 'always' },
   { id: 'nist-ai-600-1', name: 'NIST AI 600-1 Generative AI Profile', version: '2024', licence: 'US government work, public domain', ships: 'summaries', category: 'ai_risk', source_url: 'https://doi.org/10.6028/NIST.AI.600-1', default_enabled: true, applies: 'always' },
   { id: 'owasp-llm', name: 'OWASP Top 10 for LLM Applications', version: '2025', licence: 'CC BY-SA 4.0, with attribution to the OWASP GenAI Security Project', ships: 'full_text', category: 'ai_security', source_url: 'https://genai.owasp.org/llm-top-10/', default_enabled: true, applies: 'always' },
   { id: 'owasp-agentic', name: 'OWASP Agentic AI Threats and Mitigations', version: '1.0 (2025)', licence: 'CC BY-SA 4.0, with attribution to the OWASP GenAI Security Project', ships: 'full_text', category: 'ai_security', source_url: 'https://genai.owasp.org/resource/agentic-ai-threats-and-mitigations/', default_enabled: true, applies: 'always' },
   { id: 'mitre-atlas', name: 'MITRE ATLAS', version: '2025', licence: 'Published openly by MITRE on GitHub; confirm the licence file at each update', ships: 'full_text', category: 'threat', source_url: 'https://atlas.mitre.org/', default_enabled: true, applies: 'always', notes: 'Technique names change between ATLAS releases; identifiers are stable.' },
-  { id: 'eu-ai-act', name: 'EU AI Act (Regulation (EU) 2024/1689)', version: '2024', licence: 'EU legal text, reuse permitted with attribution', ships: 'summaries', category: 'ai_law', source_url: 'https://eur-lex.europa.eu/eli/reg/2024/1689/oj', default_enabled: true, applies: 'eu_ai_act' },
+  { id: 'eu-ai-act', name: 'EU AI Act (Regulation (EU) 2024/1689)', version: '2024, as amended by the Digital Omnibus (Regulation (EU) 2026/1744)', licence: 'EU legal text, reuse permitted with attribution', ships: 'summaries', category: 'ai_law', source_url: 'https://eur-lex.europa.eu/eli/reg/2024/1689/oj', default_enabled: true, applies: 'eu_ai_act', notes: 'The 2026 Digital Omnibus (in force 27 July 2026) moved the high-risk duties for Annex III systems to 2 December 2027 and for Annex I products to 2 August 2028, made AI literacy (Art. 4) a duty to take measures, and added two prohibited practices from 2 December 2026. Dates as reported by legal sources in November 2026; confirm against the consolidated text on EUR-Lex.' },
   { id: 'gdpr', name: 'GDPR (Regulation (EU) 2016/679)', version: '2016', licence: 'EU legal text, reuse permitted with attribution', ships: 'summaries', category: 'privacy', source_url: 'https://eur-lex.europa.eu/eli/reg/2016/679/oj', default_enabled: true, applies: 'personal_data' },
   { id: 'nist-csf', name: 'NIST Cybersecurity Framework 2.0', version: '2.0', licence: 'US government work, public domain', ships: 'full_text', category: 'security', source_url: 'https://doi.org/10.6028/NIST.CSWP.29', default_enabled: true, applies: 'always' },
   { id: 'nist-800-53', name: 'NIST SP 800-53 Rev. 5 (AI-relevant controls)', version: 'Rev. 5', licence: 'US government work, public domain; OSCAL catalogue on NIST GitHub', ships: 'full_text', category: 'security', source_url: 'https://github.com/usnistgov/oscal-content', default_enabled: true, applies: 'always', notes: 'Ships the controls relevant to AI agents. Import the full OSCAL catalogue to see every control; extra controls are kept out of the score.' },
   { id: 'fedramp-moderate', name: 'FedRAMP Rev. 5 Moderate (AI-relevant controls)', version: 'Rev. 5', licence: 'US government work, public domain; baseline from FedRAMP legacy workbook (OSCAL profiles discontinued)', ships: 'full_text', category: 'security', source_url: 'https://github.com/FedRAMP/docs-legacy/blob/main/overrides/assets/LEGACY%20FedRAMP_Security_Controls_Baseline.xlsx', default_enabled: false, applies: 'tenant', notes: 'Only for US federal work. Membership checked against the FedRAMP legacy Rev. 5 baseline workbook (June 2026). FedRAMP is replacing it with the Consolidated Rules for 2026 (fedramp.gov/2026); import the full workbook with the spreadsheet importer if you need every control.' },
+  { id: 'fedramp-high', name: 'FedRAMP Rev. 5 High (AI-relevant controls)', version: 'Rev. 5', licence: 'US government work, public domain; baseline from FedRAMP legacy workbook (OSCAL profiles discontinued)', ships: 'full_text', category: 'security', source_url: 'https://github.com/FedRAMP/docs-legacy/blob/main/overrides/assets/LEGACY%20FedRAMP_Security_Controls_Baseline.xlsx', default_enabled: false, applies: 'tenant', notes: 'Only for US federal work at high impact. Membership checked against the FedRAMP legacy Rev. 5 baseline workbook (June 2026); FedRAMP is replacing it with the Consolidated Rules for 2026.' },
+  { id: 'fedramp-low', name: 'FedRAMP Rev. 5 Low (AI-relevant controls)', version: 'Rev. 5', licence: 'US government work, public domain; baseline from FedRAMP legacy workbook (OSCAL profiles discontinued)', ships: 'full_text', category: 'security', source_url: 'https://github.com/FedRAMP/docs-legacy/blob/main/overrides/assets/LEGACY%20FedRAMP_Security_Controls_Baseline.xlsx', default_enabled: false, applies: 'tenant', notes: 'Only for US federal work at low impact. Membership checked against the FedRAMP legacy Rev. 5 baseline workbook (June 2026); FedRAMP is replacing it with the Consolidated Rules for 2026.' },
+  { id: 'fedramp-li-saas', name: 'FedRAMP Tailored LI-SaaS (AI-relevant controls)', version: 'Rev. 5', licence: 'US government work, public domain; baseline from FedRAMP legacy workbook (OSCAL profiles discontinued)', ships: 'full_text', category: 'security', source_url: 'https://github.com/FedRAMP/docs-legacy/blob/main/overrides/assets/LEGACY%20FedRAMP_Security_Controls_Baseline.xlsx', default_enabled: false, applies: 'tenant', notes: 'Low-impact SaaS. Each control shows its tailoring action from the FedRAMP legacy workbook (June 2026): Attest (the provider states it) or Document and Assess (an assessor tests it).' },
   { id: 'dora', name: 'DORA (Regulation (EU) 2022/2554)', version: '2022', licence: 'EU legal text, reuse permitted with attribution', ships: 'summaries', category: 'resilience', source_url: 'https://eur-lex.europa.eu/eli/reg/2022/2554/oj', default_enabled: false, applies: 'tenant', notes: 'EU financial entities.' },
   { id: 'nis2', name: 'NIS2 (Directive (EU) 2022/2555)', version: '2022', licence: 'EU legal text, reuse permitted with attribution', ships: 'summaries', category: 'resilience', source_url: 'https://eur-lex.europa.eu/eli/dir/2022/2555/oj', default_enabled: false, applies: 'tenant', notes: 'EU essential and important entities.' },
   { id: 'sg-model-ai-gov', name: 'Singapore Model AI Governance Framework', version: '2nd edition (2020)', licence: 'Singapore government publication; Signet summaries', ships: 'summaries', category: 'regional', source_url: 'https://www.pdpc.gov.sg/help-and-resources/2020/01/model-ai-governance-framework', default_enabled: false, applies: 'tenant' },
   { id: 'uk-ai-principles', name: 'UK AI regulation principles', version: '2023 white paper', licence: 'Open Government Licence v3.0', ships: 'summaries', category: 'regional', source_url: 'https://www.gov.uk/government/publications/ai-regulation-a-pro-innovation-approach', default_enabled: false, applies: 'tenant' },
   { id: 'ca-genai-code', name: 'Canada Voluntary Code of Conduct on Advanced Generative AI', version: '2023', licence: 'Government of Canada publication; Signet summaries', ships: 'summaries', category: 'regional', source_url: 'https://ised-isde.canada.ca/site/ised/en/voluntary-code-conduct-responsible-development-and-management-advanced-generative-ai-systems', default_enabled: false, applies: 'tenant' },
-  { id: 'au-ai-guardrails', name: 'Australia Voluntary AI Safety Standard (10 guardrails)', version: '2024', licence: 'Australian government publication (CC BY 4.0); Signet summaries', ships: 'summaries', category: 'regional', source_url: 'https://www.industry.gov.au/publications/voluntary-ai-safety-standard', default_enabled: false, applies: 'tenant' },
-  { id: 'us-co-ai-act', name: 'Colorado AI Act (SB 24-205), deployer duties', version: '2024', licence: 'US state legislation; Signet summaries', ships: 'summaries', category: 'regional', source_url: 'https://leg.colorado.gov/bills/sb24-205', default_enabled: false, applies: 'tenant', notes: 'Effective date has been postponed; check the current date before relying on it.' },
+  { id: 'au-ai-guardrails', name: 'Australia Guidance for AI Adoption (6 essential practices)', version: 'October 2025, updated July 2026', licence: 'Australian government publication; Signet summaries', ships: 'summaries', category: 'regional', source_url: 'https://www.industry.gov.au/publications/guidance-for-ai-adoption', default_enabled: false, applies: 'tenant', notes: 'Published by the National AI Centre. Updates and replaces the 2024 Voluntary AI Safety Standard (10 guardrails), condensing them into six practices.' },
+  { id: 'sg-imda-agentic', name: 'Singapore Model AI Governance Framework for Agentic AI', version: '1.5 (20 May 2026, updated 5 June 2026)', licence: 'Infocomm Media Development Authority publication; Signet summaries', ships: 'summaries', category: 'regional', source_url: 'https://www.imda.gov.sg/assets/63438074-73f6-4dcc-a281-030f42642cf4.pdf', default_enabled: false, applies: 'tenant', notes: 'Voluntary guidance written for AI agents, organised in four dimensions: bound risks upfront, keep humans accountable, technical controls, and end-user responsibility.' },
+  { id: 'us-co-ai-act', name: 'Colorado automated decision-making technology law (SB 26-189), deployer duties', version: 'May 2026; duties from 1 January 2027', licence: 'US state legislation; Signet summaries', ships: 'summaries', category: 'regional', source_url: 'https://leg.colorado.gov/bills/sb26-189', default_enabled: false, applies: 'tenant', notes: 'Replaced the 2024 Colorado AI Act (SB 24-205) before it took effect. Narrower and notice-based: notice, explanation of adverse decisions, data correction and human review, three-year records. The Attorney General enforces it.' },
+  { id: 'us-tx-traiga', name: 'Texas Responsible AI Governance Act (HB 149)', version: 'In force 1 January 2026', licence: 'US state legislation; Signet summaries', ships: 'summaries', category: 'regional', source_url: 'https://capitol.texas.gov/BillLookup/History.aspx?LegSess=89R&Bill=HB149', default_enabled: false, applies: 'tenant', notes: 'Mostly intent-based prohibitions; disclosure duties for government agencies and health care providers. Enforced by the Attorney General; a defence exists for red-team testing or substantial compliance with the NIST AI RMF Generative AI Profile.' },
+  { id: 'us-il-hb3773', name: 'Illinois Human Rights Act amendment on AI in employment (HB 3773)', version: 'In force 1 January 2026', licence: 'US state legislation; Signet summaries', ships: 'summaries', category: 'regional', source_url: 'https://www.ilga.gov/legislation/PublicActs/View/103-0804', default_enabled: false, applies: 'tenant', notes: 'Employers only. Paragraph numbers follow Section 2-102(L) as cited in law-firm summaries; the official ilga.gov text could not be reached when this was written (14 November 2026), so check it. The Department of Human Rights rules on notice timing and format were not final at that time.' },
+  { id: 'us-ca-ccpa-admt', name: 'California CCPA regulations on automated decision-making technology', version: 'Approved September 2025; ADMT duties from 1 January 2027', licence: 'California regulations (11 CCR); Signet summaries', ships: 'summaries', category: 'regional', source_url: 'https://cppa.ca.gov/regulations/ccpa_updates.html', default_enabled: false, applies: 'tenant', notes: 'Applies to businesses covered by the CCPA that use ADMT for significant decisions about consumers, including employees.' },
   { id: 'us-nyc-ll144', name: 'New York City Local Law 144 (automated employment decision tools)', version: '2023', licence: 'US local law; Signet summaries', ships: 'summaries', category: 'regional', source_url: 'https://www.nyc.gov/site/dca/about/automated-employment-decision-tools.page', default_enabled: false, applies: 'tenant' },
-  { id: 'us-ut-aipa', name: 'Utah Artificial Intelligence Policy Act', version: '2024', licence: 'US state legislation; Signet summaries', ships: 'summaries', category: 'regional', source_url: 'https://le.utah.gov/~2024/bills/static/SB0149.html', default_enabled: false, applies: 'tenant' },
+  { id: 'us-ut-aipa', name: 'Utah Artificial Intelligence Policy Act', version: '2024, amended 2025 (SB 226, SB 332)', licence: 'US state legislation; Signet summaries', ships: 'summaries', category: 'regional', source_url: 'https://le.utah.gov/~2024/bills/static/SB0149.html', default_enabled: false, applies: 'tenant', notes: 'The 2025 amendments narrowed the disclosure duties and moved the law\'s repeal date to 1 July 2027.' },
+  { id: 'us-sr-26-2', name: 'US interagency guidance on model risk management (SR 26-2)', version: 'April 2026 (replaces SR 11-7)', licence: 'US government work (Federal Reserve, FDIC, OCC), public domain; Signet summaries', ships: 'summaries', category: 'regional', source_url: 'https://www.federalreserve.gov/supervisionreg/srletters/SR2602.htm', default_enabled: false, applies: 'tenant', notes: 'Banking sector; most relevant to banks over $30 billion in assets. Guidance only: not enforceable on its own. Its footnote 3 puts generative and agentic AI outside its scope, so links to AI agents are partial; it applies to statistical and non-generative AI models.' },
+  { id: 'uk-pra-ss1-23', name: 'UK PRA SS1/23 Model risk management principles for banks', version: 'April 2026 (updating May 2023)', licence: 'Bank of England publication; Signet summaries', ships: 'summaries', category: 'regional', source_url: 'https://www.bankofengland.co.uk/prudential-regulation/publication/2023/may/model-risk-management-principles-for-banks-ss', default_enabled: false, applies: 'tenant', notes: 'Banking sector; applies to UK banks, building societies and PRA-designated investment firms with internal model approval. Models are defined broadly (outputs may be qualitative), so AI agents used for business decisions fall within it.' },
+  { id: 'naic-ai-bulletin', name: 'NAIC Model Bulletin on the Use of AI Systems by Insurers', version: 'December 2023', licence: 'NAIC model bulletin, adopted by individual US states; Signet summaries', ships: 'summaries', category: 'regional', source_url: 'https://content.naic.org/sites/default/files/inline-files/2023-12-4%20Model%20Bulletin_Adopted_0.pdf', default_enabled: false, applies: 'tenant', notes: 'Insurance sector. Applies where a state insurance regulator has adopted the bulletin. Requirement numbers follow its Section 3 (the written AIS Program).' },
+  { id: 'sg-mas-ai-rm', name: 'MAS Guidelines on Artificial Intelligence Risk Management', version: '7 October 2026', licence: 'Monetary Authority of Singapore publication; Signet summaries', ships: 'summaries', category: 'regional', source_url: 'https://www.mas.gov.sg/regulation/guidelines/guidelines-on-artificial-intelligence-risk-management-for-financial-institutions', default_enabled: false, applies: 'tenant', notes: 'Financial sector, Singapore. Covers all AI including generative AI and AI agents. Takes effect 7 October 2027 (Sections 3-4) and 7 October 2028 (Sections 5-6). The FEAT principles continue to apply alongside it.' },
 ];
 
 // Licence-required frameworks (BP 9.3, 9.4). Signet ships only an empty, locked entry: name, version and
@@ -83,10 +99,10 @@ export const PLACEHOLDERS: PlaceholderDef[] = [
   { id: 'scf', name: 'Secure Controls Framework', version: 'current', category: 'security', reason: 'Creative Commons terms to be confirmed before redistribution', source_url: 'https://securecontrolsframework.com/' },
 ];
 
-// "SGC-X-001" or "SGC-X-001~intersects". Default relationship is subset_of.
+// "SGC-X-001", "SGC-X-001~intersects" or "SGC-X-001~intersects~coverage note". Default relationship is subset_of.
 const m = (spec: string): MappingDef => {
-  const [control, rel] = spec.split('~') as [string, Relationship | undefined];
-  return { control, rel: rel ?? 'subset_of' };
+  const [control, rel, note] = spec.split('~') as [string, Relationship | undefined, string | undefined];
+  return { control, rel: rel ?? 'subset_of', ...(note ? { note } : {}) };
 };
 const group = (fw: string, rows: [string, string, ...string[]][]): RequirementDef[] =>
   rows.map(([external_id, summary, ...maps]) => ({ framework_id: fw, external_id, summary, maps: maps.map(m) }));
@@ -113,9 +129,9 @@ export const SP800_53_AI_SUBSET: [string, string, ...string[]][] = [
   ['SA-9', 'External System Services', 'SGC-MODEL-003'],
   ['SA-11', 'Developer Testing and Evaluation', 'SGC-SEC-001'],
   ['SC-7', 'Boundary Protection', 'SGC-TOOL-004', 'SGC-SELF-008'],
-  ['SC-8', 'Transmission Confidentiality and Integrity'],
+  ['SC-8', 'Transmission Confidentiality and Integrity', 'SGC-DATA-003'],
   ['SC-24', 'Fail in Known State', 'SGC-SELF-010'],
-  ['SC-28', 'Protection of Information at Rest'],
+  ['SC-28', 'Protection of Information at Rest', 'SGC-DATA-004'],
   ['SI-4', 'System Monitoring', 'SGC-MON-004'],
   ['SI-10', 'Information Input Validation', 'SGC-TOOL-004'],
   ['SI-12', 'Information Management and Retention', 'SGC-MON-001'],
@@ -127,6 +143,16 @@ export const SP800_53_AI_SUBSET: [string, string, ...string[]][] = [
 // built-in Moderate controls are in its Moderate Baseline sheet. FedRAMP no longer publishes OSCAL
 // profiles (the GSA fedramp-automation repository is gone); it is moving to the Consolidated Rules 2026.
 const NOT_IN_MODERATE = ['AU-10', 'IA-9', 'SC-24'];
+// The same workbook's High, Low and Tailored LI-SaaS sheets (checked 2026-11-14). IA-9 is in none of them.
+const NOT_IN_HIGH = ['IA-9'];
+const NOT_IN_LOW = ['AC-6', 'AU-10', 'IA-9', 'SA-11', 'SC-24', 'SI-10'];
+// LI-SaaS tailoring action per control: Attest = the provider attests; Document and Assess = an assessor tests it.
+const LI_SAAS_ACTION: Record<string, string> = {
+  'AC-2': 'Document and Assess', 'AC-3': 'Document and Assess', 'AU-2': 'Attest', 'AU-3': 'Document and Assess', 'AU-6': 'Document and Assess',
+  'AU-9': 'Attest', 'AU-12': 'Attest', 'CA-7': 'Document and Assess', 'CM-8': 'Document and Assess', 'IA-5': 'Attest', 'IR-4': 'Document and Assess',
+  'IR-6': 'Document and Assess', 'RA-3': 'Document and Assess', 'RA-5': 'Document and Assess', 'SA-9': 'Document and Assess', 'SC-7': 'Document and Assess',
+  'SC-8': 'Document and Assess', 'SC-28': 'Document and Assess', 'SI-4': 'Document and Assess', 'SI-12': 'Attest', 'SR-3': 'Attest',
+};
 
 export const REQUIREMENTS: RequirementDef[] = [
   ...group('nist-ai-rmf', [
@@ -262,8 +288,8 @@ export const REQUIREMENTS: RequirementDef[] = [
     ['AML.T0048', 'External Harms', 'SGC-RESP-002'],
   ]),
   ...group('eu-ai-act', [
-    ['Art. 4', 'AI literacy: staff who operate AI have enough AI knowledge', 'SGC-HUMAN-002'],
-    ['Art. 5', 'Prohibited AI practices are not placed on the market or used', 'SGC-RISK-003~equivalent'],
+    ['Art. 4', 'AI literacy: take measures so that staff who operate AI have enough AI knowledge', 'SGC-HUMAN-002'],
+    ['Art. 5', 'Prohibited AI practices are not placed on the market or used (from 2 December 2026 these include producing non-consensual intimate images and child sexual abuse material)', 'SGC-RISK-003~equivalent', 'SGC-SEC-003~intersects~unsafe content blocking stops these outputs at run time'],
     ['Art. 6', 'Classification rules for high-risk AI systems', 'SGC-RISK-001'],
     ['Art. 9', 'Risk management system for high-risk AI', 'SGC-RISK-001', 'SGC-RISK-002', 'SGC-LIFE-002', 'SGC-FAIR-001'],
     ['Art. 10', 'Data and data governance for training, validation and testing data'],
@@ -321,6 +347,9 @@ export const REQUIREMENTS: RequirementDef[] = [
   ]),
   ...group('nist-800-53', SP800_53_AI_SUBSET),
   ...group('fedramp-moderate', SP800_53_AI_SUBSET.filter(([id]) => !NOT_IN_MODERATE.includes(id))),
+  ...group('fedramp-high', SP800_53_AI_SUBSET.filter(([id]) => !NOT_IN_HIGH.includes(id))),
+  ...group('fedramp-low', SP800_53_AI_SUBSET.filter(([id]) => !NOT_IN_LOW.includes(id))),
+  ...group('fedramp-li-saas', SP800_53_AI_SUBSET.filter(([id]) => LI_SAAS_ACTION[id]).map(([id, title, ...maps]) => [id, `${title} (LI-SaaS: ${LI_SAAS_ACTION[id]})`, ...maps] as [string, string, ...string[]])),
   ...group('dora', [
     ['Art. 5', 'Management body defines, approves and oversees the ICT risk framework', 'SGC-GOV-002'],
     ['Art. 6', 'ICT risk management framework', 'SGC-RISK-001'],
@@ -361,24 +390,55 @@ export const REQUIREMENTS: RequirementDef[] = [
     ['Robustness', 'Validity and robustness: the system works as intended and is secure', 'SGC-SEC-001'],
   ]),
   ...group('au-ai-guardrails', [
-    ['G1', 'Accountability process, including governance and a strategy for compliance', 'SGC-GOV-001', 'SGC-GOV-002'],
-    ['G2', 'Risk management process to identify and reduce risks', 'SGC-RISK-001'],
-    ['G3', 'Protect AI systems and manage data quality and provenance', 'SGC-DATA-001'],
-    ['G4', 'Test models and systems before deployment and monitor them afterwards', 'SGC-SEC-001', 'SGC-MON-004'],
-    ['G5', 'Enable meaningful human control or intervention', 'SGC-HUMAN-001', 'SGC-RESP-001'],
-    ['G6', 'Inform end users about AI-enabled decisions and interactions', 'SGC-TRANS-001'],
-    ['G7', 'Let affected people challenge AI use or outcomes'],
-    ['G8', 'Be transparent with other organisations across the AI supply chain', 'SGC-MODEL-003'],
-    ['G9', 'Keep records so compliance can be assessed', 'SGC-MON-001', 'SGC-INV-001'],
-    ['G10', 'Engage stakeholders, focusing on safety, diversity, inclusion and fairness', 'SGC-FAIR-001'],
+    ['Practice 1', 'Decide who is accountable: a senior owner for AI governance and a policy for responsible use', 'SGC-GOV-001', 'SGC-GOV-002'],
+    ['Practice 2', 'Understand impacts and plan for them, including ways for people to report problems or challenge AI decisions', 'SGC-RISK-002', 'SGC-HUMAN-005'],
+    ['Practice 3', 'Measure and manage risks: screen for high-risk uses and scale controls to the risk', 'SGC-RISK-001', 'SGC-RISK-003~intersects'],
+    ['Practice 4', 'Share essential information: keep a register of AI systems, say where AI is used and be able to explain outcomes', 'SGC-INV-001', 'SGC-TRANS-001', 'SGC-SELF-007~intersects'],
+    ['Practice 5', 'Test before deployment and monitor afterwards', 'SGC-SEC-001', 'SGC-MON-004', 'SGC-MON-005~intersects'],
+    ['Practice 6', 'Maintain human control: meaningful oversight, override points and fallbacks for critical functions', 'SGC-HUMAN-001', 'SGC-TOOL-006', 'SGC-RESP-001'],
+  ]),
+  ...group('sg-imda-agentic', [
+    ['2.1.1', 'Choose suitable use cases for agents, weighing impact, autonomy and how reversible their actions are', 'SGC-RISK-001', 'SGC-RISK-002', 'SGC-RISK-003~intersects'],
+    ['2.1.2', 'Bound risks by design: set each agent\'s limits and permissions (tools, data, identity) to the least it needs', 'SGC-TOOL-004', 'SGC-TOOL-005', 'SGC-IDN-001', 'SGC-IDN-002~intersects'],
+    ['2.2.1', 'Allocate responsibilities clearly inside the organisation and with providers and vendors', 'SGC-GOV-001', 'SGC-MODEL-003~intersects'],
+    ['2.2.2', 'Design for meaningful human oversight, with checkpoints before high-impact actions', 'SGC-TOOL-006', 'SGC-HUMAN-001', 'SGC-HUMAN-003'],
+    ['2.3.1', 'Use technical controls during design and development, preferring deterministic rules over prompt instructions', 'SGC-TOOL-004', 'SGC-SEC-004', 'SGC-DATA-001~intersects'],
+    ['2.3.2', 'Test agents before deployment, including whole workflows and multi-agent set-ups', 'SGC-SEC-001', 'SGC-SEC-002~intersects'],
+    ['2.3.3', 'When deployed, monitor and test continuously, with the ability to intervene or stop an agent', 'SGC-MON-001', 'SGC-MON-004', 'SGC-RESP-001'],
+    ['2.4.2', 'People who interact with agents know it, and can reach a human when needed', 'SGC-TRANS-001', 'SGC-HUMAN-005~intersects'],
+    ['2.4.3', 'People who build agents into their work understand the agents\' limits and are trained to use them', 'SGC-HUMAN-002'],
   ]),
   ...group('us-co-ai-act', [
-    ['Risk program', 'Risk management policy and program for high-risk AI', 'SGC-RISK-001'],
-    ['Impact assessment', 'Impact assessment yearly and after significant changes', 'SGC-RISK-002'],
-    ['Notice', 'Tell consumers when high-risk AI makes or helps make a consequential decision', 'SGC-TRANS-001'],
-    ['Adverse decisions', 'Explain adverse decisions and offer correction and appeal'],
-    ['Discrimination care', 'Use reasonable care to protect against algorithmic discrimination', 'SGC-FAIR-001'],
-    ['AG report', 'Report discovered algorithmic discrimination to the Attorney General within 90 days', 'SGC-RESP-003'],
+    ['6-1-1703', 'Keep records that show compliance for at least three years, such as version identifiers and change logs', 'SGC-MON-001', 'SGC-MODEL-002~intersects'],
+    ['6-1-1704(1)-(2)', 'Before an automated decision tool materially influences a consequential decision, tell the consumer at the point of interaction', 'SGC-TRANS-001'],
+    ['6-1-1704(3)', 'Within 30 days of an adverse decision, explain in plain language the decision and the role the tool played', 'SGC-HUMAN-005~intersects~the appeal route says where people ask; the explanation is sent by the organisation', 'SGC-RISK-002~intersects'],
+    ['6-1-1705(1)(a)(I)', 'Let the consumer see and correct inaccurate personal data used in the decision', 'SGC-HUMAN-005~intersects~the appeal route also takes correction requests; data is corrected in the organisation\'s own systems'],
+    ['6-1-1705(1)(a)(II)', 'Offer meaningful human review and reconsideration of an adverse decision', 'SGC-HUMAN-005'],
+    ['6-1-1702', 'Receive and keep the developer\'s documentation: intended uses, training data categories, known limits and how to review outputs', 'SGC-SUPPLY-001~intersects~keep the developer documentation with the agent\'s AIBOM'],
+  ]),
+  ...group('us-tx-traiga', [
+    ['552.051', 'Government agencies, and providers of health care services, tell people they are interacting with an AI system', 'SGC-TRANS-001'],
+    ['552.052', 'Do not deploy AI that aims to encourage self-harm, harm to others or crime', 'SGC-SEC-003', 'SGC-RISK-003~intersects'],
+    ['552.053', 'Government entities may not use AI for social scoring', 'SGC-RISK-003'],
+    ['552.054', 'Government entities may not identify people from biometric data without consent', 'SGC-RISK-003~intersects', 'SGC-DATA-001~intersects'],
+    ['552.055', 'Do not deploy AI with the sole intent of infringing constitutional rights', 'SGC-RISK-003~intersects'],
+    ['552.056', 'Do not deploy AI with the intent to discriminate unlawfully against a protected class', 'SGC-FAIR-001~intersects~the law requires intent; bias testing gives evidence either way'],
+    ['552.057', 'Do not deploy AI to produce sexual deepfakes of real people or child sexual abuse material', 'SGC-SEC-003'],
+    ['552.103', 'Be able to answer the Attorney General: purpose, data, inputs, outputs, metrics, limits, monitoring and safeguards', 'SGC-LIFE-002~intersects~the lifecycle record and audit packs hold these answers', 'SGC-SUPPLY-001~intersects'],
+    ['552.105(e)', 'Defence: violations found through red-team testing, or substantial compliance with the NIST AI RMF Generative AI Profile', 'SGC-SEC-001~intersects', 'SGC-SEC-002~intersects~NIST AI 600-1 is in Signet\'s library'],
+  ]),
+  ...group('us-il-hb3773', [
+    ['2-102(L)(1)', 'Do not use AI in recruiting, hiring, promotion, discipline, discharge or terms of employment in a way that discriminates, including using zip codes as a stand-in for a protected class', 'SGC-FAIR-001'],
+    ['2-102(L)(2)', 'Tell employees and applicants when AI is used for these employment decisions', 'SGC-TRANS-001'],
+  ]),
+  ...group('us-ca-ccpa-admt', [
+    ['7200', 'Businesses using automated decision-making technology (ADMT) for significant decisions (lending, housing, education, employment, healthcare) comply by 1 January 2027', 'SGC-INV-001~intersects~the intake records which agents make decisions about people and in which domain'],
+    ['7150', 'Do a risk assessment before using ADMT for a significant decision', 'SGC-RISK-002'],
+    ['7155', 'Review risk assessments at least every three years, and within 45 days of a material change', 'SGC-RISK-002~intersects', 'SGC-LIFE-002~intersects~a change to the seal reopens the lifecycle'],
+    ['7157', 'Submit risk assessment information to the California Privacy Protection Agency', 'SGC-RISK-002~intersects~submission is done by the organisation; Signet keeps the assessment record'],
+    ['7220', 'Give a pre-use notice about the ADMT and the rights to opt out and to access', 'SGC-TRANS-001'],
+    ['7221', 'Let consumers opt out of ADMT, or instead offer an appeal to a human reviewer who can overturn the decision', 'SGC-HUMAN-005'],
+    ['7222', 'On request, explain how the ADMT works and how it affected the decision about the consumer', 'SGC-HUMAN-005~intersects', 'SGC-SELF-007~intersects'],
   ]),
   ...group('us-nyc-ll144', [
     ['Bias audit', 'Independent bias audit within one year before using the tool', 'SGC-FAIR-001'],
@@ -386,7 +446,94 @@ export const REQUIREMENTS: RequirementDef[] = [
     ['Notice', 'Notify candidates and employees that the tool is used', 'SGC-TRANS-001'],
   ]),
   ...group('us-ut-aipa', [
-    ['Disclosure', 'Disclose generative AI interaction when asked, and up front in regulated occupations', 'SGC-TRANS-001'],
+    ['Disclosure', 'Say that generative AI is being used when a consumer clearly asks; in regulated occupations, disclose up front for high-risk interactions (for example collecting health, financial or biometric data)', 'SGC-TRANS-001'],
+  ]),
+  // Sector guidance (BP 9.3 "sector regulator guidance (banking model risk, insurance)"). Numbers follow
+  // each document; summaries are Signet's own words. Links are "intersects" where Signet covers part.
+  ...group('us-sr-26-2', [
+    ['III', 'Manage model risk in proportion to its size: more complex, material or uncertain models get more rigour', 'SGC-RISK-001~intersects', 'SGC-RISK-002~intersects'],
+    ['IV Model development', 'Record each model\'s purpose, design, data and limits, and test it before use', 'SGC-LIFE-002~intersects', 'SGC-SEC-001~intersects'],
+    ['IV Model use', 'Users understand a model\'s limits; it is used only for its intended purpose and its outputs are challenged', 'SGC-TOOL-004~intersects', 'SGC-HUMAN-001~intersects'],
+    ['V Conceptual soundness', 'Before use, someone independent reviews the design, assumptions and data', 'SGC-LIFE-002~intersects'],
+    ['V Outcomes analysis', 'Outputs are compared with real outcomes and benchmarks', 'SGC-MON-005~intersects', 'SGC-SEC-001~intersects'],
+    ['V Ongoing monitoring', 'Performance and use are monitored after deployment and drift is investigated', 'SGC-MON-004', 'SGC-MON-001~intersects'],
+    ['VI Roles and responsibilities', 'Board and senior management oversee model risk with clear roles and independent challenge', 'SGC-GOV-001~intersects', 'SGC-GOV-002~intersects'],
+    ['VI Model inventory', 'A complete inventory of models in use, in development and retired', 'SGC-INV-001', 'SGC-INV-002~intersects', 'SGC-LIFE-004~intersects'],
+    ['VI Documentation', 'Models, their validation and their use are documented well enough for someone new to understand them', 'SGC-LIFE-002~intersects', 'SGC-MON-001~intersects'],
+    ['VII', 'Vendor and other third-party models: get documentation, validate as far as possible, and plan for the vendor failing', 'SGC-SUPPLY-001~intersects', 'SGC-MODEL-003~intersects', 'SGC-MODEL-002~intersects'],
+  ]),
+  ...group('uk-pra-ss1-23', [
+    ['1.1', 'Model definition: a clear definition of what counts as a model, including AI and complex rule-based methods', 'SGC-INV-001~intersects'],
+    ['1.2', 'Model inventory: a complete, up-to-date inventory of models and their uses', 'SGC-INV-001', 'SGC-INV-002~intersects'],
+    ['1.3', 'Model tiering: models are tiered by materiality and complexity, and the tier sets the rigour', 'SGC-RISK-001'],
+    ['2.1', 'Board responsibilities: the board sets model risk appetite and oversees the framework', 'SGC-GOV-002'],
+    ['2.2', 'A named senior manager (SMF) is accountable for the model risk management framework', 'SGC-GOV-001~intersects'],
+    ['2.3', 'Policies and procedures cover the whole model life cycle', 'SGC-GOV-002~intersects', 'SGC-LIFE-002~intersects'],
+    ['2.4', 'Roles and responsibilities for owners, developers, users and validators are clear', 'SGC-GOV-001~intersects', 'SGC-GOV-003~intersects'],
+    ['2.5', 'Internal audit assesses the model risk management framework', 'SGC-MON-001~intersects~the ledger and audit packs give internal audit the evidence'],
+    ['2.6', 'Externally developed and vendor models are held to the same standards', 'SGC-SUPPLY-001~intersects', 'SGC-MODEL-003~intersects'],
+    ['3.1', 'Model purpose and design are documented and justified', 'SGC-LIFE-002~intersects'],
+    ['3.2', 'Data used is suitable, of good quality and governed', 'SGC-DATA-001~intersects', 'SGC-DATA-005~intersects'],
+    ['3.3', 'Models are tested during development, including their limits', 'SGC-SEC-001'],
+    ['3.4', 'Model adjustments and expert judgement are controlled and recorded', 'SGC-LIFE-002~intersects~changes to an agent\'s seal go through the lifecycle again'],
+    ['3.5', 'Development documentation is complete enough to support validation', 'SGC-LIFE-002~intersects'],
+    ['3.6', 'Supporting systems that run models are controlled', 'SGC-SUPPLY-001~intersects', 'SGC-MODEL-002~intersects'],
+    ['4.1', 'An independent validation function with the authority and skills to challenge', 'SGC-LIFE-002~intersects~approval needs people independent of the build team'],
+    ['4.2', 'Independent review of each model before use, proportionate to its tier', 'SGC-LIFE-002~intersects'],
+    ['4.3', 'Process verification: the model works as intended in production', 'SGC-MON-001~intersects', 'SGC-SELF-007~intersects'],
+    ['4.4', 'Model performance is monitored against thresholds', 'SGC-MON-004', 'SGC-MON-005~intersects'],
+    ['4.5', 'Models are periodically revalidated', 'SGC-LIFE-001'],
+    ['5.1', 'A controlled process for adjustments made after the model (post-model adjustments)', 'SGC-LIFE-002~intersects'],
+    ['5.2', 'Use of a model can be restricted when it is not performing or not validated', 'SGC-TOOL-004', 'SGC-RESP-001~intersects~quarantine and kill stop an agent at once'],
+    ['5.3', 'Exceptions are recorded and escalated', 'SGC-RESP-002~intersects', 'SGC-HUMAN-003~intersects'],
+  ]),
+  ...group('naic-ai-bulletin', [
+    ['1.1', 'The AI program reduces the risk of adverse consumer outcomes, such as unfair discrimination or inaccurate decisions', 'SGC-FAIR-001', 'SGC-DATA-001~intersects'],
+    ['1.2', 'The program covers governance, risk controls and internal audit', 'SGC-GOV-002~intersects'],
+    ['1.3', 'Senior management is accountable for the program and reports to the board', 'SGC-GOV-001~intersects', 'SGC-GOV-002~intersects'],
+    ['1.4', 'The program is proportionate to how much the insurer uses and relies on AI', 'SGC-RISK-001~intersects'],
+    ['1.5', 'The program may sit inside enterprise risk management or stand alone', 'SGC-GOV-002~intersects'],
+    ['1.6', 'AI use is covered across the insurance life cycle (product, pricing, underwriting, claims, fraud)', 'SGC-INV-001~intersects'],
+    ['1.7', 'All phases of an AI system\'s life are covered, from design to retirement', 'SGC-LIFE-002', 'SGC-LIFE-004~intersects'],
+    ['1.8', 'AI used for regulated insurance practices gets particular attention', 'SGC-RISK-002~intersects'],
+    ['1.9', 'Consumers affected by AI are told it is used', 'SGC-TRANS-001'],
+    ['2.1', 'Policies and procedures, including risk management and controls, at each stage', 'SGC-GOV-002~intersects'],
+    ['2.2', 'Compliance with the program is documented', 'SGC-MON-001~intersects'],
+    ['2.3', 'A governance structure with committees, authority, independence, escalation and training', 'SGC-GOV-001~intersects', 'SGC-GOV-003~intersects', 'SGC-HUMAN-002~intersects'],
+    ['2.4', 'Predictive models: processes to detect and prevent unfair discrimination', 'SGC-FAIR-001'],
+    ['3.1', 'Oversight and approval of developing, adopting or buying AI systems', 'SGC-LIFE-002'],
+    ['3.2', 'Data practices: currency, lineage, quality, integrity and bias', 'SGC-DATA-001~intersects', 'SGC-FAIR-001~intersects'],
+    ['3.3', 'Predictive models: inventory, documentation and checks such as robustness and drift', 'SGC-INV-001~intersects', 'SGC-MON-004~intersects'],
+    ['3.4', 'AI outputs are validated, tested and retested', 'SGC-SEC-001', 'SGC-LIFE-001~intersects'],
+    ['3.5', 'Non-public consumer information is protected', 'SGC-DATA-002', 'SGC-DATA-001~intersects'],
+    ['3.6', 'Data and records are retained', 'SGC-MON-001~intersects'],
+    ['3.7', 'Predictive models: a written description of intended goals and use', 'SGC-LIFE-002~intersects'],
+    ['4.1', 'Due diligence on third parties and their AI systems and data', 'SGC-SUPPLY-001~intersects', 'SGC-MODEL-003'],
+    ['4.2', 'Contracts with AI vendors give audit rights and require cooperation with regulators', 'SGC-MODEL-003~intersects~contract terms are kept by the organisation; Signet records provider terms reviews'],
+    ['4.3', 'Those contract rights are actually used to confirm vendors comply', 'SGC-MODEL-003~intersects'],
+  ]),
+  ...group('sg-mas-ai-rm', [
+    ['3.1-3.4', 'The board oversees AI risk and makes sure existing risk frameworks cover AI', 'SGC-GOV-002'],
+    ['3.5', 'Senior management puts the AI risk framework into practice and reviews it regularly', 'SGC-GOV-001~intersects', 'SGC-GOV-002~intersects'],
+    ['4.2-4.4', 'AI use is identified consistently, including AI built into other tools; unidentified AI stays within risk appetite', 'SGC-INV-002', 'SGC-INV-001~intersects'],
+    ['4.5-4.9', 'An accurate inventory of AI use cases, systems and models with their key attributes', 'SGC-INV-001'],
+    ['4.10-4.13', 'Each AI use case is assessed for risk materiality, before and after controls', 'SGC-RISK-001', 'SGC-RISK-002'],
+    ['5.3', 'High-risk AI use cases have contingency plans', 'SGC-RESP-001', 'SGC-RESP-002~intersects'],
+    ['5.4', 'Data used across the AI life cycle is fit for purpose and protected', 'SGC-DATA-001', 'SGC-DATA-002~intersects'],
+    ['5.5-5.6', 'Transparency and explainability match the context of the use case', 'SGC-TRANS-001', 'SGC-SELF-007~intersects'],
+    ['5.7-5.8', 'Fair outcomes are defined and fairness is assessed where relevant', 'SGC-FAIR-001'],
+    ['5.9', 'Appropriate human oversight of AI, reviewed regularly', 'SGC-HUMAN-001', 'SGC-TOOL-006', 'SGC-HUMAN-003~intersects'],
+    ['5.10-5.11', 'Third-party AI is managed; the institution stays responsible for using it', 'SGC-SUPPLY-001', 'SGC-MODEL-003~intersects'],
+    ['5.12-5.13', 'AI systems and models are selected carefully; less understood ones get extra controls', 'SGC-MODEL-001~intersects', 'SGC-MODEL-002~intersects'],
+    ['5.14-5.15', 'Evaluation and testing proportionate to risk; known limits are mitigated', 'SGC-SEC-001', 'SGC-SEC-002~intersects'],
+    ['5.16', 'AI systems are secure and well governed (technology and cybersecurity risks)', 'SGC-SEC-004', 'SGC-DATA-003~intersects', 'SGC-IDN-001~intersects'],
+    ['5.17', 'The development process is documented for reproducibility and audit', 'SGC-MON-001', 'SGC-SELF-007~intersects'],
+    ['5.18-5.22', 'Pre-deployment reviews, independent for high-risk use cases, with findings resolved', 'SGC-LIFE-002'],
+    ['5.23-5.24', 'Post-deployment monitoring and revalidation', 'SGC-MON-004', 'SGC-MON-005~intersects', 'SGC-LIFE-001~intersects'],
+    ['5.25', 'Changes to AI are controlled', 'SGC-LIFE-002~intersects', 'SGC-MODEL-002~intersects'],
+    ['5.26', 'AI is retired or decommissioned in a controlled way', 'SGC-LIFE-004'],
+    ['6.1-6.2', 'Staff working with AI are competent and their skills are reviewed', 'SGC-HUMAN-002', 'SGC-GOV-003~intersects'],
+    ['6.3', 'Technology infrastructure is adequate for the AI in use', 'SGC-SUPPLY-001~intersects', 'SGC-DATA-004~intersects'],
   ]),
 ];
 
@@ -433,13 +580,7 @@ const LATER_MAPS: Record<string, string[]> = {
   'nist-csf|RS.AN': ['SGC-RESP-002~intersects', 'SGC-SELF-007~intersects~any decision can be replayed from the ledger'],
   'nist-csf|RC.RP': ['SGC-RESP-001~intersects~quarantine and kill are released only by people after investigation'],
   'nist-csf|RC.CO': ['SGC-RESP-003~intersects'],
-  'nist-800-53|SC-8': ['SGC-DATA-003'],
-  'nist-800-53|SC-28': ['SGC-DATA-004'],
-  'fedramp-moderate|SC-8': ['SGC-DATA-003'],
-  'fedramp-moderate|SC-28': ['SGC-DATA-004'],
   'uk-ai-principles|P5': ['SGC-HUMAN-005'],
-  'au-ai-guardrails|G7': ['SGC-HUMAN-005'],
-  'us-co-ai-act|Adverse decisions': ['SGC-HUMAN-005', 'SGC-RISK-002~intersects~the impact assessment records how decisions are explained'],
   'us-nyc-ll144|Audit summary': ['SGC-FAIR-002', 'SGC-FAIR-001~intersects~Signet holds the bias test results'],
 };
 for (const r of REQUIREMENTS) {
