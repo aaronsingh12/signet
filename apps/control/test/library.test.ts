@@ -28,7 +28,7 @@ function nextPack(): ReturnType<typeof library.builtInPack> {
   content.frameworks.push({ id: 'zz-test-fw', name: 'Test framework', version: '1', licence: 'test', ships: 'summaries', category: 'regional', source_url: 'https://example.com', default_enabled: false, applies: 'tenant' });
   content.requirements.push({ framework_id: 'zz-test-fw', external_id: 'T1', summary: 'Test requirement', maps: [{ control: 'SGC-GOV-001', rel: 'intersects' }] });
   content.requirements[0]!.summary += ' (reworded)';
-  return { ...base, version: '1.1.0', content, sha256: core.sha256(core.canonicalize(content)) };
+  return { ...base, version: '9.9.0', content, sha256: core.sha256(core.canonicalize(content)) };
 }
 
 test('a fresh install adopts the built-in pack automatically and records it', async () => {
@@ -56,19 +56,19 @@ test('signed pack import: untrusted signers and tampered packs are refused; a tr
   assert.equal(r.diff.requirements.added, 1);
   assert.equal(r.diff.requirements.changed, 1);
   assert.equal(r.diff.mappings.added, 1);
-  assert.equal(r.diff.previous, '1.0.0');
+  assert.equal(r.diff.previous, library.builtInPack().version);
   assert.equal(Number(((await db.prepare("SELECT COUNT(*) AS n FROM framework WHERE id = 'zz-test-fw'").get()) as { n: number }).n), 0, 'not applied before adoption');
 
   await library.adopt(r.id, admin);
   assert.equal(Number(((await db.prepare("SELECT COUNT(*) AS n FROM framework_requirement WHERE framework_id = 'zz-test-fw'").get()) as { n: number }).n), 1);
   const statuses = (await library.list()).items as { version: string; status: string }[];
-  assert.deepEqual(statuses.filter((p) => p.status === 'adopted').map((p) => p.version), ['1.1.0']);
+  assert.deepEqual(statuses.filter((p) => p.status === 'adopted').map((p) => p.version), ['9.9.0']);
   assert.ok((await events()).some((e) => e.event === 'library.pack_imported' && e.signer === 'pack-test'));
 });
 
 test('review mode: a new built-in pack waits for a person, and admins are told', async () => {
   await library.setMode('review', admin);
-  // The adopted library (1.1.0 above) differs from the built-in one, as after a deploy.
+  // The adopted library (9.9.0 above) differs from the built-in one, as after a deploy.
   await library.syncBuiltIn();
   assert.notEqual(await controls.appliedSha(), library.builtInPack().sha256, 'not applied automatically');
   const waiting = ((await library.list()).items as { id: string; source: string; status: string }[]).find((p) => p.source === 'built_in' && p.status !== 'adopted');

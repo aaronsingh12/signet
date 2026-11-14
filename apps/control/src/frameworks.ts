@@ -13,6 +13,7 @@
 //   superset_of - the control meets the requirement and more
 //   intersects  - partial overlap in both directions
 // A requirement with no mapping is shown as a coverage gap, never as passing.
+import { NIST_OFFICIAL_TEXT } from './nist-official-text';
 
 export type Relationship = 'equivalent' | 'subset_of' | 'superset_of' | 'intersects';
 export type Category = 'ai_risk' | 'ai_security' | 'ai_law' | 'security' | 'privacy' | 'resilience' | 'threat' | 'regional';
@@ -46,12 +47,12 @@ export interface RequirementDef {
 
 // Library pack version (BP 9.1, semantic versioning): raise it whenever frameworks, requirements, links or
 // control definitions change. Major: something removed or renamed; minor: added; patch: wording.
-export const LIBRARY_VERSION = '1.0.0';
+export const LIBRARY_VERSION = '1.1.0';
 export const LIBRARY_RELEASED = '2026-11-14';
 
 export const FRAMEWORKS: FrameworkDef[] = [
-  { id: 'nist-ai-rmf', name: 'NIST AI RMF 1.0', version: '1.0 (NIST AI 100-1)', licence: 'US government work, public domain', ships: 'summaries', category: 'ai_risk', source_url: 'https://doi.org/10.6028/NIST.AI.100-1', default_enabled: true, applies: 'always' },
-  { id: 'nist-ai-600-1', name: 'NIST AI 600-1 Generative AI Profile', version: '2024', licence: 'US government work, public domain', ships: 'summaries', category: 'ai_risk', source_url: 'https://doi.org/10.6028/NIST.AI.600-1', default_enabled: true, applies: 'always' },
+  { id: 'nist-ai-rmf', name: 'NIST AI RMF 1.0', version: '1.0 (NIST AI 100-1)', licence: 'US government work, public domain', ships: 'full_text', category: 'ai_risk', source_url: 'https://doi.org/10.6028/NIST.AI.100-1', default_enabled: true, applies: 'always', notes: 'All 72 subcategories with NIST\'s official wording (Tables 1-4 of NIST AI 100-1).' },
+  { id: 'nist-ai-600-1', name: 'NIST AI 600-1 Generative AI Profile', version: '2024', licence: 'US government work, public domain', ships: 'full_text', category: 'ai_risk', source_url: 'https://doi.org/10.6028/NIST.AI.600-1', default_enabled: true, applies: 'always', notes: 'The 12 generative AI risks with NIST\'s official definitions (section 1 of NIST AI 600-1).' },
   { id: 'owasp-llm', name: 'OWASP Top 10 for LLM Applications', version: '2025', licence: 'CC BY-SA 4.0, with attribution to the OWASP GenAI Security Project', ships: 'full_text', category: 'ai_security', source_url: 'https://genai.owasp.org/llm-top-10/', default_enabled: true, applies: 'always' },
   { id: 'owasp-agentic', name: 'OWASP Agentic AI Threats and Mitigations', version: '1.0 (2025)', licence: 'CC BY-SA 4.0, with attribution to the OWASP GenAI Security Project', ships: 'full_text', category: 'ai_security', source_url: 'https://genai.owasp.org/resource/agentic-ai-threats-and-mitigations/', default_enabled: true, applies: 'always' },
   { id: 'mitre-atlas', name: 'MITRE ATLAS', version: '2025', licence: 'Published openly by MITRE on GitHub; confirm the licence file at each update', ships: 'full_text', category: 'threat', source_url: 'https://atlas.mitre.org/', default_enabled: true, applies: 'always', notes: 'Technique names change between ATLAS releases; identifiers are stable.' },
@@ -590,6 +591,13 @@ for (const r of REQUIREMENTS) {
     const [control, rel, note] = spec.split('~') as [string, Relationship | undefined, string | undefined];
     if (!r.maps.some((x) => x.control === control)) r.maps.push({ control, rel: rel ?? 'subset_of', ...(note ? { note } : {}) });
   }
+}
+
+// NIST AI RMF and the Generative AI Profile ship NIST's own wording (public domain, BP 9.3 "full text"):
+// the official text replaces Signet's short summary for each of these requirements.
+for (const r of REQUIREMENTS) {
+  const official = NIST_OFFICIAL_TEXT[`${r.framework_id}|${r.external_id}`];
+  if (official) r.summary = official;
 }
 
 /**

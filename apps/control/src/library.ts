@@ -167,6 +167,6 @@ export async function importPack(file: PackFile, p: Principal) {
 }
 
 export async function list() {
-  const rows = (await db.prepare('SELECT id, version, released, sha256, source, signer, status, created_at, adopted_at, adopted_by FROM library_pack ORDER BY created_at DESC LIMIT 50').all()) as { id: string; status: string }[];
+  const rows = (await db.prepare('SELECT id, version, released, sha256, source, signer, status, created_at, adopted_at, adopted_by FROM library_pack ORDER BY created_at DESC LIMIT 50').all()) as { id: string; version: string; released: string | null; sha256: string; source: string; signer: string | null; status: string; created_at: string; adopted_at: string | null; adopted_by: string | null }[];
   return { mode: await mode(), built_in: { version: LIBRARY_VERSION, released: LIBRARY_RELEASED, sha256: builtInPack().sha256 }, items: rows };
 }

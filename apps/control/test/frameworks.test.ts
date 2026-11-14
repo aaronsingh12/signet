@@ -154,3 +154,14 @@ test('links need two people; suggestions are hints; built-in links cannot be rem
   process.env.SIGNET_SINGLE_OPERATOR = 'true';
   assert.equal((await libraryImport.proposeMapping({ requirement_id: id, control_id: 'SGC-TOOL-004' }, admin)).status, 'confirmed', 'single administrator mode: confirmed and marked');
 });
+
+test('NIST AI RMF and the Generative AI Profile ship NIST\'s official text for every requirement', async () => {
+  const { FRAMEWORKS, REQUIREMENTS } = await import('../src/frameworks');
+  const { NIST_OFFICIAL_TEXT } = await import('../src/nist-official-text');
+  for (const id of ['nist-ai-rmf', 'nist-ai-600-1']) {
+    assert.equal(FRAMEWORKS.find((f) => f.id === id)!.ships, 'full_text');
+    const rows = REQUIREMENTS.filter((r) => r.framework_id === id);
+    assert.ok(rows.length && rows.every((r) => r.summary === NIST_OFFICIAL_TEXT[`${id}|${r.external_id}`]), `${id}: every row has the official wording`);
+  }
+  assert.equal(REQUIREMENTS.find((r) => r.external_id === 'GOVERN 1.1')!.summary, 'Legal and regulatory requirements involving AI are understood, managed, and documented.');
+});
