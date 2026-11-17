@@ -7,4 +7,5 @@ tools/bin
 dist
 apps/web/dist
 .env
+.env.*
 .git
