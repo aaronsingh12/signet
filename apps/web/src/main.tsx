@@ -14,6 +14,7 @@ import { Connectors } from './pages/Connectors';
 import { Discovery } from './pages/Discovery';
 import { Enforcement } from './pages/Enforcement';
 import { Login } from './pages/Login';
+import { OAuthConsent } from './pages/OAuthConsent';
 import { Plugins } from './pages/Plugins';
 import { QuickConnect } from './pages/QuickConnect';
 import { Policies } from './pages/Policies';
@@ -29,6 +30,7 @@ createRoot(document.getElementById('root')!).render(
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/oauth/authorize" element={authed(<OAuthConsent />)} />
         <Route path="/m/approvals/:id" element={authed(<MobileApproval />)} />
         <Route element={authed(<Shell />)}>
           <Route index element={<CommandCenter />} />

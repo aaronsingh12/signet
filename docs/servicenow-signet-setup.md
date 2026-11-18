@@ -1,4 +1,4 @@
-﻿# ServiceNow ko Signet se connect karna: easy step-by-step guide
+# ServiceNow ko Signet se connect karna: easy step-by-step guide
 
 Ye guide existing ServiceNow AI agent ke MCP tool calls Signet gateway se route karne ke liye hai. UI labels instance/release aur permissions ke according thode alag ho sakte hain. Instructions screenshots aur repository ke implemented flow par based hain.
 
@@ -38,7 +38,7 @@ Simple terms:
 
 **Current verified state:** upstream OAuth/discovery working; two incident tools discovered; Incident context AI agent manually linked; Signet approval completed; outbound provider, credential, HTTP connection and MCP registration created; Control Tower record shows **Deployed**.
 
-**Current remaining work:** Incident context AI agent is protected and cannot accept a new tool. An existing editable agent must be confirmed, linked/approved with its own Signet identity and credentials, and made to call the gateway. Real governed tool execution and activity monitoring are not yet verified.
+**Current remaining work:** the protected original was copied as **Incident context AI agent (Copy)**, sys_id `6dfcea3e0f2457507e34bec300d1b216`. The copy is editable, linked/approved in Signet, and shown Managed/Deployed in Control Tower. Its MCP picker still reports **There are no tools from this MCP server**. The exact discovery failure remains unconfirmed; real governed execution and activity monitoring are not yet verified.
 
 Latest screenshot has a different public hostname and selected alias `mcp://signet-demo`. Its association with this incident server is not confirmed. Do not assume it is the same route.
 
@@ -194,7 +194,7 @@ Its **Add tool** button was disabled. Switching scope alone is not a confirmed f
 
 **Current outcome:** this agent cannot be used for attaching the Signet gateway through the shown editor. The earlier recommendation did not check editability first.
 
-**Next step:** inspect existing `SignetDemoAgent` or another custom agent; confirm editability before selecting it. No new agent is required if a suitable editable one exists. This replacement has not yet been verified.
+**Resolution used:** the user duplicated the original as `Incident context AI agent (Copy)`. Its Add tool button is enabled and offers MCP server tool. Link the copy using its own sys_id, approve its actions, generate its own Signet credentials and update the outbound provider before requesting a new token. The original protected record stays separate.
 
 The existing incident gateway/OAuth infrastructure can be reused. A different agent needs its own correct Signet link, approval and workload credentials. Do not use the protected agent's credentials to represent another agent. Keep unrelated existing records until their use has been reviewed.
 
@@ -279,6 +279,35 @@ A token alone does not mark the agent connected. Regenerating credentials requir
 7. Under **OAuth Entity Profiles**, confirm the generated `Signet Incident OAuth default_profile` with grant **Client Credentials**.
 
 Do not edit `Nav Test` to do this. That is the separate inbound provider.
+
+### Alternative: direct OAuth 2.1 manual registration with Authorization Code
+
+Signet also supports confidential Authorization Code clients with mandatory PKCE S256 and rotating refresh tokens. This is an alternative to the existing **Others + connection alias** client-credentials path; choose one connection path deliberately. It does not itself resolve an unidentified tools-discovery failure.
+
+1. Open the correct copied agent in Signet ? **Gateway setup**. Generate/restore that agent's saved Client ID and Secret.
+2. The credential panel displays **Authorization URL** and **Token URL**, derived from the saved Hosted Signet control address. Update Hosted Signet addresses first if the public origin changed.
+3. Under **OAuth Authorization Code**, register the external platform's exact callback URL. For the outbound ServiceNow provider, copy its generated Redirect URL (commonly `https://<instance>.service-now.com/oauth_redirect.do`). Verify the actual callback supplied by the chosen ServiceNow registration screen before saving it.
+4. Click **Save callback URL**. This is not the inbound `/api/v1/plugins/servicenow/callback`. Only an agent owner/authorized identity manager may configure it. Saving clears outstanding authorization requests, codes and refresh tokens for that client.
+5. In ServiceNow **Add MCP server**, use the registered Signet gateway MCP URL and **OAuth 2.1 ? Manual Registration**.
+6. Choose **Authorization Code**, **Client Secret Basic** (or Client Secret Post if offered), and enter the same agent's Signet-issued Client ID/Secret.
+7. Enter these URLs using the current configured public origin:
+
+| Field | Value |
+| --- | --- |
+| Authorization URL | `<PUBLIC_SIGNET_URL>/api/v1/identity/authorize` |
+| Token URL | `<PUBLIC_SIGNET_URL>/api/v1/identity/token` |
+| Auth scopes | `mcp` (or empty; the granted scope is mcp) |
+| Token Revocation URL | Leave blank; no public OAuth revocation endpoint is advertised |
+
+8. The external client must send `response_type=code`, the exact registered `redirect_uri`, nonempty `state`, `code_challenge_method=S256` and a valid `code_challenge`. Its token exchange must send the matching `code_verifier`. Missing PKCE is explicitly rejected; a placeholder Authorization URL is not supported.
+9. Start authorization from ServiceNow. Sign in to Signet as the appropriate owner/administrator, verify the agent/environment/callback on the consent page and click **Allow access**. **Deny** returns `access_denied` with the original state.
+10. Signet returns a five-minute single-use code. ServiceNow exchanges it at the Token URL, authenticating with its client credentials. The result contains `access_token`, `token_type`, `expires_in`, `refresh_token` and `scope`.
+11. For renewal, the client sends `grant_type=refresh_token` with the latest refresh token and its client credentials. Every refresh replaces the previous refresh token; store the returned replacement. Refresh tokens expire after 30 days. Client/instance revocation and changed seals stop renewal.
+12. Continue tool attachment and a real gateway test. A completed consent screen alone does not verify tool discovery or execution.
+
+Protocol capabilities are available at `<PUBLIC_SIGNET_URL>/api/v1/identity/oauth-metadata`. Dynamic Client Registration is not implemented: manually register the existing Signet-issued client and its callback. ServiceNow's exact PKCE behavior in this UI must be verified with an actual authorization attempt; no live success is claimed from local integration tests.
+
+Implementation verification covers real local HTTP login, consent, callback/state binding, code exchange, Basic/body client authentication, PKCE rejection, single-use/concurrent code redemption, expiry, refresh rotation and revocation against an isolated MongoDB database. Security references: [OAuth Security BCP](https://www.rfc-editor.org/rfc/rfc9700.html) and [PKCE S256](https://www.rfc-editor.org/rfc/rfc7636.html).
 
 ## 13. Create OAuth credential and request a token
 
@@ -383,7 +412,7 @@ The supplied final Control Tower screenshot shows **Assess**, **Build and test**
 5. Review the actual instructions so the test invokes gateway-provided tools rather than existing direct/native tools.
 6. Save through the available UI.
 
-Exact picker screens after Add tool have not been supplied. Do not assume the buttons or claim tools attached without checking.
+The copy's **Add tool ? MCP server tool** picker was opened. Selecting **Signet Incident Gateway** displayed an empty disabled Select tool field and **There are no tools from this MCP server**. Do not fill Name/Description to work around missing tools. Both saved gateway and Token URLs were checked against `festive-dealt-talisman.ngrok-free.dev`. The copied agent and gateway show Control Tower deployment complete, but discovery still fails. Browser Network responses and the actual ngrok MCP request/response are needed to determine the cause; no root cause or resolution is confirmed.
 
 If **Add tool** is disabled and protection policy is displayed, stop editing that record and select an editable agent. The protected **Incident context AI agent** cannot complete this step through the shown UI.
 
@@ -426,7 +455,8 @@ No working execution-history source was demonstrated. Incident lookup and summar
 | Token expires soon/old expiry | Request fresh token and verify lifetime | Current valid token not established by old banner |
 | MCP still syncing | Retry then inspect exact server's sync with admin | Incident record later appeared in Control Tower |
 | No onboarding tasks | Review requirements; create tasks if needed | Later screenshot shows lifecycle Deployed |
-| Add tool greyed out | Protected agent cannot be edited through shown UI | Existing editable replacement still needed |
+| Add tool greyed out | Protected original cannot be edited through shown UI | User-created copy is editable and separately linked |
+| There are no tools from this MCP server | Inspect actual discovery response and gateway logs | URLs checked; copied agent and gateway Deployed; root cause unresolved |
 | Gateway enforcement not verified | Need real authenticated traffic for correct identity | Real execution not yet demonstrated |
 | Monitoring not configured | Need separate execution-history source and successful sync | Pending |
 | ngrok hostname changed | Update all URL references consistently | Latest screen uses a different origin; alignment unverified |

@@ -59,7 +59,10 @@ const ops: Record<string, Record<string, Op>> = {
   '/auth/logout': { post: { summary: 'End the Signet session and the IdP session', public: true } },
   '/me': { get: { summary: 'The signed-in principal, roles and permissions' } },
   '/identity/jwks': { get: { summary: 'Public keys: CA (seals, bundles), workload tokens, ledger roots', public: true } },
-  '/identity/token': { post: { summary: 'Exchange a one-time bootstrap credential or OAuth client credentials for an agent workload token; rate limited per address', public: true, body: 'BootstrapExchange' } },
+  '/identity/token': { post: { summary: 'Exchange a bootstrap credential, client credentials, PKCE authorization code or rotating refresh token for an agent workload token; rate limited per address', public: true, body: 'BootstrapExchange' } },
+  '/identity/authorize': { get: { summary: 'Start signed-in human consent for a registered callback using authorization code and PKCE S256', public: true } },
+  '/identity/oauth-metadata': { get: { summary: 'Discover OAuth endpoints and supported confidential-client grants', public: true } },
+  '/identity/clients/{id}/oauth': { get: { summary: 'Read the registered external callback URL for a workload client' }, put: { summary: 'Register an exact callback URL and invalidate pending grants and refresh tokens' } },
   '/edge-runners': {
     get: { summary: 'List outbound connector runners and heartbeat status', permission: 'agents.read' },
     post: { summary: 'Enroll a private-network HTTP connector runner; returns its secret once', permission: 'connectors.manage' },
@@ -192,6 +195,8 @@ export const openapi = {
       BootstrapExchange: { oneOf: [
         { type: 'object', required: ['bootstrap_credential'], properties: { bootstrap_credential: { type: 'string' } } },
         { type: 'object', required: ['grant_type', 'client_id', 'client_secret'], properties: { grant_type: { const: 'client_credentials' }, client_id: { type: 'string' }, client_secret: { type: 'string' } } },
+        { type: 'object', required: ['grant_type', 'code', 'redirect_uri', 'code_verifier'], properties: { grant_type: { const: 'authorization_code' }, client_id: { type: 'string' }, client_secret: { type: 'string' }, code: { type: 'string' }, redirect_uri: { type: 'string', format: 'uri' }, code_verifier: { type: 'string', minLength: 43, maxLength: 128 } } },
+        { type: 'object', required: ['grant_type', 'refresh_token'], properties: { grant_type: { const: 'refresh_token' }, client_id: { type: 'string' }, client_secret: { type: 'string' }, refresh_token: { type: 'string' } } },
       ] },
       AgentRegistration: {
         type: 'object',

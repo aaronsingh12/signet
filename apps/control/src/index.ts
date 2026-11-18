@@ -16,6 +16,7 @@ import * as evidence from './evidence';
 import { cursor, idempotency, limitOf, problemHandler, route } from './http';
 import * as hub from './hub';
 import * as identity from './identity';
+import { workloadOAuthRouter } from './workload-oauth-routes';
 import * as deploymentIdentity from './deployment-identity';
 import { jwks, keys } from './keys';
 import * as ledger from './ledger';
@@ -137,21 +138,9 @@ function tokenRateLimit(req: Request) {
 }
 // Self-hosted agents send their one-time bootstrap credential. Third-party (vendor) platforms use OAuth
 // client credentials, as JSON, as a form (RFC 6749 section 4.4) or with HTTP Basic client auth.
-api.post('/identity/token', express.urlencoded({ extended: false, limit: '8kb' }), route(async (req, res) => {
-  res.setHeader('cache-control', 'no-store');
-  res.setHeader('pragma', 'no-cache');
-  tokenRateLimit(req);
-  const b = (req.body ?? {}) as Record<string, string>;
-  if (b.grant_type === 'client_credentials') {
-    let id = b.client_id;
-    let secret = b.client_secret;
-    const basic = String(req.headers.authorization ?? '').match(/^Basic\s+(.+)$/i);
-    if (basic) [id, secret] = Buffer.from(basic[1]!, 'base64').toString('utf8').split(':') as [string, string];
-    const t = (await identity.exchangeClientCredentials(decodeURIComponent(String(id ?? '')), decodeURIComponent(String(secret ?? ''))));
-    return { ...t, access_token: t.token }; // access_token for OAuth clients, token for the Signet SDK
-  }
-  return (await identity.exchangeBootstrap(String(b.bootstrap_credential ?? '')));
-}));
+api.post('/identity/token', (req, _res, next) => { tokenRateLimit(req); next(); });
+api.get('/identity/authorize', (req, _res, next) => { tokenRateLimit(req); next(); });
+api.use(workloadOAuthRouter());
 // The SDK and sidecar report what they see in the agent's runtime (variable names, never values).
 api.post('/identity/diagnostics', route(async (req) => (await connectivity.report(String(req.headers.authorization ?? '').replace(/^Bearer\s+/i, ''), req.body))));
 api.post('/identity/token/refresh', route(async (req) => (await identity.refreshToken((req.headers.authorization ?? '').replace(/^Bearer /, '')))));

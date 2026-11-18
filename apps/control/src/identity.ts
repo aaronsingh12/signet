@@ -226,13 +226,19 @@ export async function revokeClient(clientId: string, p: Principal, reason: strin
   return { client_id: clientId, revoked: true };
 }
 
+/** Validates a confidential workload client without issuing a token. */
+export async function authenticateWorkloadClient(clientId: string, secret: string): Promise<{ client_id: string; agent_id: string; secret_hash: string; revoked_at: string | null; environment: string | null }> {
+  const c = (await db.prepare('SELECT * FROM agent_client WHERE client_id = ?').get(clientId ?? '')) as { client_id: string; agent_id: string; secret_hash: string; revoked_at: string | null; environment: string | null } | undefined;
+  // Same answer for an unknown client and a wrong secret; hashes compared in constant time.
+  const ok = !!c && timingSafeEqual(Buffer.from(c.secret_hash), Buffer.from(sha256(secret ?? '')));
+  if (!c || !ok) throw new PolicyError('BP-4.2', 'invalid client credentials', 401);
+  if (c.revoked_at) throw new PolicyError('BP-4.2', 'client credentials have been revoked', 401);
+  return c;
+}
+
 export async function exchangeClientCredentials(clientId: string, secret: string) {
   return (await tx(async () => {
-    const c = (await db.prepare('SELECT * FROM agent_client WHERE client_id = ?').get(clientId ?? '')) as { client_id: string; agent_id: string; secret_hash: string; revoked_at: string | null; environment: string | null } | undefined;
-    // Same answer for an unknown client and a wrong secret; hashes compared in constant time.
-    const ok = !!c && timingSafeEqual(Buffer.from(c.secret_hash), Buffer.from(sha256(secret ?? '')));
-    if (!c || !ok) throw new PolicyError('BP-4.2', 'invalid client credentials', 401);
-    if (c.revoked_at) throw new PolicyError('BP-4.2', 'client credentials have been revoked', 401);
+    const c = await authenticateWorkloadClient(clientId, secret);
     const cert = (await usableCertificate(c.agent_id));
     const environment = c.environment ?? cert.environments[0];
     if (!environment || !cert.environments.includes(environment)) throw new PolicyError('BP-5.2-4', `the seal does not cover client environment ${environment}`, 403);

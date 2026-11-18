@@ -12,6 +12,7 @@ import { GatewayConnection } from './GatewayConnection';
 import { HostedConnectionSettings } from './HostedConnectionSettings';
 import { AgentConfigDownload } from './AgentConfigDownload';
 import { AgentPlatformDeployment } from './AgentPlatformDeployment';
+import { OAuthClientSettings } from './OAuthClientSettings';
 
 interface ConnectInfo {
   control_url: string; gateway_url: string | null; gateway_url_source: string;
@@ -63,6 +64,7 @@ function AdvancedConnectionSetup({ agent, certificate, state, onChange, initialM
   const gateway = info?.gateway_url ?? '<gateway-url>';
   const model = certificate?.models?.[0]?.model ?? info?.models[0] ?? '<approved-model>';
   const tokenUrl = `${control}/api/v1/identity/token`;
+  const authorizationUrl = `${control}/api/v1/identity/authorize`;
   const permitted = !!certificate && can('identity.bootstrap') && state !== 'revoked' && state !== 'suspended';
   const unsupported = agent.kind === 'third_party' && (method === 'bootstrap' || method === 'hybrid');
   const generate = async (): Promise<void> => {
@@ -141,7 +143,8 @@ function AdvancedConnectionSetup({ agent, certificate, state, onChange, initialM
           <button type="button" data-testid="setup-restore-secret" className="btn-primary mt-3" disabled={busy || !originalSecret || !permitted} onClick={() => void restoreSecret()}>Save existing secret</button>
         </div>}
         {certificate && !can('identity.bootstrap') && <p className="mt-2 text-sm text-ink-3">Ask your agent owner or administrator to generate credentials.</p>}
-        {(credentials || bootstrap) && <div className="mt-4 rounded-lg border border-line p-3"><p className="mb-2 text-sm font-medium">{credentials ? 'Credentials are saved encrypted and restored after refresh. They change only when you regenerate them.' : 'Save this single-use bootstrap credential before leaving this page.'}</p>{credentials ? <CopyCode testId="setup-credentials" text={`Client ID: ${credentials.client_id}\nClient Secret: ${credentials.client_secret}\nToken URL: ${tokenUrl}\nGrant type: client_credentials\nEnvironment: ${environment}`} /> : bootstrap && <><CopyCode testId="setup-bootstrap" text={bootstrap.bootstrap_credential} /><p className="mt-2 text-xs text-ink-3">Single use · expires {new Date(bootstrap.expires_at).toLocaleString()}</p></>}<button data-testid="setup-hide-secret" className="mt-2 text-xs text-royal" onClick={() => { setCredentials(null); setBootstrap(null); }}>Hide credentials</button></div>}
+        {(credentials || bootstrap) && <div className="mt-4 rounded-lg border border-line p-3"><p className="mb-2 text-sm font-medium">{credentials ? 'Credentials are saved encrypted and restored after refresh. They change only when you regenerate them.' : 'Save this single-use bootstrap credential before leaving this page.'}</p>{credentials ? <CopyCode testId="setup-credentials" text={`Client ID: ${credentials.client_id}\nClient Secret: ${credentials.client_secret}\nAuthorization URL: ${authorizationUrl}\nToken URL: ${tokenUrl}\nGrant types: client_credentials, authorization_code (PKCE S256)\nEnvironment: ${environment}`} /> : bootstrap && <><CopyCode testId="setup-bootstrap" text={bootstrap.bootstrap_credential} /><p className="mt-2 text-xs text-ink-3">Single use · expires {new Date(bootstrap.expires_at).toLocaleString()}</p></>}<button data-testid="setup-hide-secret" className="mt-2 text-xs text-royal" onClick={() => { setCredentials(null); setBootstrap(null); }}>Hide credentials</button></div>}
+        {credentials && method === 'oauth' && <OAuthClientSettings key={credentials.client_id} clientId={credentials.client_id} controlUrl={control} />}
       </>}
       <ErrorNote error={error ?? infoError} />
       {info?.gateway_url && credentials && <AgentConfigDownload agentId={agent.id} controlUrl={info.control_url} gatewayUrl={info.gateway_url} identity={{ kind: 'oauth', client_id: credentials.client_id, client_secret: credentials.client_secret }} />}
