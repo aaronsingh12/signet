@@ -8,6 +8,7 @@ import { agentBlocked, revokeTokensFor } from './enforcement';
 import * as hub from './hub';
 import * as ledger from './ledger';
 import { can, type Principal } from './rbac';
+import { sealValue, openValue } from './keyring';
 
 // Revoking an identity is a security action: Security (who may quarantine) or whoever manages the
 // agent's identities may do it.
@@ -135,13 +136,74 @@ export async function createClient(agentRef: string, p: Principal, label: string
   if (!cert.environments.includes(environment)) throw new PolicyError('BP-5.2-4', `the seal does not cover environment ${environment}`, 403);
   const clientId = `scl_${randomBytes(12).toString('hex')}`;
   const secret = `scs_${randomBytes(32).toString('base64url')}`;
-  (await db.prepare('INSERT INTO agent_client (client_id, agent_id, secret_hash, label, created_by, created_at, environment) VALUES (?, ?, ?, ?, ?, ?, ?)').run(clientId, agent.id, sha256(secret), label?.trim() || 'agent connection', p.id, nowIso(), environment));
+  (await db.prepare('INSERT INTO agent_client (client_id, agent_id, secret_hash, secret_sealed, label, created_by, created_at, environment) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(clientId, agent.id, sha256(secret), await sealValue(secret), label?.trim() || 'agent connection', p.id, nowIso(), environment));
   (await ledger.append({ kind: 'admin', agent_id: agent.id, data: { event: 'identity.client_created', client_id: clientId, label, actor: p.id } }));
   return { client_id: clientId, client_secret: secret, token_url: '/api/v1/identity/token', grant_type: 'client_credentials' };
 }
 
 export const clientsOf = async (agentId: string) =>
   (await db.prepare('SELECT client_id, label, created_by, created_at, last_used_at, revoked_at FROM agent_client WHERE agent_id = ? ORDER BY created_at DESC').all(agentId));
+
+export interface SavedClient {
+  client_id: string | null;
+  credentials: { client_id: string; client_secret: string } | null;
+  requires_regeneration: boolean;
+}
+
+/** Restores the latest active client for this agent/environment without issuing or rotating credentials. */
+export async function savedClient(agentRef: string, actor: Principal, environment: string): Promise<SavedClient> {
+  const agent = await getAgent(agentRef);
+  assertCan(actor, 'identity.bootstrap', agent);
+  if (!environment) throw new PolicyError('VALIDATION', 'environment is required to read saved client credentials', 400);
+  const row = await db.prepare('SELECT client_id, secret_sealed FROM agent_client WHERE agent_id = ? AND environment = ? AND revoked_at IS NULL ORDER BY created_at DESC, client_id DESC LIMIT 1').get(agent.id, environment) as { client_id: string; secret_sealed: string | null } | undefined;
+  if (!row) return { client_id: null, credentials: null, requires_regeneration: false };
+  if (!row.secret_sealed) return { client_id: row.client_id, credentials: null, requires_regeneration: true };
+  return { client_id: row.client_id, credentials: { client_id: row.client_id, client_secret: await openValue(row.secret_sealed) }, requires_regeneration: false };
+}
+
+/** Reuses saved credentials; concurrent generate requests serialize on the agent instead of issuing duplicates. */
+export async function ensureSavedClient(agentRef: string, actor: Principal, label: string, environment: string): Promise<SavedClient> {
+  const agent = await getAgent(agentRef);
+  assertCan(actor, 'identity.bootstrap', agent);
+  return tx(async () => {
+    await db.prepare('SELECT id FROM agent WHERE id = ? FOR UPDATE').get(agent.id);
+    const existing = await savedClient(agent.id, actor, environment);
+    if (existing.requires_regeneration) throw new PolicyError('IDENTITY_SECRET_UNRECOVERABLE', 'Existing credentials were stored as a hash only. They still work; explicitly regenerate once to save a recoverable encrypted secret', 409);
+    if (existing.credentials) return existing;
+    const created = await createClient(agent.id, actor, label, environment);
+    return { client_id: created.client_id, credentials: { client_id: created.client_id, client_secret: created.client_secret }, requires_regeneration: false };
+  });
+}
+
+/** Verifies a user's original secret against its hash before encrypting it, without rotating the client. */
+export async function restoreSavedClient(agentRef: string, actor: Principal, environment: string, clientId: string, secret: string): Promise<SavedClient> {
+  const agent = await getAgent(agentRef);
+  assertCan(actor, 'identity.bootstrap', agent);
+  if (!environment || !clientId || typeof secret !== 'string' || secret.length < 8 || secret.length > 4096) throw new PolicyError('VALIDATION', 'Provide the environment, saved Client ID and original client secret (8–4096 characters)', 400);
+  return tx(async () => {
+    await db.prepare('SELECT id FROM agent WHERE id = ? FOR UPDATE').get(agent.id);
+    const current = await savedClient(agent.id, actor, environment);
+    if (current.client_id !== clientId) throw new PolicyError('IDENTITY_CLIENT_CHANGED', 'The active saved client changed; reload this page before saving the original secret', 409);
+    const row = await db.prepare('SELECT secret_hash FROM agent_client WHERE agent_id = ? AND client_id = ? AND revoked_at IS NULL').get(agent.id, clientId) as { secret_hash: string } | undefined;
+    if (!row || !timingSafeEqual(Buffer.from(sha256(secret)), Buffer.from(row.secret_hash))) throw new PolicyError('IDENTITY_SECRET_MISMATCH', 'The supplied secret does not match this Client ID. Paste its original secret or explicitly regenerate credentials', 400);
+    await db.prepare('UPDATE agent_client SET secret_sealed = ? WHERE agent_id = ? AND client_id = ?').run(await sealValue(secret), agent.id, clientId);
+    await ledger.append({ kind: 'admin', agent_id: agent.id, data: { event: 'identity.client_secret_restored', client_id: clientId, actor: actor.id } });
+    return savedClient(agent.id, actor, environment);
+  });
+}
+
+/** Explicit user regeneration revokes the previous client and issues a replacement for this environment. */
+export async function regenerateSavedClient(agentRef: string, actor: Principal, label: string, environment: string): Promise<SavedClient> {
+  const agent = await getAgent(agentRef);
+  assertCan(actor, 'identity.bootstrap', agent);
+  return tx(async () => {
+    await db.prepare('SELECT id FROM agent WHERE id = ? FOR UPDATE').get(agent.id);
+    const prior = await db.prepare('SELECT client_id FROM agent_client WHERE agent_id = ? AND environment = ? AND revoked_at IS NULL ORDER BY created_at DESC, client_id DESC LIMIT 1').get(agent.id, environment) as { client_id: string } | undefined;
+    if (prior) await revokeClient(prior.client_id, actor, 'User explicitly regenerated saved client credentials');
+    const created = await createClient(agent.id, actor, label, environment);
+    return { client_id: created.client_id, credentials: { client_id: created.client_id, client_secret: created.client_secret }, requires_regeneration: false };
+  });
+}
 
 // One stable instance per client, so a kill or revocation can target that vendor connection alone.
 const clientInstanceId = (clientId: string) => `ins_${sha256(clientId).slice(0, 26).toUpperCase()}`;

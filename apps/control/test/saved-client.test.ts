@@ -1,0 +1,48 @@
+import { strict as assert } from 'node:assert';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { after, test } from 'node:test';
+import type { Principal } from '../src/rbac';
+import { dropTestDatabase } from './database';
+
+process.env.SIGNET_DATA_DIR = mkdtempSync(join(tmpdir(), 'signet-saved-client-'));
+process.env.SIGNET_DB_SCHEMA = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+after(dropTestDatabase);
+
+test('saved clients survive repeated reads and concurrent creation, remain environment scoped, and change only on explicit regeneration', async () => {
+  const { db } = await import('../src/db');
+  const { permissionsFor } = await import('../src/rbac');
+  const { registerAgent, issueSeal } = await import('../src/registry');
+  const { savedClient, ensureSavedClient, regenerateSavedClient, exchangeClientCredentials, restoreSavedClient } = await import('../src/identity');
+  const owner: Principal = { id: 'owner@example.test', name: 'Owner', kind: 'human', roles: ['agent_owner'], permissions: permissionsFor(['agent_owner']), groups: [], mfa: true, auth: 'session', auth_time: null };
+  const security: Principal = { ...owner, id: 'security@example.test', roles: ['security_officer'], permissions: permissionsFor(['security_officer']) };
+  const agent = await registerAgent({ handle: 'saved-client-agent', name: 'Saved credentials', purpose: 'Verify persistent client credentials across UI reloads', sponsor: owner.id, tier: 'T1', autonomy_level: 'L0' }, owner);
+  await issueSeal(agent.id, { models: [{ model: 'gpt-oss:120b-cloud', region: 'unverified' }], tools: [], limits: { rpm: 10, tokens_per_day: 1000, usd_per_day: 1 }, environments: ['dev', 'test'] }, security);
+  assert.equal((await savedClient(agent.id, owner, 'dev')).credentials, null);
+  const results = await Promise.all([ensureSavedClient(agent.id, owner, 'ServiceNow', 'dev'), ensureSavedClient(agent.id, owner, 'ServiceNow', 'dev')]);
+  assert.deepEqual(results[0], results[1]);
+  const initial = results[0]!.credentials!;
+  assert.deepEqual((await savedClient(agent.id, owner, 'dev')).credentials, initial);
+  const stored = await db.prepare('SELECT secret_hash, secret_sealed FROM agent_client WHERE client_id = ?').get(initial.client_id) as { secret_hash: string; secret_sealed: string };
+  assert.notEqual(stored.secret_sealed, initial.client_secret);
+  assert(!stored.secret_sealed.includes(initial.client_secret));
+  await exchangeClientCredentials(initial.client_id, initial.client_secret);
+  const otherEnvironment = (await ensureSavedClient(agent.id, owner, 'Other environment', 'test')).credentials!;
+  assert.notEqual(otherEnvironment.client_id, initial.client_id);
+  await assert.rejects(() => savedClient(agent.id, { ...owner, id: 'other@example.test' }, 'dev'), /does not own/);
+  const replaced = (await regenerateSavedClient(agent.id, owner, 'ServiceNow', 'dev')).credentials!;
+  assert.notEqual(replaced.client_id, initial.client_id);
+  assert.notEqual(replaced.client_secret, initial.client_secret);
+  await assert.rejects(() => exchangeClientCredentials(initial.client_id, initial.client_secret));
+  await exchangeClientCredentials(replaced.client_id, replaced.client_secret);
+  await exchangeClientCredentials(otherEnvironment.client_id, otherEnvironment.client_secret);
+  assert.deepEqual((await savedClient(agent.id, owner, 'dev')).credentials, replaced);
+  await db.prepare('UPDATE agent_client SET secret_sealed = NULL WHERE client_id = ?').run(replaced.client_id);
+  assert.deepEqual(await savedClient(agent.id, owner, 'dev'), { client_id: replaced.client_id, credentials: null, requires_regeneration: true });
+  await assert.rejects(() => ensureSavedClient(agent.id, owner, 'ServiceNow', 'dev'), /hash only/);
+  await exchangeClientCredentials(replaced.client_id, replaced.client_secret);
+  await assert.rejects(() => restoreSavedClient(agent.id, owner, 'dev', replaced.client_id, 'incorrect-original-secret'), /does not match/);
+  assert.equal((await restoreSavedClient(agent.id, owner, 'dev', replaced.client_id, replaced.client_secret)).credentials?.client_secret, replaced.client_secret);
+  assert.deepEqual((await savedClient(agent.id, owner, 'dev')).credentials, replaced);
+});

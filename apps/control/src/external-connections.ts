@@ -93,9 +93,26 @@ export async function create(agentRef: string | null, value: unknown, actor: Pri
     const id = newId('conn');
     const secret = await secrets.putSecret({ name: id.toLowerCase(), kind: 'tool', value: JSON.stringify({ config, credential, token: null, expires_at: 0 } satisfies Stored) }, actor);
     await db.prepare('INSERT INTO external_connection (id, tenant_id, agent_id, secret_id, state, health, next_sync_at, busy_until, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(id, tenant.id, agent?.id ?? null, secret.id, 'enabled', JSON.stringify(initialHealth()), Date.now() + config.sync_interval_seconds * 1000, 0, actor.id, nowIso(), nowIso());
+    if (agent) {
+      const linked = await db.prepare('SELECT external_id FROM servicenow_agent_link WHERE tenant_id = ? AND agent_id = ? LIMIT 1').get(tenant.id, agent.id) as { external_id: string } | undefined;
+      if (linked) {
+        validateServiceNowMonitoring(config, linked.external_id);
+        await db.prepare('INSERT INTO external_agent_mapping (connection_id, external_id, agent_id, last_seen_at, normalized) VALUES (?, ?, ?, ?, ?)')
+          .run(id, linked.external_id, agent.id, nowIso(), JSON.stringify({ id: linked.external_id, name: agent.name }));
+      }
+    }
     await audit(id, 'created', actor.id);
     return view(id);
   });
+}
+
+function validateServiceNowMonitoring(config: ExternalConnectionConfig, externalId: string): void {
+  if (config.remote_management || config.endpoints.discover || config.endpoints.run || config.endpoints.pause || config.endpoints.stop || config.endpoints.activate) throw invalid('Linked ServiceNow activity sources are read-only. Configure tracking/executions instead of discovery or remote actions');
+  if (Object.values(config.endpoints).some(endpoint => endpoint.method !== 'GET')) throw invalid('Linked ServiceNow activity sources support GET endpoints only');
+  if (config.endpoints.executions) {
+    const executionRequest = JSON.stringify(config.endpoints.executions);
+    if (![externalId, '{id}', '{agent_id}'].some(marker => executionRequest.includes(marker))) throw invalid('Scope the executions request to this ServiceNow agent using {agent_id}, {id}, or its exact sys_id in the endpoint or query parameters');
+  }
 }
 
 /** Associate a verified setup profile with its newly registered agent without granting runtime access. */
@@ -132,6 +149,10 @@ export async function update(id: string, value: unknown, actor: Principal): Prom
     const old = await storedOf(row);
     const input = object(value, 'request');
     const config = parseConfig(input.config);
+    if (row.agent_id) {
+      const linked = await db.prepare('SELECT external_id FROM servicenow_agent_link WHERE tenant_id = ? AND agent_id = ? LIMIT 1').get(tenant.id, row.agent_id) as { external_id: string } | undefined;
+      if (linked) validateServiceNowMonitoring(config, linked.external_id);
+    }
     if (row.agent_id === null && config.method !== 'rest') throw invalid('Onboard an agent before changing to a non-REST connection method');
     await validatePrivate(row.agent_id, config);
     const changedAuth = config.auth !== old.config.auth || config.base_url !== old.config.base_url || config.token_url !== old.config.token_url || config.client_id !== old.config.client_id || config.header !== old.config.header || config.username !== old.config.username || JSON.stringify(config.secret_headers) !== JSON.stringify(old.config.secret_headers) || JSON.stringify(config.private_connector) !== JSON.stringify(old.config.private_connector);

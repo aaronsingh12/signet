@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { ConnectionMethod } from '@signet/core/types';
 import { Card, ErrorNote } from './ui';
@@ -18,6 +18,7 @@ interface ConnectInfo {
   models: string[];
 }
 interface Credentials { client_id: string; client_secret: string }
+interface SavedClient { client_id: string | null; credentials: Credentials | null; requires_regeneration: boolean }
 interface Bootstrap { bootstrap_credential: string; expires_at: string; environment: string }
 interface SetupAgent { id: string; name: string; kind: string; connection_method: ConnectionMethod | null }
 export interface ConnectionSetupProps {
@@ -40,13 +41,17 @@ export function ConnectionSetup(props: ConnectionSetupProps) {
   </div>;
 }
 
-/** Keep credentials in component memory only; registration and seal approval remain separate steps. */
+/** Restore saved encrypted client credentials; bootstrap credentials remain single-use. */
 function AdvancedConnectionSetup({ agent, certificate, state, onChange, initialMethod }: ConnectionSetupProps & { initialMethod: ConnectionMethod }) {
   const can = useCan();
   const { data: info, error: infoError, reload: reloadInfo } = useApi<ConnectInfo>('/connect/info');
   const [method, setMethod] = useState<ConnectionMethod>(initialMethod);
   const [environment, setEnvironment] = useState(certificate?.environments[0] ?? 'dev');
   const [credentials, setCredentials] = useState<Credentials | null>(null);
+  const [savedClientId, setSavedClientId] = useState<string | null>(null);
+  const [originalSecret, setOriginalSecret] = useState('');
+  const [loadingCredentials, setLoadingCredentials] = useState(false);
+  const [requiresRegeneration, setRequiresRegeneration] = useState(false);
   const [bootstrap, setBootstrap] = useState<Bootstrap | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
@@ -67,13 +72,49 @@ function AdvancedConnectionSetup({ agent, certificate, state, onChange, initialM
       if (method === 'bootstrap') {
         setBootstrap(await api<Bootstrap>(`/agents/${agent.id}/bootstrap`, { method: 'POST', body: { environment } }));
       } else {
-        setCredentials(await api<Credentials>(`/agents/${agent.id}/clients`, { method: 'POST', body: { label: label || `${agent.name} connection`, environment } }));
+        const saved = await api<SavedClient>(`/agents/${agent.id}/saved-client`, { method: 'POST', body: { label: label || `${agent.name} connection`, environment } });
+        if (!saved.credentials) throw new Error('Saved client response did not contain credentials');
+        setCredentials(saved.credentials); setSavedClientId(saved.client_id);
+        setRequiresRegeneration(false);
       }
       onChange();
     } catch (error) { setError(error as ApiError); }
     finally { setBusy(false); }
   };
-  const client = credentials?.client_id ?? '<client-id>';
+  useEffect(() => {
+    let active = true;
+    setCredentials(null);
+    setSavedClientId(null);
+    setOriginalSecret('');
+    setRequiresRegeneration(false);
+    if (!permitted || method === 'bootstrap' || direction === 'outbound') { setLoadingCredentials(false); return () => { active = false; }; }
+    setLoadingCredentials(true);
+    void api<SavedClient>(`/agents/${agent.id}/saved-client?environment=${encodeURIComponent(environment)}`).then(saved => {
+      if (typeof saved.requires_regeneration !== 'boolean' || (saved.credentials !== null && (typeof saved.credentials?.client_id !== 'string' || typeof saved.credentials?.client_secret !== 'string'))) throw new Error('Invalid saved client credentials response');
+      if (active) { setCredentials(saved.credentials); setSavedClientId(saved.client_id); setRequiresRegeneration(saved.requires_regeneration); }
+    }).catch((failure: ApiError) => { if (active) setError(failure); }).finally(() => { if (active) setLoadingCredentials(false); });
+    return () => { active = false; };
+  }, [agent.id, environment, permitted, method, direction]);
+  const regenerate = async (): Promise<void> => {
+    setBusy(true); setError(null);
+    try {
+      const saved = await api<SavedClient>(`/agents/${agent.id}/saved-client/regenerate`, { method: 'POST', body: { label: label || `${agent.name} connection`, environment } });
+      if (!saved.credentials) throw new Error('Regeneration response did not contain client credentials');
+      setCredentials(saved.credentials); setSavedClientId(saved.client_id); setRequiresRegeneration(false); onChange();
+    } catch (failure) { setError(failure as ApiError); }
+    finally { setBusy(false); }
+  };
+  const restoreSecret = async (): Promise<void> => {
+    if (!savedClientId) throw new Error('Select a saved client before restoring its secret');
+    setBusy(true); setError(null);
+    try {
+      const saved = await api<SavedClient>(`/agents/${agent.id}/saved-client/restore`, { method: 'POST', body: { environment, client_id: savedClientId, client_secret: originalSecret } });
+      if (!saved.credentials) throw new Error('Secret restoration did not return saved credentials');
+      setCredentials(saved.credentials); setSavedClientId(saved.client_id); setRequiresRegeneration(false); setOriginalSecret('');
+    } catch (failure) { setError(failure as ApiError); }
+    finally { setBusy(false); }
+  };
+  const client = credentials?.client_id ?? savedClientId ?? '<client-id>';
   const secret = credentials?.client_secret ?? '<client-secret>';
   const httpGrant = certificate?.tools?.find((tool) => tool.server.startsWith('http://') && tool.actions.length > 0);
   const toolEndpoint = `${gateway}/v1/tools/http/${httpGrant?.server.slice(7) ?? '<approved-tool-alias>'}/${httpGrant?.actions[0]?.name ?? '<approved-action>'}`;
@@ -89,9 +130,18 @@ function AdvancedConnectionSetup({ agent, certificate, state, onChange, initialM
       {direction === 'outbound' && method === 'oauth' && <ExternalConnectionEditor key={method} agentId={agent.id} method={method} existing={null} onSaved={() => { setExternalRevision(externalRevision + 1); onChange(); }} onCancel={() => { setDirection('inbound'); }} />}
       {!certificate && <div className="mt-4 rounded-lg border border-line bg-canvas p-4 text-sm"><strong>1. Complete approval</strong><p className="mt-1 text-ink-2">Your agent is registered. Complete its lifecycle checks, then open My Approvals. An administrator can approve the certificate directly; other reviewers follow the tier approval matrix. Return here to generate credentials after approval.</p><Link data-testid="setup-open-lifecycle" className="mt-2 inline-block text-royal" to={`/agents/${agent.id}?tab=lifecycle`}>Open approval lifecycle →</Link></div>}
       {unsupported ? <p role="alert" className="mt-4 text-sm text-warn">Vendor-hosted agents connect with OAuth or REST for company tools. Select one of those methods.</p> : direction === 'outbound' && method === 'oauth' ? null : <>
-        <div className="mt-4 flex flex-wrap items-end gap-3"><div><label className="label" htmlFor="setup-environment">Environment</label><select id="setup-environment" data-testid="setup-environment" className="input" value={environment} disabled={!certificate || busy} onChange={(event) => { setEnvironment(event.target.value); setCredentials(null); setBootstrap(null); }}>{(certificate?.environments ?? ['dev']).map((item) => <option key={item} value={item}>{item}</option>)}</select></div>{method !== 'bootstrap' && <div className="flex-1"><label className="label" htmlFor="setup-label">Connection label (optional)</label><input id="setup-label" className="input" value={label} onChange={(event) => setLabel(event.target.value)} placeholder="Production agent" /></div>}<button data-testid="setup-generate" className="btn-primary" disabled={!permitted || busy} onClick={() => void generate()}>{busy ? 'Generating…' : method === 'bootstrap' ? 'Generate bootstrap credential' : 'Generate Client ID & Secret'}</button></div>
+        <div className="mt-4 flex flex-wrap items-end gap-3"><div><label className="label" htmlFor="setup-environment">Environment</label><select id="setup-environment" data-testid="setup-environment" className="input" value={environment} disabled={!certificate || busy} onChange={(event) => { setEnvironment(event.target.value); setCredentials(null); setBootstrap(null); }}>{(certificate?.environments ?? ['dev']).map((item) => <option key={item} value={item}>{item}</option>)}</select></div>{method !== 'bootstrap' && <div className="flex-1"><label className="label" htmlFor="setup-label">Connection label (optional)</label><input id="setup-label" className="input" value={label} onChange={(event) => setLabel(event.target.value)} placeholder="Production agent" /></div>}<button data-testid="setup-generate" className="btn-primary" disabled={!permitted || busy || loadingCredentials || Boolean(credentials) || requiresRegeneration} onClick={() => void generate()}>{busy ? 'Generating…' : method === 'bootstrap' ? 'Generate bootstrap credential' : loadingCredentials ? 'Loading saved credentials...' : credentials ? 'Credentials saved' : 'Generate Client ID & Secret'}</button></div>
+        {method !== 'bootstrap' && (credentials || requiresRegeneration) && <button type="button" data-testid="setup-regenerate" className="btn-ghost mt-3" disabled={!permitted || busy || loadingCredentials} onClick={() => void regenerate()}>Regenerate Client ID & Secret</button>}
+        {requiresRegeneration && <div className="mt-4 rounded-lg border border-line p-3">
+          <p className="mb-2 text-sm font-medium">Saved client credentials</p>
+          <CopyCode testId="setup-saved-client-id" text={`Client ID: ${savedClientId}`} />
+          <p className="mt-2 text-sm text-warn">The original secret was stored as a hash and cannot be displayed. Save your existing copy below to keep the same credentials, or explicitly regenerate a replacement.</p>
+          <label className="label mt-3" htmlFor="setup-original-secret">Existing Client Secret</label>
+          <input id="setup-original-secret" data-testid="setup-original-secret" className="input" type="password" autoComplete="new-password" value={originalSecret} onChange={event => setOriginalSecret(event.target.value)} />
+          <button type="button" data-testid="setup-restore-secret" className="btn-primary mt-3" disabled={busy || !originalSecret || !permitted} onClick={() => void restoreSecret()}>Save existing secret</button>
+        </div>}
         {certificate && !can('identity.bootstrap') && <p className="mt-2 text-sm text-ink-3">Ask your agent owner or administrator to generate credentials.</p>}
-        {(credentials || bootstrap) && <div className="mt-4 rounded-lg border border-line p-3"><p className="mb-2 text-sm font-medium">Save these credentials now. The secret is shown only in this session.</p>{credentials ? <CopyCode testId="setup-credentials" text={`Client ID: ${credentials.client_id}\nClient Secret: ${credentials.client_secret}\nToken URL: ${tokenUrl}\nGrant type: client_credentials\nEnvironment: ${environment}`} /> : bootstrap && <><CopyCode testId="setup-bootstrap" text={bootstrap.bootstrap_credential} /><p className="mt-2 text-xs text-ink-3">Single use · expires {new Date(bootstrap.expires_at).toLocaleString()}</p></>}<button data-testid="setup-hide-secret" className="mt-2 text-xs text-royal" onClick={() => { setCredentials(null); setBootstrap(null); }}>Hide credentials</button></div>}
+        {(credentials || bootstrap) && <div className="mt-4 rounded-lg border border-line p-3"><p className="mb-2 text-sm font-medium">{credentials ? 'Credentials are saved encrypted and restored after refresh. They change only when you regenerate them.' : 'Save this single-use bootstrap credential before leaving this page.'}</p>{credentials ? <CopyCode testId="setup-credentials" text={`Client ID: ${credentials.client_id}\nClient Secret: ${credentials.client_secret}\nToken URL: ${tokenUrl}\nGrant type: client_credentials\nEnvironment: ${environment}`} /> : bootstrap && <><CopyCode testId="setup-bootstrap" text={bootstrap.bootstrap_credential} /><p className="mt-2 text-xs text-ink-3">Single use · expires {new Date(bootstrap.expires_at).toLocaleString()}</p></>}<button data-testid="setup-hide-secret" className="mt-2 text-xs text-royal" onClick={() => { setCredentials(null); setBootstrap(null); }}>Hide credentials</button></div>}
       </>}
       <ErrorNote error={error ?? infoError} />
       {info?.gateway_url && credentials && <AgentConfigDownload agentId={agent.id} controlUrl={info.control_url} gatewayUrl={info.gateway_url} identity={{ kind: 'oauth', client_id: credentials.client_id, client_secret: credentials.client_secret }} />}

@@ -3,10 +3,12 @@ import { db } from './db';
 import { agentLevel } from './enforcement';
 import { tenant } from './tenant';
 import { providerAnalytics } from './provider-analytics';
+import { serviceNowAgentCoverage } from './servicenow-agents';
 
 interface AgentRow {
   id: string; name: string; handle: string; purpose: string; owner: string; tier: string; status: string;
   valid_to: string | null; daily_budget_usd: number | null;
+  servicenow_identity: boolean;
 }
 
 interface UsageRow {
@@ -16,6 +18,8 @@ interface UsageRow {
 
 /** One tenant-scoped, rolling 24-hour snapshot; detector scores never count as agent requests. */
 export async function agentAnalytics(): Promise<AgentAnalyticsResponse> {
+  const serviceNowLinks = await db.prepare('SELECT DISTINCT agent_id FROM servicenow_agent_link WHERE tenant_id = ?').all(tenant.id) as { agent_id: string }[];
+  const serviceNowIds = new Set(serviceNowLinks.map(link => link.agent_id));
   const to = new Date();
   const from = new Date(to.getTime() - 86_400_000);
   const firstHour = new Date(from);
@@ -23,6 +27,7 @@ export async function agentAnalytics(): Promise<AgentAnalyticsResponse> {
   const hours: string[] = Array.from({ length: 25 }, (_, index) => new Date(firstHour.getTime() + index * 3_600_000).toISOString().slice(0, 13));
   const providers = await providerAnalytics(from.toISOString(), to.toISOString(), hours);
   const agents = (await db.prepare(`SELECT a.id, a.name, a.handle, a.purpose, a.owner, a.tier, a.status, c.valid_to,
+      COALESCE(a.vendor = 'ServiceNow' AND jsonb_extract_path_text(a.vendor_details::jsonb, 'external_agent_id') IS NOT NULL, false) AS servicenow_identity,
       (jsonb_extract_path_text(c.body::jsonb, 'limits', 'usd_per_day'))::double precision AS daily_budget_usd
     FROM agent a LEFT JOIN certificate c ON c.agent_id = a.id AND c.status = 'active'
     WHERE a.tenant_id = ? AND a.status != 'retired' ORDER BY a.created_at, a.id`).all(tenant.id)) as unknown as AgentRow[];
@@ -49,8 +54,10 @@ export async function agentAnalytics(): Promise<AgentAnalyticsResponse> {
       return { hour: `${hour}:00:00.000Z`, requests: bucket?.requests ?? 0, allowed: bucket?.allowed ?? 0, blocked: bucket?.blocked ?? 0, review: bucket?.review ?? 0, failed: bucket?.failed ?? 0 };
     });
     const count = sum('latency_count');
+    const serviceNowCoverage = serviceNowIds.has(agent.id) ? await serviceNowAgentCoverage(agent.id) : null;
     return {
       ...agent, enforcement: (await agentLevel(agent.id)),
+      servicenow: serviceNowCoverage ? { linked: true, monitoring: serviceNowCoverage.monitoring, gateway_enforcement: serviceNowCoverage.gateway_enforcement } : agent.servicenow_identity ? { linked: false, monitoring: false, gateway_enforcement: false } : null,
       provider: providers.get(agent.id) ?? { connection_ids: [], last_sync_at: null, executions: 0, succeeded: 0, failed: 0, other: 0, avg_duration_ms: null, activity: [], recent: [] },
       requests: sum('requests'), allowed: sum('allowed'), blocked: sum('blocked'), review: sum('review'), failed: sum('failed'),
       tokens: sum('tokens'), cost_usd: sum('cost_usd'), avg_latency_ms: count ? sum('latency_total') / count : null,

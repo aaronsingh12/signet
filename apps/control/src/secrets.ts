@@ -77,6 +77,11 @@ export const listSecrets = async () =>
 export async function revealForGateway(id: string): Promise<{ id: string; version: number; value: string }> {
   const row = (await db.prepare('SELECT id, version, sealed, kind FROM secret WHERE id = ?').get(id)) as { id: string; version: number; sealed: string; kind: SecretKind } | undefined;
   if (!row || row.kind === 'platform') throw notFound(`secret ${id}`);
+  const serviceNow = await db.prepare('SELECT r.connection_id FROM servicenow_gateway_route r JOIN servicenow_mcp_account a ON a.id = r.connection_id WHERE r.secret_id = ? AND a.tenant_id = ?').get(id, tenant.id) as { connection_id: string } | undefined;
+  if (serviceNow) {
+    const { serviceNowAccessToken } = await import('./servicenow-gateway');
+    return { id: row.id, version: row.version, value: await serviceNowAccessToken(serviceNow.connection_id) };
+  }
   return { id: row.id, version: row.version, value: await openValue(row.sealed) };
 }
 

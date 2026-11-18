@@ -15,6 +15,10 @@ export function agentColor(index: number): string {
 export function agentState(agent: AgentAnalytics): { label: string; tone: string; description: string } {
   if (agent.status === 'killed' || agent.enforcement === 'killed') return { label: 'Stopped', tone: 'bad', description: 'This agent has been permanently stopped.' };
   if (agent.enforcement === 'quarantined') return { label: 'Paused', tone: 'warn', description: 'Requests are paused until this agent is reviewed.' };
+  if (agent.servicenow && !agent.servicenow.linked) return { label: 'Disconnected', tone: 'neutral', description: 'The ServiceNow connection was removed. Link the existing agent again to restore source monitoring and gateway setup.' };
+  if (agent.servicenow?.linked && !agent.servicenow.gateway_enforcement) return agent.servicenow.monitoring
+    ? { label: 'Monitored', tone: 'neutral', description: 'ServiceNow activity has been synchronized. Internal calls are not intercepted; gateway enforcement has not been verified.' }
+    : { label: 'Linked', tone: 'neutral', description: 'ServiceNow identity is registered. Configure and verify activity monitoring, then complete approval and gateway setup.' };
   if (!agent.valid_to) return { label: 'Awaiting approval', tone: 'neutral', description: 'An approval certificate is needed before this agent can run.' };
   if (Date.parse(agent.valid_to) <= Date.now()) return { label: 'Approval expired', tone: 'warn', description: 'Renew this agent’s approval before it runs again.' };
   if (agent.enforcement === 'throttled') return { label: 'Limited', tone: 'warn', description: 'This agent is running with a reduced request limit.' };

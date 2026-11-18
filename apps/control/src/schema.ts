@@ -606,7 +606,7 @@ CREATE TABLE IF NOT EXISTS connector_mapping (
 
 
 -- Third-party agents (vendor-hosted) cannot hold a bootstrap credential: the vendor platform calls
--- Signet tools with OAuth client credentials. Only the secret's hash is stored.
+-- OAuth credentials use a hash for authentication and encryption for authorized UI retrieval.
 CREATE TABLE IF NOT EXISTS agent_client (
   environment TEXT,
   client_id TEXT PRIMARY KEY,
@@ -619,6 +619,7 @@ CREATE TABLE IF NOT EXISTS agent_client (
   revoked_at TEXT,
   revoked_by TEXT
 );
+ALTER TABLE agent_client ADD COLUMN IF NOT EXISTS secret_sealed TEXT;
 -- What the SDK or sidecar saw in the agent's runtime at start-up (names only, never values).
 CREATE TABLE IF NOT EXISTS agent_diagnostic (
   instance_id TEXT PRIMARY KEY REFERENCES agent_instance(id),
@@ -750,6 +751,47 @@ CREATE TABLE IF NOT EXISTS external_observation (
   external_agent_id TEXT NOT NULL, external_id TEXT NOT NULL, kind TEXT NOT NULL,
   metadata TEXT NOT NULL, observed_at TEXT NOT NULL,
   PRIMARY KEY(connection_id, external_agent_id, kind, external_id)
+);
+CREATE TABLE IF NOT EXISTS servicenow_mcp_oauth_state (
+  state_hash TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, principal_id TEXT NOT NULL,
+  verifier TEXT NOT NULL, instance_url TEXT NOT NULL, client_id TEXT NOT NULL,
+  redirect_uri TEXT NOT NULL, expires_at BIGINT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS servicenow_mcp_settings (
+  tenant_id TEXT PRIMARY KEY REFERENCES tenant(id), gateway_url TEXT NOT NULL,
+  instance_url TEXT NOT NULL, mcp_url TEXT NOT NULL, client_id TEXT NOT NULL,
+  client_secret_id TEXT NOT NULL REFERENCES secret(id), updated_by TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS servicenow_mcp_connection (
+  tenant_id TEXT PRIMARY KEY, instance_url TEXT NOT NULL, mcp_url TEXT NOT NULL,
+  client_id TEXT NOT NULL, secret_id TEXT NOT NULL REFERENCES secret(id),
+  expires_at BIGINT NOT NULL, updated_by TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+ALTER TABLE servicenow_mcp_connection ADD COLUMN IF NOT EXISTS tools_json TEXT;
+ALTER TABLE servicenow_mcp_connection ADD COLUMN IF NOT EXISTS discovered_at TEXT;
+CREATE TABLE IF NOT EXISTS servicenow_mcp_account (
+  id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL REFERENCES tenant(id), gateway_url TEXT NOT NULL,
+  instance_url TEXT NOT NULL, mcp_url TEXT NOT NULL, client_id TEXT NOT NULL,
+  client_secret_id TEXT NOT NULL REFERENCES secret(id), token_secret_id TEXT REFERENCES secret(id),
+  expires_at BIGINT, tools_json TEXT, discovered_at TEXT, updated_by TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+INSERT INTO servicenow_mcp_account (id, tenant_id, gateway_url, instance_url, mcp_url, client_id, client_secret_id,
+  token_secret_id, expires_at, tools_json, discovered_at, updated_by, updated_at)
+SELECT 'snm_' || s.tenant_id, s.tenant_id, s.gateway_url, s.instance_url, s.mcp_url, s.client_id, s.client_secret_id,
+  c.secret_id, c.expires_at, c.tools_json, c.discovered_at, s.updated_by, s.updated_at
+FROM servicenow_mcp_settings s LEFT JOIN servicenow_mcp_connection c ON c.tenant_id = s.tenant_id
+  AND c.instance_url = s.instance_url AND c.mcp_url = s.mcp_url AND c.client_id = s.client_id
+ON CONFLICT (id) DO NOTHING;
+ALTER TABLE servicenow_mcp_oauth_state ADD COLUMN IF NOT EXISTS connection_id TEXT;
+CREATE TABLE IF NOT EXISTS servicenow_agent_link (
+  connection_id TEXT NOT NULL REFERENCES servicenow_mcp_account(id) ON DELETE CASCADE,
+  agent_id TEXT NOT NULL REFERENCES agent(id) ON DELETE CASCADE, external_id TEXT NOT NULL,
+  tenant_id TEXT NOT NULL REFERENCES tenant(id), instance_url TEXT NOT NULL, created_at TEXT NOT NULL,
+  PRIMARY KEY (connection_id, external_id)
+);
+CREATE TABLE IF NOT EXISTS servicenow_gateway_route (
+  connection_id TEXT PRIMARY KEY REFERENCES servicenow_mcp_account(id) ON DELETE CASCADE,
+  alias TEXT NOT NULL UNIQUE, secret_id TEXT NOT NULL REFERENCES secret(id)
 );
 CREATE TABLE IF NOT EXISTS external_connection_budget (
   connection_id TEXT PRIMARY KEY REFERENCES external_connection(id) ON DELETE CASCADE,

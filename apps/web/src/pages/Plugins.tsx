@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Card, ErrorNote, PageHeader } from '../components/ui';
 import { ApiError, api, useApi } from '../lib/api';
 import { useCan } from '../lib/auth';
+import { ServiceNowConnection } from '../components/ServiceNowConnection';
 
 interface VercelConnection {
   configured: boolean;
@@ -24,6 +25,7 @@ export function Plugins() {
     <>
       <PageHeader title="Connections" subtitle="Connect your deployment platforms and services to bring AI agents into Signet." />
       <div className="grid gap-4 xl:grid-cols-2">
+        <ServiceNowConnection />
         <Card>
           <div className="flex items-start gap-3">
             <div className="rounded-md bg-black px-2 py-1.5 text-sm font-semibold text-white" aria-hidden="true">▲</div>

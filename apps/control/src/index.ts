@@ -22,6 +22,11 @@ import * as ledger from './ledger';
 import * as live from './live';
 import * as oidc from './oidc';
 import * as plugins from './plugins';
+import * as serviceNowMcp from './servicenow-mcp';
+import { discoverServiceNowTools } from './servicenow-mcp-discovery';
+import { serviceNowSettings, createServiceNowSettings, updateServiceNowSettings, removeServiceNowConnection } from './servicenow-mcp-settings';
+import { linkServiceNowAgent, linkedServiceNowAgents, serviceNowLinksForAgent, availableServiceNowAgents } from './servicenow-agents';
+import { prepareServiceNowGateway, serviceNowGatewayRoute } from './servicenow-gateway';
 import { openapi } from './openapi';
 import { principalOf, requires, singleOperatorMode } from './rbac';
 import * as registry from './registry';
@@ -260,6 +265,54 @@ api.put('/edge-runners/:id/tools/:alias/credential', requires('connectors.manage
   return result;
 }));
 api.get('/plugins/vercel', requires('tenant.admin'), route(async (_req, res) => (await plugins.vercelConnection(principalOf(res)))));
+api.get('/plugins/servicenow', requires('tenant.admin'), route(async (_req, res) => {
+  res.setHeader('cache-control', 'no-store');
+  return { items: await serviceNowMcp.listServiceNowConnections() };
+}));
+api.post('/plugins/servicenow/connections', requires('tenant.admin'), route(async (req, res) => {
+  res.setHeader('cache-control', 'no-store');
+  return [201, { settings: await createServiceNowSettings(req.body ?? {}, principalOf(res)) }];
+}));
+api.delete('/plugins/servicenow/connections/:id', requires('tenant.admin'), route(async (req, res) => {
+  res.setHeader('cache-control', 'no-store');
+  const result = await removeServiceNowConnection(req.params.id!);
+  hub.publish('bundle', { reason: 'servicenow.connection_removed' });
+  return result;
+}));
+api.get('/plugins/servicenow/connections/:id/settings', requires('tenant.admin'), route(async (req, res) => {
+  res.setHeader('cache-control', 'no-store');
+  const settings = await serviceNowSettings(req.params.id!);
+  if (!settings) throw new PolicyError('SERVICENOW_CONFIG', 'ServiceNow connection was not found in this tenant', 404);
+  return { settings };
+}));
+api.put('/plugins/servicenow/connections/:id/settings', requires('tenant.admin'), route(async (req, res) => {
+  res.setHeader('cache-control', 'no-store');
+  const settings = await updateServiceNowSettings(req.params.id!, req.body ?? {}, principalOf(res));
+  hub.publish('bundle', { reason: 'servicenow.settings_changed' });
+  return { settings };
+}));
+api.get('/plugins/servicenow/connections/:id/connect', requires('tenant.admin'), route(async (req, res) => serviceNowMcp.startServiceNowConnection(req.params.id!, res, principalOf(res))));
+api.get('/plugins/servicenow/connections/:id/agents', requires('tenant.admin'), route(async req => ({ items: await linkedServiceNowAgents(req.params.id!) })));
+api.get('/plugins/servicenow/connections/:id/agents/available', requires('tenant.admin'), route(async (req, res) => {
+  res.setHeader('cache-control', 'no-store');
+  return { items: await availableServiceNowAgents(req.params.id!) };
+}));
+api.post('/plugins/servicenow/connections/:id/gateway', requires('tenant.admin'), route(async (req, res) => {
+  res.setHeader('cache-control', 'no-store');
+  const result = await prepareServiceNowGateway(req.params.id!, req.body?.alias, principalOf(res));
+  hub.publish('bundle', { reason: 'servicenow.gateway_prepared', alias: result.alias });
+  return result;
+}));
+api.get('/plugins/servicenow/connections/:id/gateway', requires('tenant.admin'), route(async req => ({ route: await serviceNowGatewayRoute(req.params.id!) })));
+api.post('/plugins/servicenow/connections/:id/agents', requires('tenant.admin'), route(async (req, res) => {
+  res.setHeader('cache-control', 'no-store');
+  return [201, await linkServiceNowAgent(req.params.id!, req.body ?? {}, principalOf(res))];
+}));
+api.post('/plugins/servicenow/connections/:id/discover', requires('tenant.admin'), route(async (req, res) => {
+  res.setHeader('cache-control', 'no-store');
+  return { tools: await discoverServiceNowTools(req.params.id!) };
+}));
+api.get('/plugins/servicenow/callback', requires('tenant.admin'), route(async (req, res) => serviceNowMcp.completeServiceNowConnection(req, res, principalOf(res))));
 api.get('/plugins/vercel/connect', requires('tenant.admin'), route((_req, res) => plugins.startVercelConnection(res, principalOf(res))));
 api.get('/plugins/vercel/callback', requires('tenant.admin'), route(async (req, res) => (await plugins.completeVercelConnection(req, res, principalOf(res)))));
 api.post('/plugins/vercel/disconnect', requires('tenant.admin'), route(async (_req, res) => (await plugins.disconnectVercel(principalOf(res)))));
@@ -333,6 +386,7 @@ api.post('/agents/:id/quick-connect', requires('agents.write'), route(async (req
 }));
 api.post('/connect/test', requires('identity.bootstrap'), route(async (req) => quickConnect.testCall(req.body?.credential)));
 api.get('/agents/:id/removal-preview', requires('agents.delete'), route(async (req, res) => (await agentRemovalPreview(req.params.id!, principalOf(res)))));
+api.get('/agents/:id/servicenow', requires('agents.read'), route(async req => ({ items: await serviceNowLinksForAgent(req.params.id!) })));
 api.delete('/agents/:id', requires('agents.delete'), route(async (req, res) => {
   if (typeof req.body?.confirm_handle !== 'string') throw invalid('confirm_handle must be the exact agent handle');
   return (await removeAgent(req.params.id!, req.body.confirm_handle, principalOf(res)));
@@ -479,6 +533,22 @@ api.get('/agents/:id/connection', requires('agents.read'), route(async (req) => 
 api.post('/agents/:id/clients', requires('identity.bootstrap'), route(async (req, res) => {
   res.setHeader('cache-control', 'no-store');
   return [201, (await identity.createClient(req.params.id!, principalOf(res), String(req.body?.label ?? ''), String(req.body?.environment ?? 'dev')))];
+}));
+api.get('/agents/:id/saved-client', requires('identity.bootstrap'), route(async (req, res) => {
+  res.setHeader('cache-control', 'no-store');
+  return identity.savedClient(req.params.id!, principalOf(res), typeof req.query.environment === 'string' ? req.query.environment : '');
+}));
+api.post('/agents/:id/saved-client', requires('identity.bootstrap'), route(async (req, res) => {
+  res.setHeader('cache-control', 'no-store');
+  return identity.ensureSavedClient(req.params.id!, principalOf(res), String(req.body?.label ?? ''), String(req.body?.environment ?? ''));
+}));
+api.post('/agents/:id/saved-client/regenerate', requires('identity.bootstrap'), route(async (req, res) => {
+  res.setHeader('cache-control', 'no-store');
+  return identity.regenerateSavedClient(req.params.id!, principalOf(res), String(req.body?.label ?? ''), String(req.body?.environment ?? ''));
+}));
+api.post('/agents/:id/saved-client/restore', requires('identity.bootstrap'), route(async (req, res) => {
+  res.setHeader('cache-control', 'no-store');
+  return identity.restoreSavedClient(req.params.id!, principalOf(res), String(req.body?.environment ?? ''), String(req.body?.client_id ?? ''), String(req.body?.client_secret ?? ''));
 }));
 api.post('/clients/:id/revoke', requires('identity.bootstrap', 'ladder.quarantine'), route(async (req, res) => (await identity.revokeClient(req.params.id!, principalOf(res), String(req.body?.reason ?? '')))));
 api.post('/instances/:id/revoke', requires('identity.bootstrap', 'ladder.quarantine'), route(async (req, res) => (await identity.revokeInstance(req.params.id!, principalOf(res), String(req.body?.reason ?? '')))));

@@ -29,6 +29,7 @@ export interface AgentAnalytics {
   last_activity: string | null;
   activity: ActivityBucket[];
   provider: ProviderAnalytics;
+  servicenow: { linked: boolean; monitoring: boolean; gateway_enforcement: boolean } | null;
 }
 
 export interface ProviderAnalytics {
@@ -55,6 +56,7 @@ export function parseAgentAnalytics(value: AgentAnalyticsResponse): AgentAnalyti
     throw new TypeError('Agent analytics must include valid from/to dates and an agents array');
   }
   for (const agent of value.agents) {
+    if (agent.servicenow !== null && (!agent.servicenow || typeof agent.servicenow.linked !== 'boolean' || typeof agent.servicenow.monitoring !== 'boolean' || typeof agent.servicenow.gateway_enforcement !== 'boolean')) throw new TypeError('ServiceNow analytics coverage must be null or contain linked, monitoring and gateway_enforcement booleans');
     for (const key of ['id', 'name', 'handle', 'purpose', 'owner', 'tier', 'status', 'enforcement'] as const) {
       if (typeof agent?.[key] !== 'string') throw new TypeError(`Agent analytics ${key} must be a string`);
     }

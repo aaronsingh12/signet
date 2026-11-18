@@ -4,6 +4,7 @@ import { ApiError, api, useApi } from '../lib/api';
 import { useCan } from '../lib/auth';
 import { ago, time } from '../lib/format';
 import { ConnectionSetup } from '../components/ConnectionSetup';
+import { ServiceNowAgentCoverage } from '../components/ServiceNowAgents';
 
 // Agent connectivity on Agent 360: whether the agent's own calls actually reach the gateway, the
 // credentials that let it, the runtime diagnostics its SDK reported, how to connect it, and its
@@ -53,6 +54,7 @@ export function ConnectionTab({ data, onChange }: { data: any; onChange: () => v
 
   return (
     <div className="space-y-4">
+      <ServiceNowAgentCoverage agentId={agent.id} />
       <ConnectionSetup key={agent.id} agent={agent} certificate={cert} state={c.state} onChange={onChange} />
       <details className="card" data-testid="connection-diagnostics">
         <summary className="cursor-pointer px-4 py-3 text-sm font-medium">Connection activity and diagnostics</summary>
