@@ -6,6 +6,7 @@ import type { Principal } from './rbac';
 import { tenant } from './tenant';
 
 export interface ServiceNowSettingsInput {
+  name: string;
   gateway_url: string;
   instance_url: string;
   mcp_url: string;
@@ -15,6 +16,7 @@ export interface ServiceNowSettingsInput {
 
 export interface SettingsRow {
   id: string;
+  name: string;
   gateway_url: string;
   instance_url: string;
   mcp_url: string;
@@ -24,6 +26,7 @@ export interface SettingsRow {
 
 export interface ServiceNowSettingsView {
   id: string;
+  name: string;
   gateway_url: string;
   instance_url: string;
   mcp_url: string;
@@ -41,12 +44,12 @@ function httpsUrl(value: string, field: string): URL {
 }
 
 function settingsView(row: SettingsRow): ServiceNowSettingsView {
-  return { id: row.id, gateway_url: row.gateway_url, instance_url: row.instance_url, mcp_url: row.mcp_url, client_id: row.client_id,
+  return { id: row.id, name: row.name, gateway_url: row.gateway_url, instance_url: row.instance_url, mcp_url: row.mcp_url, client_id: row.client_id,
     has_client_secret: true, callback_url: `${row.gateway_url}/api/v1/plugins/servicenow/callback` };
 }
 
 async function settingsRow(id: string): Promise<SettingsRow | undefined> {
-  return await db.prepare('SELECT id, gateway_url, instance_url, mcp_url, client_id, client_secret_id FROM servicenow_mcp_account WHERE tenant_id = ? AND id = ?').get(tenant.id, id) as SettingsRow | undefined;
+  return await db.prepare('SELECT id, name, gateway_url, instance_url, mcp_url, client_id, client_secret_id FROM servicenow_mcp_account WHERE tenant_id = ? AND id = ?').get(tenant.id, id) as SettingsRow | undefined;
 }
 
 /** Returns saved configuration without exposing the client secret or its broker identifier. */
@@ -64,6 +67,7 @@ export async function serviceNowConfiguration(id: string): Promise<{ instance: s
 }
 
 function validatedSettings(input: ServiceNowSettingsInput): { gateway: URL; instance: URL; endpoint: URL } {
+  if (typeof input.name !== 'string' || !input.name.trim() || input.name.trim().length > 120) throw new PolicyError('SERVICENOW_CONFIG', 'Connection name is required and must not exceed 120 characters', 400);
   const gateway = httpsUrl(input.gateway_url, 'Public Signet URL');
   const instance = httpsUrl(input.instance_url, 'ServiceNow instance URL');
   const endpoint = httpsUrl(input.mcp_url, 'ServiceNow MCP server URL');
@@ -82,9 +86,9 @@ export async function createServiceNowSettings(input: ServiceNowSettingsInput, a
   const id = newId('evt').replace('evt_', 'con_');
   return tx(async () => {
     const secret = await putSecret({ name: 'servicenow-client-' + id.slice(-20).toLowerCase(), kind: 'platform', value: input.client_secret }, actor);
-    await db.prepare('INSERT INTO servicenow_mcp_account (id, tenant_id, gateway_url, instance_url, mcp_url, client_id, client_secret_id, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(id, tenant.id, gateway.origin, instance.origin, endpoint.href, input.client_id.trim(), secret.id, actor.id, nowIso());
-    return settingsView({ id, gateway_url: gateway.origin, instance_url: instance.origin, mcp_url: endpoint.href, client_id: input.client_id.trim(), client_secret_id: secret.id });
+    await db.prepare('INSERT INTO servicenow_mcp_account (id, name, tenant_id, gateway_url, instance_url, mcp_url, client_id, client_secret_id, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(id, input.name.trim(), tenant.id, gateway.origin, instance.origin, endpoint.href, input.client_id.trim(), secret.id, actor.id, nowIso());
+    return settingsView({ id, name: input.name.trim(), gateway_url: gateway.origin, instance_url: instance.origin, mcp_url: endpoint.href, client_id: input.client_id.trim(), client_secret_id: secret.id });
   });
 }
 
@@ -96,8 +100,8 @@ export async function updateServiceNowSettings(id: string, input: ServiceNowSett
     if (!existing) throw new PolicyError('SERVICENOW_CONFIG', 'ServiceNow connection was not found in this tenant', 404);
     if (input.client_secret) await rotateSecret(existing.client_secret_id, input.client_secret, actor);
     const changed = existing.gateway_url !== gateway.origin || existing.instance_url !== instance.origin || existing.mcp_url !== endpoint.href || existing.client_id !== input.client_id.trim() || Boolean(input.client_secret);
-    await db.prepare('UPDATE servicenow_mcp_account SET gateway_url = ?, instance_url = ?, mcp_url = ?, client_id = ?, updated_by = ?, updated_at = ? WHERE tenant_id = ? AND id = ?')
-      .run(gateway.origin, instance.origin, endpoint.href, input.client_id.trim(), actor.id, nowIso(), tenant.id, id);
+    await db.prepare('UPDATE servicenow_mcp_account SET name = ?, gateway_url = ?, instance_url = ?, mcp_url = ?, client_id = ?, updated_by = ?, updated_at = ? WHERE tenant_id = ? AND id = ?')
+      .run(input.name.trim(), gateway.origin, instance.origin, endpoint.href, input.client_id.trim(), actor.id, nowIso(), tenant.id, id);
     await db.prepare('DELETE FROM servicenow_mcp_oauth_state WHERE tenant_id = ? AND connection_id = ?').run(tenant.id, id);
     if (changed) await db.prepare('UPDATE servicenow_mcp_account SET expires_at = 0, tools_json = NULL, discovered_at = NULL WHERE tenant_id = ? AND id = ?').run(tenant.id, id);
     if (changed) {
@@ -107,7 +111,7 @@ export async function updateServiceNowSettings(id: string, input: ServiceNowSett
         await db.prepare('DELETE FROM secret WHERE tenant_id = ? AND id = ?').run(tenant.id, route.secret_id);
       }
     }
-    return settingsView({ id, gateway_url: gateway.origin, instance_url: instance.origin, mcp_url: endpoint.href, client_id: input.client_id.trim(), client_secret_id: existing.client_secret_id });
+    return settingsView({ id, name: input.name.trim(), gateway_url: gateway.origin, instance_url: instance.origin, mcp_url: endpoint.href, client_id: input.client_id.trim(), client_secret_id: existing.client_secret_id });
   });
 }
 

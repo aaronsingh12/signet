@@ -72,7 +72,7 @@ export async function completeServiceNowConnection(req: Request, res: Response, 
 }
 
 export interface ServiceNowConnectionView {
-  id: string; configured: boolean; authorized: boolean; callback_url: string; mcp_url: string;
+  id: string; name: string; configured: boolean; authorized: boolean; callback_url: string; mcp_url: string;
   expires_at: number | null; monitoring: boolean; tools: ServiceNowTool[]; discovered_at: string | null;
 }
 
@@ -80,7 +80,7 @@ export async function serviceNowConnection(id: string): Promise<ServiceNowConnec
   const row = await db.prepare('SELECT expires_at, tools_json, discovered_at FROM servicenow_mcp_account WHERE tenant_id = ? AND id = ?').get(tenant.id, id) as { expires_at: number | null; tools_json: string | null; discovered_at: string | null } | undefined;
   const settings = await serviceNowSettings(id);
   if (!row || !settings) throw new PolicyError('SERVICENOW_CONFIG', 'ServiceNow connection was not found in this tenant', 404);
-  return { id, configured: true, authorized: Boolean(row.expires_at && row.expires_at > Date.now()), callback_url: settings.callback_url,
+  return { id, name: settings.name, configured: true, authorized: Boolean(row.expires_at && row.expires_at > Date.now()), callback_url: settings.callback_url,
     mcp_url: settings.mcp_url, expires_at: row.expires_at, monitoring: (await linkedServiceNowAgents(id)).some(agent => agent.monitoring),
     tools: row.tools_json ? JSON.parse(row.tools_json) as ServiceNowTool[] : [], discovered_at: row.discovered_at };
 }

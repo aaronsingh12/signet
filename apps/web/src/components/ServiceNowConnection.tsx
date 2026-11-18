@@ -1,13 +1,15 @@
 import { useState } from 'react';
-import { Link2, RefreshCw } from 'lucide-react';
+import { ArrowUpRight, Link2, RefreshCw, ServerCog } from 'lucide-react';
 import { Card, ErrorNote, Modal } from './ui';
 import { EditServiceNowSetup, ServiceNowSetup } from './ServiceNowSetup';
+import { ConnectionIcon } from './ConnectionIcon';
 import { ServiceNowAgents } from './ServiceNowAgents';
 import { api, useApi } from '../lib/api';
 import { useCan } from '../lib/auth';
 
 interface ServiceNowStatus {
   id: string;
+  name?: string;
   configured: boolean;
   authorized: boolean;
   mcp_url: string | null;
@@ -15,6 +17,13 @@ interface ServiceNowStatus {
   monitoring: boolean;
   discovered_at: string | null;
   tools: { name: string; title: string; description: string }[];
+}
+
+function connectionDisplayName(connection: ServiceNowStatus): string {
+  if (connection.name?.trim()) return connection.name;
+  const endpoint = connection.mcp_url?.split('/').filter(Boolean).pop();
+  if (!endpoint) return `ServiceNow connection ${connection.id.slice(-4)}`;
+  return endpoint.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ').trim().replace(/\s+/g, ' ').replace(/\b[a-z]/g, letter => letter.toUpperCase());
 }
 
 export function ServiceNowConnection() {
@@ -30,7 +39,9 @@ export function ServiceNowConnection() {
       <ErrorNote error={error} />
       {data && !data.items.length && <p className="mt-3 text-sm text-ink-3">No ServiceNow connections saved yet.</p>}
     </Card>
-    {data?.items.map(connection => <SavedServiceNowConnection key={connection.id} connection={connection} onChanged={() => { void reload(); }} />)}
+    <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,220px))] gap-4">
+      {data?.items.map(connection => <SavedServiceNowConnection key={connection.id} connection={connection} onChanged={() => { void reload(); }} />)}
+    </div>
     {adding && <Modal title="Add ServiceNow AI Agents" onClose={() => setAdding(false)}>
       <ServiceNowSetup onSaved={() => { void reload(); }} onCancel={() => setAdding(false)} />
     </Modal>}
@@ -38,7 +49,9 @@ export function ServiceNowConnection() {
 }
 
 function SavedServiceNowConnection({ connection: data, onChanged }: { connection: ServiceNowStatus; onChanged: () => void }) {
+  const name = connectionDisplayName(data);
   const path = '/plugins/servicenow/connections/' + encodeURIComponent(data.id);
+  const [expanded, setExpanded] = useState(false);
   const [discovering, setDiscovering] = useState(false);
   const [editing, setEditing] = useState(false);
   const [removing, setRemoving] = useState(false);
@@ -67,14 +80,21 @@ function SavedServiceNowConnection({ connection: data, onChanged }: { connection
       setRemoving(false);
     }
   };
-  return <Card>
-    <section data-testid={`servicenow-mcp-connection-${data.id}`} aria-labelledby={`servicenow-mcp-heading-${data.id}`}>
-      <div className="flex flex-wrap items-center gap-2">
-        <h2 id={`servicenow-mcp-heading-${data.id}`} className="text-base font-semibold">ServiceNow MCP</h2>
-        {data && <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${data.authorized ? 'bg-ok-50 text-ok' : 'bg-slate-100 text-ink-2'}`}>
+  return <Card className={`aspect-square [&>div]:h-full !bg-none ${data.authorized ? '!bg-ok-50 !border-ok/30' : '!bg-warn-50 !border-warn/30'}`} pad={false}>
+    <section className="h-full" data-testid={`servicenow-mcp-connection-${data.id}`} aria-labelledby={`servicenow-mcp-heading-${data.id}`}>
+      <button type="button" data-testid={`servicenow-open-connection-${data.id}`} className="flex h-full w-full flex-col items-start rounded-2xl p-4 text-left transition-colors hover:brightness-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2" aria-haspopup="dialog" onClick={() => setExpanded(!expanded)}>
+        <span className="flex w-full items-start justify-between gap-2">
+          <ConnectionIcon tone={data.authorized ? 'ok' : 'warn'}><ServerCog size={23} strokeWidth={1.8} /></ConnectionIcon>
+          <ArrowUpRight size={16} aria-hidden="true" className="shrink-0 text-ink-3" />
+        </span>
+        <span id={`servicenow-mcp-heading-${data.id}`} className="mt-3 line-clamp-2 break-words text-sm font-semibold">{name}</span>
+        <span className={`mt-2 rounded px-1.5 py-0.5 text-[11px] font-medium ${data.authorized ? 'bg-ok-50 text-ok' : 'bg-slate-100 text-ink-2'}`}>
           {data.authorized ? 'Authorized' : data.expires_at === null ? 'Not authorized' : 'Reauthorization required'}
-        </span>}
-      </div>
+        </span>
+        <span className="mt-auto pt-3 text-xs text-ink-3">{data.tools.length} tools</span>
+        <span className="mt-1 text-xs text-ink-2">View details</span>
+      </button>
+      {expanded && <Modal title={name} width="max-w-5xl" onClose={() => setExpanded(false)}>
       <p className="mt-1 text-sm text-ink-2">Connect to your ServiceNow MCP server and discover its available tools.</p>
       <ErrorNote error={discoveryError} />
       <div className="mt-3 flex flex-wrap gap-2">
@@ -104,6 +124,7 @@ function SavedServiceNowConnection({ connection: data, onChanged }: { connection
       </div>}
       {data?.mcp_url && <p className="mt-3 text-xs text-ink-3">Discovered tools do not automatically provide execution history. Configure and verify activity sources for the linked agents below.</p>}
       <ServiceNowAgents connectionId={data.id} />
+      </Modal>}
     </section>
   </Card>;
 }

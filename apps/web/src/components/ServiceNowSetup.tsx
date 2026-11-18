@@ -5,6 +5,7 @@ import { api, useApi } from '../lib/api';
 
 interface SavedSettings {
   id: string;
+  name: string;
   gateway_url: string;
   instance_url: string;
   mcp_url: string;
@@ -15,7 +16,7 @@ interface SavedSettings {
 
 interface SetupProps { onSaved: () => void; onCancel: () => void }
 
-const emptyDraft = { gateway_url: '', instance_url: '', mcp_url: '', client_id: '', client_secret: '' };
+const emptyDraft = { name: '', gateway_url: '', instance_url: '', mcp_url: '', client_id: '', client_secret: '' };
 type SettingsDraft = typeof emptyDraft;
 
 function savedConnectionId(response: { settings: { id: string } }): string {
@@ -44,7 +45,7 @@ export function EditServiceNowSetup({ connectionId, onSaved, onCancel }: SetupPr
 }
 
 function ServiceNowSettingsForm({ settings, saveSettings, onSaved, onCancel }: SetupProps & { settings: SavedSettings | null; saveSettings: (draft: SettingsDraft) => Promise<string> }) {
-  const [draft, setDraft] = useState({ gateway_url: settings?.gateway_url ?? '', instance_url: settings?.instance_url ?? '',
+  const [draft, setDraft] = useState({ name: settings?.name ?? '', gateway_url: settings?.gateway_url ?? '', instance_url: settings?.instance_url ?? '',
     mcp_url: settings?.mcp_url ?? '', client_id: settings?.client_id ?? '', client_secret: '' });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<Error | null>(null);
@@ -66,6 +67,8 @@ function ServiceNowSettingsForm({ settings, saveSettings, onSaved, onCancel }: S
   };
   return <form data-testid="servicenow-setup-form" onSubmit={event => void save(event)} className="space-y-4">
     <p className="text-sm text-ink-2">Save your ServiceNow connection, then authorize access to discover its MCP tools. Agent activity monitoring requires an execution-data tool.</p>
+    <div><label className="label" htmlFor="servicenow-connection-name">Connection name</label>
+      <input id="servicenow-connection-name" data-testid="servicenow-connection-name" className="input" required maxLength={120} pattern=".*\S.*" value={draft.name} onChange={event => setDraft({ ...draft, name: event.target.value })} placeholder="e.g. Incident management" /></div>
     <div>
       <label className="label" htmlFor="servicenow-redirect-url">ServiceNow Redirect URL</label>
       <input id="servicenow-redirect-url" data-testid="servicenow-redirect-url" className="input" readOnly value={redirectUrl} onFocus={event => event.currentTarget.select()} aria-describedby="servicenow-redirect-help" />

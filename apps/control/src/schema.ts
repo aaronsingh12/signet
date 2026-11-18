@@ -775,13 +775,16 @@ CREATE TABLE IF NOT EXISTS servicenow_mcp_account (
   client_secret_id TEXT NOT NULL REFERENCES secret(id), token_secret_id TEXT REFERENCES secret(id),
   expires_at BIGINT, tools_json TEXT, discovered_at TEXT, updated_by TEXT NOT NULL, updated_at TEXT NOT NULL
 );
-INSERT INTO servicenow_mcp_account (id, tenant_id, gateway_url, instance_url, mcp_url, client_id, client_secret_id,
+ALTER TABLE servicenow_mcp_account ADD COLUMN IF NOT EXISTS name TEXT;
+INSERT INTO servicenow_mcp_account (id, name, tenant_id, gateway_url, instance_url, mcp_url, client_id, client_secret_id,
   token_secret_id, expires_at, tools_json, discovered_at, updated_by, updated_at)
-SELECT 'snm_' || s.tenant_id, s.tenant_id, s.gateway_url, s.instance_url, s.mcp_url, s.client_id, s.client_secret_id,
+SELECT 'snm_' || s.tenant_id, regexp_replace(s.mcp_url, '^.*/', ''), s.tenant_id, s.gateway_url, s.instance_url, s.mcp_url, s.client_id, s.client_secret_id,
   c.secret_id, c.expires_at, c.tools_json, c.discovered_at, s.updated_by, s.updated_at
 FROM servicenow_mcp_settings s LEFT JOIN servicenow_mcp_connection c ON c.tenant_id = s.tenant_id
   AND c.instance_url = s.instance_url AND c.mcp_url = s.mcp_url AND c.client_id = s.client_id
 ON CONFLICT (id) DO NOTHING;
+UPDATE servicenow_mcp_account SET name = regexp_replace(mcp_url, '^.*/', '') WHERE name IS NULL;
+ALTER TABLE servicenow_mcp_account ALTER COLUMN name SET NOT NULL;
 ALTER TABLE servicenow_mcp_oauth_state ADD COLUMN IF NOT EXISTS connection_id TEXT;
 CREATE TABLE IF NOT EXISTS servicenow_agent_link (
   connection_id TEXT NOT NULL REFERENCES servicenow_mcp_account(id) ON DELETE CASCADE,

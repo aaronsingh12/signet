@@ -1,9 +1,11 @@
 import { useState } from 'react';
+import { ArrowUpRight, Cloud, KeyRound, Network } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import type { ExternalConnectionConfig, ExternalConnectionView, ExternalOperation, ResponseMapping } from '@signet/core/types';
 import { ApiError, api, useApi } from '../lib/api';
 import { useCan } from '../lib/auth';
-import { Card, ErrorNote } from './ui';
+import { Card, ErrorNote, Modal } from './ui';
+import { ConnectionIcon } from './ConnectionIcon';
 import { RestConnectionWizard } from './RestConnectionWizard';
 import { ConnectorMappingEditor } from './ConnectorMappingEditor';
 
@@ -99,9 +101,11 @@ export function ExternalConnections({ agentId }: { agentId: string | null }) {
   const [editing, setEditing] = useState<ExternalConnectionView | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
+  const [opened, setOpened] = useState<string | null>(null);
   const [details, setDetails] = useState<string | null>(null);
   const can = useCan();
   const items = (data?.items ?? []).filter((item) => agentId === null || item.agent_id === agentId || item.mapped_agent_ids.includes(agentId));
+  const selectedItems = items.filter((item) => item.id === opened);
   const act = async (id: string, action: string): Promise<void> => {
     const item = items.find((connection) => connection.id === id);
     if (!item) throw new Error(`Connection ${id} is no longer available; reload the connection list`);
@@ -109,6 +113,7 @@ export function ExternalConnections({ agentId }: { agentId: string | null }) {
     const missingExecutionMapping = action === 'sync' && item.config.endpoints.executions && !item.config.executions_mapping;
     if (missingAgentMapping || missingExecutionMapping) {
       setError(null);
+      setOpened(null);
       setEditing(item);
       return;
     }
@@ -118,8 +123,33 @@ export function ExternalConnections({ agentId }: { agentId: string | null }) {
     finally { await reload(); setBusy(false); }
   };
   return <div className="space-y-4">{editing && <ExternalConnectionEditor key={editing.id} agentId={editing.agent_id} method={editing.config.method} existing={editing} onSaved={() => { setEditing(null); void reload(); }} onCancel={() => setEditing(null)} />}
-    <Card title="External platform connections"><ErrorNote error={error ?? loadError} />{items.filter((item) => item.config.method === 'rest').map((item) => <RestConnectionCard key={item.id} connection={item} busy={busy} onSetup={() => { setError(null); setEditing(item); }} onDetails={() => { if (can('connectors.manage')) setEditing(item); else setDetails(details === item.id ? null : item.id); }} onAction={(action) => void act(item.id, action)} />)}{!items.length ? <p className="text-sm text-ink-3">No external platform connection configured.</p> : items.some((item) => item.config.method !== 'rest') && <div className="overflow-x-auto"><table data-testid="connections-table" className="w-full"><thead><tr>{['Connection / method', 'Direction / agents', 'API reachable', 'Authentication', 'Discovery', 'Monitoring', 'Remote control', 'Gateway enforcement', 'Last success / sync', 'Capabilities / coverage', 'Last error', 'Actions'].map((h) => <th key={h} className="th">{h}</th>)}</tr></thead><tbody>{items.filter((item) => item.config.method !== 'rest').map((item) => <tr key={item.id} data-testid={`connection-${item.id}`}><td className="td"><Link className="text-royal" to={`/agents/${item.agent_id}?tab=connection`}>{item.config.name}</Link><p>{item.config.method} · {item.state}</p></td><td className="td">Outbound · {item.agent_count}</td><td className="td">{item.health.reachable === null ? 'Unverified' : item.health.reachable ? 'Reachable' : 'Unreachable'}</td><td className="td">{item.health.authentication}</td><td className="td">{item.health.discovered === null ? 'Unverified' : `${item.health.discovered} discovered`}</td><td className="td">{item.health.monitoring && item.health.last_sync_at && Date.now() - Date.parse(item.health.last_sync_at) < item.config.sync_interval_seconds * 2000 ? 'Active' : 'Inactive / stale'}</td><td className="td">{item.health.remote_control ? 'Action verified' : item.config.remote_management ? 'Enabled, unverified' : 'Disabled'}</td><td className="td">{item.health.gateway_enforcement ? "Verified for connector calls" : "Inactive"}</td><td className="td text-xs">{item.health.last_success_at ?? 'Never'}<br />{item.health.last_sync_at ?? 'Never'}</td><td className="td text-xs">{item.capabilities.join(', ')}<br />{item.coverage === "gateway_tools" ? "Gateway governs connector tool requests; platform internals unobserved" : "External monitoring"}</td><td className="td text-xs">{item.health.last_error ?? 'None'}</td><td className="td"><div className="flex flex-wrap gap-2"><button data-testid={`connection-details-${item.id}`} className="btn-ghost" onClick={() => setDetails(details === item.id ? null : item.id)}>Details</button>{can('connectors.manage') && <>{['test', ...(item.config.endpoints.discover ? ['discover'] : []), ...(item.config.endpoints.track || item.config.endpoints.executions ? ['sync'] : []), ...(item.state === 'enabled' ? ['disconnect', 'revoke'] : item.state === 'disconnected' ? ['reconnect', 'revoke'] : [])].map((action) => <button data-testid={`connection-${action}-${item.id}`} className="btn-ghost" disabled={busy || item.state === 'revoked'} key={action} onClick={() => void act(item.id, action)}>{action}</button>)}<button data-testid={`connection-edit-${item.id}`} className="btn-ghost" disabled={busy || item.state === 'revoked'} onClick={() => setEditing(item)}>Edit / Rotate</button></>}</div></td></tr>)}</tbody></table></div>}</Card>
-    {details && <ConnectionRecords id={details} />}
+    <Card title="External platform connections">
+      <ErrorNote error={error ?? loadError} />
+      {!items.length && <p className="text-sm text-ink-3">No external platform connection configured.</p>}
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,220px))] gap-4">
+        {items.map((item) => <Card key={item.id} className={`aspect-square [&>div]:h-full !bg-none ${item.state === 'revoked' || item.health.reachable === false || item.health.last_error !== null ? '!bg-bad-50 !border-bad/30' : item.state === 'enabled' && item.health.reachable === true ? '!bg-ok-50 !border-ok/30' : '!bg-warn-50 !border-warn/30'}`} pad={false}>
+          <button type="button" data-testid={`connection-open-${item.id}`} className="flex h-full w-full flex-col items-start rounded-2xl p-4 text-left transition-colors hover:brightness-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2" aria-haspopup="dialog" onClick={() => { setDetails(null); setOpened(item.id); }}>
+            <span className="flex w-full items-start justify-between gap-2">
+              <ConnectionIcon tone={item.state === 'revoked' || item.health.reachable === false || item.health.last_error !== null ? 'bad' : item.state === 'enabled' && item.health.reachable === true ? 'ok' : 'warn'}>
+                {item.config.method === 'oauth' ? <KeyRound size={23} strokeWidth={1.8} /> : item.config.method === 'hybrid' ? <Network size={23} strokeWidth={1.8} /> : <Cloud size={23} strokeWidth={1.8} />}
+              </ConnectionIcon>
+              <ArrowUpRight size={16} aria-hidden="true" className="shrink-0 text-ink-3" />
+            </span>
+            <span className="mt-3 line-clamp-2 break-words text-sm font-semibold">{item.config.name}</span>
+            <span className={`mt-2 rounded px-1.5 py-0.5 text-[11px] font-medium ${item.state === 'enabled' && item.health.reachable === true && item.health.last_error === null ? 'bg-ok-50 text-ok' : 'bg-slate-100 text-ink-2'}`}>
+              {item.state !== 'enabled' ? item.state : item.health.reachable === true && item.health.last_error === null ? 'API verified' : 'Setup needs attention'}
+            </span>
+            <span className="mt-auto pt-3 text-xs text-ink-3">{item.config.method.toUpperCase()} / {item.agent_count} agents</span>
+            <span className="mt-1 text-xs text-ink-2">View details</span>
+          </button>
+        </Card>)}
+      </div>
+    </Card>
+    {selectedItems.map((item) => <Modal key={item.id} title={item.config.name} width="max-w-5xl" onClose={() => { setOpened(null); setDetails(null); }}>
+      <ErrorNote error={error} />
+    {selectedItems.filter((item) => item.config.method === 'rest').map((item) => <RestConnectionCard key={item.id} connection={item} busy={busy} onSetup={() => { setError(null); setOpened(null); setEditing(item); }} onDetails={() => { if (can('connectors.manage')) { setOpened(null); setEditing(item); } else setDetails(details === item.id ? null : item.id); }} onAction={(action) => void act(item.id, action)} />)}{!selectedItems.length ? <p className="text-sm text-ink-3">No external platform connection configured.</p> : selectedItems.some((item) => item.config.method !== 'rest') && <div className="overflow-x-auto"><table data-testid="connections-table" className="w-full"><thead><tr>{['Connection / method', 'Direction / agents', 'API reachable', 'Authentication', 'Discovery', 'Monitoring', 'Remote control', 'Gateway enforcement', 'Last success / sync', 'Capabilities / coverage', 'Last error', 'Actions'].map((h) => <th key={h} className="th">{h}</th>)}</tr></thead><tbody>{selectedItems.filter((item) => item.config.method !== 'rest').map((item) => <tr key={item.id} data-testid={`connection-${item.id}`}><td className="td"><Link className="text-royal" to={`/agents/${item.agent_id}?tab=connection`}>{item.config.name}</Link><p>{item.config.method} · {item.state}</p></td><td className="td">Outbound · {item.agent_count}</td><td className="td">{item.health.reachable === null ? 'Unverified' : item.health.reachable ? 'Reachable' : 'Unreachable'}</td><td className="td">{item.health.authentication}</td><td className="td">{item.health.discovered === null ? 'Unverified' : `${item.health.discovered} discovered`}</td><td className="td">{item.health.monitoring && item.health.last_sync_at && Date.now() - Date.parse(item.health.last_sync_at) < item.config.sync_interval_seconds * 2000 ? 'Active' : 'Inactive / stale'}</td><td className="td">{item.health.remote_control ? 'Action verified' : item.config.remote_management ? 'Enabled, unverified' : 'Disabled'}</td><td className="td">{item.health.gateway_enforcement ? "Verified for connector calls" : "Inactive"}</td><td className="td text-xs">{item.health.last_success_at ?? 'Never'}<br />{item.health.last_sync_at ?? 'Never'}</td><td className="td text-xs">{item.capabilities.join(', ')}<br />{item.coverage === "gateway_tools" ? "Gateway governs connector tool requests; platform internals unobserved" : "External monitoring"}</td><td className="td text-xs">{item.health.last_error ?? 'None'}</td><td className="td"><div className="flex flex-wrap gap-2"><button data-testid={`connection-details-${item.id}`} className="btn-ghost" onClick={() => setDetails(details === item.id ? null : item.id)}>Details</button>{can('connectors.manage') && <>{['test', ...(item.config.endpoints.discover ? ['discover'] : []), ...(item.config.endpoints.track || item.config.endpoints.executions ? ['sync'] : []), ...(item.state === 'enabled' ? ['disconnect', 'revoke'] : item.state === 'disconnected' ? ['reconnect', 'revoke'] : [])].map((action) => <button data-testid={`connection-${action}-${item.id}`} className="btn-ghost" disabled={busy || item.state === 'revoked'} key={action} onClick={() => void act(item.id, action)}>{action}</button>)}<button data-testid={`connection-edit-${item.id}`} className="btn-ghost" disabled={busy || item.state === 'revoked'} onClick={() => { setOpened(null); setEditing(item); }}>Edit / Rotate</button></>}</div></td></tr>)}</tbody></table></div>}
+      {details && <ConnectionRecords id={details} />}
+    </Modal>)}
   </div>;
 }
 

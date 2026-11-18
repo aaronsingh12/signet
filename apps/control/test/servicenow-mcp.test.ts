@@ -37,8 +37,10 @@ test('ServiceNow connections keep independent settings and OAuth state, enforce 
   await new Promise<void>(resolve => server.once('listening', resolve));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   try {
-    const input = { gateway_url: 'https://signet.example.test', instance_url: 'https://example.service-now.com',
+    const input = { name: 'Incident management', gateway_url: 'https://signet.example.test', instance_url: 'https://example.service-now.com',
       mcp_url: 'https://example.service-now.com/sncapps/mcp-server/mcp/monitoring', client_id: 'integration-test-client', client_secret: 'integration-test-secret' };
+    const blankName = await fetch(`${base}/settings`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...input, name: ' ' }) });
+    assert.equal(blankName.status, 400);
     const missingSecret = await fetch(`${base}/settings`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...input, client_secret: '' }) });
     assert.equal(missingSecret.status, 400);
     const saved = await fetch(`${base}/settings`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) });
@@ -70,6 +72,9 @@ test('ServiceNow connections keep independent settings and OAuth state, enforce 
     await db.prepare('UPDATE servicenow_mcp_oauth_state SET expires_at = ?').run(Date.now() - 1);
     assert.equal((await fetch(`${base}/callback?state=${expiredState}&code=unused`)).status, 400);
     const status = await serviceNowConnection(id);
+    assert.equal(status.name, input.name);
+    await updateServiceNowSettings(id, { ...input, name: 'Renamed connection', client_secret: '' }, actor);
+    assert.equal((await serviceNowConnection(id)).name, 'Renamed connection');
     assert.equal(status.authorized, false);
     assert.equal(status.monitoring, false);
     const pendingBeforeEdit = await fetch(`${base}/connect/${id}`, { redirect: 'manual' });

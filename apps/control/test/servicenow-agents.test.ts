@@ -21,7 +21,7 @@ test('ServiceNow agent linking reuses identities, maps read-only monitoring, rep
   const { db } = await import('../src/db');
   const { permissionsFor } = await import('../src/rbac');
   const actor: Principal = { id: 'sn-admin@example.test', name: 'Admin', kind: 'human', roles: ['tenant_admin', 'platform_admin', 'agent_owner'], permissions: permissionsFor(['tenant_admin', 'platform_admin', 'agent_owner']), groups: [], mfa: true, auth: 'session', auth_time: null };
-  const settings = await createServiceNowSettings({ gateway_url: 'https://signet.example.test', instance_url: 'https://techsnitchpvtltddemo2.service-now.com', mcp_url: 'https://techsnitchpvtltddemo2.service-now.com/sncapps/mcp-server/mcp/test-monitoring', client_id: 'test-client', client_secret: 'test-client-secret' }, actor);
+  const settings = await createServiceNowSettings({ name: 'Monitoring', gateway_url: 'https://signet.example.test', instance_url: 'https://techsnitchpvtltddemo2.service-now.com', mcp_url: 'https://techsnitchpvtltddemo2.service-now.com/sncapps/mcp-server/mcp/test-monitoring', client_id: 'test-client', client_secret: 'test-client-secret' }, actor);
   const input = { external_id: '1234567890abcdef1234567890abcdef', name: 'ServiceNow integration agent', purpose: 'Monitor an existing ServiceNow agent without claiming gateway enforcement' };
   await assert.rejects(() => linkServiceNowAgent(settings.id, input, { ...actor, permissions: [] }), /agents.write/);
   const linked = await linkServiceNowAgent(settings.id, input, actor);
@@ -55,6 +55,6 @@ test('ServiceNow agent linking reuses identities, maps read-only monitoring, rep
   assert.equal(await db.prepare('SELECT id FROM external_connection WHERE id = ?').get(source.id), undefined);
   const afterRemoval = await agentAnalytics();
   assert.equal(afterRemoval.agents.find(agent => agent.id === linked.agent_id)?.servicenow?.linked, false);
-  const replacement = await createServiceNowSettings({ gateway_url: settings.gateway_url, instance_url: settings.instance_url, mcp_url: settings.mcp_url, client_id: settings.client_id, client_secret: 'replacement-client-secret' }, actor);
+  const replacement = await createServiceNowSettings({ name: 'Monitoring', gateway_url: settings.gateway_url, instance_url: settings.instance_url, mcp_url: settings.mcp_url, client_id: settings.client_id, client_secret: 'replacement-client-secret' }, actor);
   assert.equal((await linkServiceNowAgent(replacement.id, input, actor)).agent_id, linked.agent_id);
 });

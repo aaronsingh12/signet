@@ -333,3 +333,22 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 3px solid
 .guide-block dt { font-weight: 600; color: #1c2826; overflow-wrap: anywhere; }
 .guide-block dd { margin: 1px 0 0; }
 @media (min-width: 1100px) { .app-main:has(.guide-panel) { padding-right: 460px; max-width: none; } }
+
+.connection-icon {
+  display: inline-flex;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #ffffff70;
+  border-radius: 13px;
+  color: white;
+  background: linear-gradient(145deg, rgb(var(--connection-icon-color) / 0.65), rgb(var(--connection-icon-color)));
+  box-shadow: 0 5px 0 rgb(var(--connection-icon-color) / 0.5), 0 9px 12px rgb(var(--connection-icon-color) / 0.22), inset 2px 2px 4px #ffffff70, inset -2px -2px 4px #00000020;
+  transform: perspective(160px) rotateX(8deg) rotateY(-10deg);
+}
+.connection-icon svg { filter: drop-shadow(0 2px 1px #00000035); }
+.connection-icon-ok { --connection-icon-color: 21 128 61; }
+.connection-icon-warn { --connection-icon-color: 180 83 9; }
+.connection-icon-bad { --connection-icon-color: 180 35 24; }
