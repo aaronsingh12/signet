@@ -7,7 +7,7 @@ import { dropTestDatabase } from './database';
 
 // Model detector releases and champion / challenger (DA 3, DA 6 mechanism 4).
 process.env.SIGNET_DATA_DIR = mkdtempSync(join(tmpdir(), 'signet-challenger-'));
-process.env.SIGNET_DB_SCHEMA = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+process.env.MONGODB_DATABASE = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
 process.env.SIGNET_SINGLE_OPERATOR = 'false';
 const core = await import('@signet/core');
 const { db } = await import('../src/db');

@@ -11,7 +11,7 @@ import { dropTestDatabase } from './database';
 // Official sources (BP 9.3): Signet downloads the NIST SP 800-53 catalog itself, pinned to one commit,
 // and imports it only when the SHA-256 matches.
 process.env.SIGNET_DATA_DIR = mkdtempSync(join(tmpdir(), 'signet-official-'));
-process.env.SIGNET_DB_SCHEMA = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+process.env.MONGODB_DATABASE = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
 const controls = await import('../src/controls');
 const oscal = await import('../src/oscal');
 const { db } = await import('../src/db');

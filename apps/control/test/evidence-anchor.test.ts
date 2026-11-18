@@ -17,7 +17,7 @@ const tsaUrl = process.env.SIGNET_TEST_TSA_URL;
 const skip = !(endpoint && tsaUrl) && 'set SIGNET_TEST_S3_* and SIGNET_TEST_TSA_URL to run';
 
 process.env.SIGNET_DATA_DIR = mkdtempSync(join(tmpdir(), 'signet-anchor-'));
-process.env.SIGNET_DB_SCHEMA = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+process.env.MONGODB_DATABASE = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
 
 test('a sealed day is stored write-once in S3 and timestamped; the package carries the token', { skip }, async () => {
   const bucket = `signet-anchor-${Date.now()}`;

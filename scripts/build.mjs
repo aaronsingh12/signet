@@ -4,7 +4,7 @@ import { build } from 'esbuild';
 import { cpSync, mkdirSync, rmSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 
-const external = ['express', 'pg', '@huggingface/transformers', 'onnxruntime-node', '@open-policy-agent/opa-wasm'];
+const external = ['express', 'mongodb', 'pgsql-ast-parser', '@huggingface/transformers', 'onnxruntime-node', '@open-policy-agent/opa-wasm'];
 const entries = {
   control: 'apps/control/src/index.ts',
   gateway: 'apps/gateway/src/index.ts',

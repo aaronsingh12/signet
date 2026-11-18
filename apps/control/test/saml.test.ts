@@ -9,7 +9,7 @@ import { dropTestDatabase } from './database';
 // one-time request store, and turning a validated profile into a person with roles from groups.
 // The full flow was checked against Keycloak as a SAML identity provider (sign-in, replay and tampering).
 process.env.SIGNET_DATA_DIR = mkdtempSync(join(tmpdir(), 'signet-saml-'));
-process.env.SIGNET_DB_SCHEMA = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+process.env.MONGODB_DATABASE = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
 const saml = await import('../src/saml');
 after(dropTestDatabase);
 

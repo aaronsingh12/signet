@@ -10,7 +10,7 @@ import type { LedgerRecord } from '@signet/core';
 // throwaway database and checks the signed root, the WORM copy and the inclusion proofs.
 const dir = mkdtempSync(join(tmpdir(), 'signet-evidence-'));
 process.env.SIGNET_DATA_DIR = dir;
-process.env.SIGNET_DB_SCHEMA = 'test_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2, 10);
+process.env.MONGODB_DATABASE = 'test_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2, 10);
 
 after(dropTestDatabase);
 

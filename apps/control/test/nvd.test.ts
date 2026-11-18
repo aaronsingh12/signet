@@ -10,7 +10,7 @@ import { dropTestDatabase } from './database';
 // NVD CVE API 2.0 (BP 9.3 feeds): official CVSS for CVEs that OSV.dev gives no severity for, cached for
 // 7 days and rate-limited.
 process.env.SIGNET_DATA_DIR = mkdtempSync(join(tmpdir(), 'signet-nvd-'));
-process.env.SIGNET_DB_SCHEMA = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+process.env.MONGODB_DATABASE = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
 let calls = 0;
 let limited = false;
 const nvd = createServer((req, res) => {

@@ -8,7 +8,7 @@ import { dropTestDatabase } from './database';
 
 // Secrets Broker envelope encryption (BP 18.2): per-secret data keys wrapped by a key service.
 process.env.SIGNET_DATA_DIR = mkdtempSync(join(tmpdir(), 'signet-keyring-'));
-process.env.SIGNET_DB_SCHEMA = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+process.env.MONGODB_DATABASE = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
 delete process.env.SIGNET_KMS_PROVIDER;
 const keyring = await import('../src/keyring');
 const { db } = await import('../src/db');

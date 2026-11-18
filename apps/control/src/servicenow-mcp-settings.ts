@@ -58,7 +58,7 @@ export async function serviceNowSettings(id: string): Promise<ServiceNowSettings
   return row ? settingsView(row) : null;
 }
 
-/** All ServiceNow OAuth settings come from tenant-scoped PostgreSQL, never environment variables. */
+/** All ServiceNow OAuth settings come from tenant-scoped MongoDB, never environment variables. */
 export async function serviceNowConfiguration(id: string): Promise<{ instance: string; endpoint: string; clientId: string; clientSecret: string; redirectUri: string }> {
   const row = await settingsRow(id);
   if (!row) throw new PolicyError('SERVICENOW_CONFIG', 'Open Add ServiceNow AI Agents and save your connection settings before authorizing', 409);

@@ -12,7 +12,7 @@ import type { CreateInput } from '../src/platforms';
 // Platform connectors against one local stand-in for the platform APIs Signet calls (Vercel, AWS STS,
 // Bedrock Agents and Lambda, Azure login and Resource Manager, Google token, Vertex AI and Cloud Run).
 process.env.SIGNET_DATA_DIR = mkdtempSync(join(tmpdir(), 'signet-plat-'));
-process.env.SIGNET_DB_SCHEMA = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+process.env.MONGODB_DATABASE = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
 
 const VERCEL_TOKEN = 'vercel-test-token-1234567890';
 const calls: { method: string; host: string; path: string; body: unknown; auth: string | undefined }[] = [];
@@ -284,7 +284,12 @@ test('kill stops linked workloads on their platform (Vercel paused, Lambda concu
   await enforcement.applyLadder({ agentId: lambdaAgent }, 'kill', { actor: 'admin', reason: 'test kill' } as never);
   for (let i = 0; i < 50 && !calls.some((c) => c.path.endsWith('/concurrency')); i++) await new Promise((r) => setTimeout(r, 50));
   assert.deepEqual(calls.find((c) => c.path.endsWith('/concurrency'))!.body, { ReservedConcurrentExecutions: 0 }, 'a kill in Signet stops the Lambda function');
-  const state = ((await db.prepare('SELECT state FROM platform_link WHERE agent_id = ?').get(lambdaAgent)) as { state: string }).state;
+  let state: string | null = null;
+  for (let attempt = 0; attempt < 50; attempt++) {
+    state = ((await db.prepare('SELECT state FROM platform_link WHERE agent_id = ?').get(lambdaAgent)) as { state: string }).state;
+    if (state === 'stopped') break;
+    await new Promise<void>(resolve => setTimeout(resolve, 100));
+  }
   assert.equal(state, 'stopped');
 });
 

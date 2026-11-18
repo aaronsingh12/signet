@@ -9,7 +9,7 @@ import { dropTestDatabase } from './database';
 // (SC-8, SC-28), lawful basis (GDPR Art. 6), transfers (Art. 44), appeal routes (contestability),
 // unsafe content (DET-SAFE) and injection / jailbreak detection (DET-INJ, DET-JB).
 process.env.SIGNET_DATA_DIR = mkdtempSync(join(tmpdir(), 'signet-mapping-'));
-process.env.SIGNET_DB_SCHEMA = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+process.env.MONGODB_DATABASE = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
 const controls = await import('../src/controls');
 const registry = await import('../src/registry');
 const workflow = await import('../src/workflow');
@@ -32,7 +32,7 @@ test('intake: appeal route and lawful basis are validated and pre-fill the asses
 });
 
 test('encryption in transit: a remote database without sslmode=require or a plain-http LLM is ineffective', async () => {
-  const saved = { db: process.env.DATABASE_URL, llm: process.env.SIGNET_LLM_BASE_URL, pub: process.env.SIGNET_PUBLIC_URL };
+  const saved = { db: process.env.MONGODB_URL, llm: process.env.SIGNET_LLM_BASE_URL, pub: process.env.SIGNET_PUBLIC_URL };
   try {
     process.env.SIGNET_PUBLIC_URL = 'https://signet.example';
     process.env.SIGNET_LLM_BASE_URL = 'https://ollama.com/v1';

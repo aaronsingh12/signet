@@ -7,7 +7,7 @@ import { dropTestDatabase } from './database';
 
 // The lifecycle and approvals engine against a throwaway database (BP 6, 7).
 process.env.SIGNET_DATA_DIR = mkdtempSync(join(tmpdir(), 'signet-wf-'));
-process.env.SIGNET_DB_SCHEMA = 'test_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2, 10);
+process.env.MONGODB_DATABASE = 'test_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2, 10);
 process.env.SIGNET_TOOL_PRIVATE_DESTINATIONS = 'allow'; // the test tool address is on localhost
 process.env.SIGNET_SINGLE_OPERATOR = 'false'; // separation of duties on; one test switches it on
 const { permissionsFor } = await import('../src/rbac');

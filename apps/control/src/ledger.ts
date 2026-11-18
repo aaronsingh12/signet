@@ -23,10 +23,10 @@ export interface LedgerEntry {
 const listeners = new Set<(r: LedgerRecord) => void | Promise<void>>();
 export const onAppend = (fn: (r: LedgerRecord) => void | Promise<void>) => (listeners.add(fn), () => listeners.delete(fn));
 
-// A transaction-level lock serializes the hash chain across PostgreSQL clients.
+// The MongoDB transaction write lock serializes the hash chain across control instances.
 export async function append(entry: LedgerEntry): Promise<LedgerRecord> {
   return (await tx(async () => {
-  await db.prepare('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))').get(`${db.schema}:ledger`);
+  await db.lock();
   if (entry.agent_id && !(await db.prepare('SELECT 1 FROM agent WHERE id = ? AND tenant_id = ?').get(entry.agent_id, tenant.id))) throw notFound('agent for ledger entry; removed agents cannot write new records');
   const last = (await head.get()) as { seq: number; record_hash: string } | undefined;
   const rec: Omit<LedgerRecord, 'record_hash'> = {

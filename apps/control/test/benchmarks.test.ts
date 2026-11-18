@@ -8,7 +8,7 @@ import { dropTestDatabase } from './database';
 // Detector release process (DA 6 mechanism 4, SGC-SELF-004): benchmark, champion/challenger, and
 // Security plus AI Assurance sign-off by two different people before a version may become active.
 process.env.SIGNET_DATA_DIR = mkdtempSync(join(tmpdir(), 'signet-bench-'));
-process.env.SIGNET_DB_SCHEMA = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+process.env.MONGODB_DATABASE = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
 process.env.SIGNET_SINGLE_OPERATOR = 'false'; // a team install: separation of duties applies
 const core = await import('@signet/core');
 const detectors = await import('../src/detectors');

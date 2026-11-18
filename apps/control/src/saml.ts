@@ -9,7 +9,7 @@ import { OIDC, createSession, principalFromClaims } from './oidc';
 // SAML 2.0 single sign-on (BP 2 principle 8, 11.4: "any OIDC/SAML"). Signet is the service provider; the
 // customer's identity provider (Microsoft Entra ID, Okta, Ping, ADFS, Google Workspace, Keycloak ...)
 // signs the assertion. Signature, audience, time window and InResponseTo checks are done by the
-// open-source @node-saml/node-saml library (MIT). Every request ID is stored in PostgreSQL and used once,
+// open-source @node-saml/node-saml library (MIT). Every request ID is stored in MongoDB and used once,
 // so responses that were not asked for, or that are replayed, are refused on every Signet instance.
 //
 //   SIGNET_AUTH_MODE=saml

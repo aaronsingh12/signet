@@ -12,10 +12,10 @@ has the detail.
 
 ## Run it
 
-Requirements: Node 22.13+, PostgreSQL configured through `DATABASE_URL` in the ignored `.env`,
-and Ollama Cloud access for `gpt-oss:120b-cloud`. Docker is not required for local development.
-The control plane requires PostgreSQL and does not fall back to a local database. Tests create
-isolated `test_*` schemas in the configured database; CI reads `DATABASE_URL` from its secret.
+Requirements: Node 22.13+, a MongoDB replica set configured through `MONGODB_URL` in the ignored root `.env`,
+and the identity provider below. Start the local replica set with `npm run mongo:start` (set `SIGNET_MONGODB_BINARY`
+to the local `mongod` executable), or run `docker compose up -d mongodb`. Local data persists in `data/mongodb`
+when using the executable. Tests create and remove isolated `test_*` databases. CI starts its own MongoDB replica set.
 
 The DET-INJ detector model (about 700 MB, Apache-2.0) is not in git. Download it once; without it the
 gateway runs and reports the detector as unavailable:
@@ -129,7 +129,7 @@ keys are generated on first start under `data/` (git-ignored); delete `data/` to
 ### Measured
 - Gate demo: kill acknowledged by both gateway nodes in 17-33 ms; hijack after a poisoned document quarantines the agent; tampering with one record in an export is caught and located.
 - Gateway pipeline latency (excluding upstream), 16 concurrent clients: model calls p50 2.1 / p95 4.1 / p99 8.1 ms; tool calls p50 1.5 / p95 2.6 ms. Budget is p95 50 ms.
-- End-to-end throughput on one laptop running every component: about 180-260 req/s. The Blueprint asks 2,000 req/s per 4-vCPU node; that needs the production profile (one process per core, Postgres, sharded ledger writers).
+- End-to-end throughput on one laptop running every component: about 180-260 req/s. The Blueprint asks 2,000 req/s per 4-vCPU node; that needs the production profile (one process per core, MongoDB replica set, sharded ledger writers).
 
 ### Not built yet (later phases)
 - With DET-JB and DET-PII not deployed, **every T1/T2 model call is held for a person** (RB-INV-06), which is the correct fail-safe; "approve for session" keeps a conversation usable.

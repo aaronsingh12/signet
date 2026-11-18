@@ -99,7 +99,7 @@ const signedIn = (_req: Request, res: Response, next: NextFunction) => (res.loca
 
 app.get('/healthz', route(async () => {
   await db.prepare('SELECT 1').get();
-  return { ok: true, tenant: tenant.id, database: 'postgresql' };
+  return { ok: true, tenant: tenant.id, database: 'mongodb' };
 }));
 
 // --- public: sign-in, identity exchange, API description ---

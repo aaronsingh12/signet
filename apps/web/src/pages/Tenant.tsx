@@ -58,7 +58,7 @@ export function Tenant() {
               ['Name', me.tenant.name],
               ['ID', <Mono key="t">{me.tenant.id}</Mono>],
               ['Identity provider', 'Keycloak (OIDC, embedded for dev and air-gapped installs)'],
-              ['Database', 'PostgreSQL'],
+              ['Database', 'MongoDB'],
               ['Session', 'HttpOnly cookie · 30 min idle · 12 h absolute'],
             ]}
           />

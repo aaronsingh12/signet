@@ -3,6 +3,17 @@
 #   docker compose --profile full up -d    the whole stack in containers
 #   docker compose --profile presidio up -d presidio   DET-PII (then SIGNET_PRESIDIO_URL=http://localhost:5002)
 services:
+  mongodb:
+    image: mongo:9.0.4
+    command: ["mongod", "--replSet", "signet-local", "--bind_ip_all"]
+    ports: ["127.0.0.1:27017:27017"]
+    volumes: ["signet-mongodb-data:/data/db"]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "try { rs.status().ok } catch (error) { rs.initiate({_id:'signet-local',members:[{_id:0,host:'127.0.0.1:27017'}]}).ok }"]
+      interval: 5s
+      timeout: 10s
+      retries: 12
+
   keycloak:
     image: quay.io/keycloak/keycloak:26.4
     command: ["start-dev", "--import-realm", "--http-port=8180"]
@@ -23,9 +34,11 @@ services:
 
   control:
     profiles: ["full"]
+    depends_on:
+      mongodb: { condition: service_healthy }
     build: { context: ., target: control }
     environment:
-      DATABASE_URL: ${DATABASE_URL:?Configure the PostgreSQL connection in .env}
+      MONGODB_URL: ${MONGODB_URL:?Configure the MongoDB replica set URI in the root .env}
       SIGNET_OIDC_ISSUER: http://localhost:8180/realms/signet
       SIGNET_DATA_DIR: /data
     volumes: ["signet-data:/data"]
@@ -52,4 +65,5 @@ services:
     network_mode: host
 
 volumes:
+  signet-mongodb-data:
   signet-data:

@@ -10,7 +10,7 @@ import type { Principal } from '../src/rbac';
 import { dropTestDatabase } from './database';
 
 process.env.SIGNET_DATA_DIR = mkdtempSync(join(tmpdir(), 'signet-servicenow-'));
-process.env.SIGNET_DB_SCHEMA = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+process.env.MONGODB_DATABASE = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
 process.env.SIGNET_PUBLIC_URL = 'https://signet.example.test';
 after(dropTestDatabase);
 
@@ -20,8 +20,6 @@ test('ServiceNow connections keep independent settings and OAuth state, enforce 
   const { route, problemHandler } = await import('../src/http');
   const { createServiceNowSettings, updateServiceNowSettings, serviceNowSettings, removeServiceNowConnection } = await import('../src/servicenow-mcp-settings');
   const { putSecret } = await import('../src/secrets');
-  const { tenant } = await import('../src/tenant');
-  const { SCHEMA_SQL } = await import('../src/schema');
   const actor: Principal = { id: 'admin@example.test', name: 'Admin', kind: 'human', roles: ['tenant_admin'], permissions: ['tenant.admin'], groups: [], mfa: true, auth: 'session', auth_time: null };
   const app = express();
   app.use(express.json());
@@ -107,20 +105,7 @@ test('ServiceNow connections keep independent settings and OAuth state, enforce 
     assert.equal((await fetch(`${base}/callback?state=${removedState}&code=unused`)).status, 400);
     assert.equal((await listServiceNowConnections()).length, 1);
     assert.equal((await fetch(`${base}/connections/${second.id}`, { method: 'DELETE' })).status, 404);
-    const legacyClient = await putSecret({ name: 'servicenow-legacy-delete-client', kind: 'platform', value: 'legacy-client-secret' }, actor);
-    const legacyToken = await putSecret({ name: 'servicenow-legacy-delete-token', kind: 'platform', value: 'legacy-token-secret' }, actor);
-    await db.prepare('INSERT INTO servicenow_mcp_settings (tenant_id, gateway_url, instance_url, mcp_url, client_id, client_secret_id, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(tenant.id, input.gateway_url, input.instance_url, input.mcp_url, input.client_id, legacyClient.id, actor.id, new Date().toISOString());
-    await db.prepare('INSERT INTO servicenow_mcp_connection (tenant_id, instance_url, mcp_url, client_id, secret_id, expires_at, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(tenant.id, input.instance_url, input.mcp_url, input.client_id, legacyToken.id, Date.now() + 60000, actor.id, new Date().toISOString());
-    await db.initialize(SCHEMA_SQL);
-    const migratedId = `snm_${tenant.id}`;
-    assert((await serviceNowSettings(migratedId)) !== null);
-    await removeServiceNowConnection(migratedId);
-    await db.initialize(SCHEMA_SQL);
-    assert.equal(await serviceNowSettings(migratedId), null);
-    assert.equal(await db.prepare('SELECT id FROM secret WHERE id = ?').get(legacyClient.id), undefined);
-    assert.equal(await db.prepare('SELECT id FROM secret WHERE id = ?').get(legacyToken.id), undefined);
+    await db.initialize();
     assert.equal((await listServiceNowConnections()).length, 1);
   } finally {
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));

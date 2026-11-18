@@ -12,7 +12,7 @@ import type { Principal } from '../src/rbac';
 import { dropTestDatabase } from './database';
 
 process.env.SIGNET_DATA_DIR = mkdtempSync(join(tmpdir(), 'signet-external-'));
-process.env.SIGNET_DB_SCHEMA = `test_external_${Date.now().toString(36)}`;
+process.env.MONGODB_DATABASE = `test_external_${Date.now().toString(36)}`;
 after(dropTestDatabase);
 
 const config = (): ExternalConnectionConfig => ({ name: 'Mock documented platform', tracking_pointer: '', execution_pagination: null, method: 'rest', private_connector: null, base_url: 'https://platform.example/api/v1', auth: 'api_key', header: 'x-api-key', client_id: '', token_url: '', scopes: '', token_auth: 'client_secret_basic', timeout_ms: 1000, sync_interval_seconds: 60, remote_management: false, endpoints: { test: { method: 'GET', path: '/agents' }, discover: { method: 'GET', path: '/agents' }, executions: { method: 'GET', path: '/agents/executions?agentId={id}' }, pause: { method: 'POST', path: '/agents/{id}/pause' } }, agents_mapping: { items: '/agents', id: '/key', name: '/label', status: '', timestamp: '' }, executions_mapping: { items: '/history', id: '/executionId', name: '', status: '/state', timestamp: '/at' } });

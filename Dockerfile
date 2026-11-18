@@ -28,7 +28,7 @@ USER node
 VOLUME ["/data"]
 
 FROM runtime-base AS control
-RUN npm init -y >/dev/null && npm install --omit=dev --ignore-scripts express@4.22.3 pg@8.23.1 && npm cache clean --force
+RUN npm init -y >/dev/null && npm install --omit=dev --ignore-scripts express@4.22.3 mongodb@7.9.0 pgsql-ast-parser@12.0.2 && npm cache clean --force
 COPY --from=build /src/dist/control.mjs /src/dist/signet-verify.mjs ./
 EXPOSE 4100
 HEALTHCHECK CMD node -e "fetch('http://localhost:4100/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"

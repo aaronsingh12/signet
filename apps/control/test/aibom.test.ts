@@ -9,7 +9,7 @@ import { dropTestDatabase } from './database';
 
 // AIBOM (CycloneDX 1.6) and vulnerability scanning (OSV.dev + CISA KEV), BP 6 Stage 3 and 7.
 process.env.SIGNET_DATA_DIR = mkdtempSync(join(tmpdir(), 'signet-aibom-'));
-process.env.SIGNET_DB_SCHEMA = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+process.env.MONGODB_DATABASE = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
 const live = process.env.SIGNET_TEST_OSV_LIVE === '1';
 
 // Stand-in OSV and KEV unless the live run is asked for.

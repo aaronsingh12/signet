@@ -3,7 +3,7 @@
 type Op = { summary: string; permission?: string; public?: boolean; body?: string; runner?: boolean };
 
 const ops: Record<string, Record<string, Op>> = {
-  '/connect/settings': { put: { summary: 'Save public Control and Gateway origins in PostgreSQL; subsequent connections use them without restarting', permission: 'tenant.admin' } },
+  '/connect/settings': { put: { summary: 'Save public Control and Gateway origins in MongoDB; subsequent connections use them without restarting', permission: 'tenant.admin' } },
   '/edge-runners/{id}/tools': { post: { summary: 'Register a private HTTP tool and encrypted credential atomically', permission: 'connectors.manage and tools.manage and secrets.manage' } },
   '/edge-runners/{id}/tools/{alias}/credential': { put: { summary: 'Rotate a private tool credential; paired runners read the new value on their next request', permission: 'connectors.manage and secrets.manage' } },
   '/edge/runners/{runnerId}/tools/{alias}/credential': { get: { summary: 'Read only the authenticated runner\'s assigned tool credential; never cached', runner: true } },

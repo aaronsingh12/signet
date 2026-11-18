@@ -282,12 +282,12 @@ const CONTROLS: ControlDef[] = [
       const local = (u: URL) => ['localhost', '127.0.0.1', '::1'].includes(u.hostname);
       const bad: string[] = [];
       const checked: string[] = [];
-      const db = process.env.DATABASE_URL;
+      const db = process.env.MONGODB_URL;
       if (db) {
         const u = new URL(db);
-        const mode = u.searchParams.get('sslmode') ?? '';
+        const secure = u.protocol === 'mongodb+srv:' || u.searchParams.get('tls') === 'true';
         checked.push('database');
-        if (!local(u) && !['require', 'verify-ca', 'verify-full'].includes(mode)) bad.push(`database connection without sslmode=require (${mode || 'not set'})`);
+        if (!local(u) && !secure) bad.push('MongoDB connection must enable TLS for a remote host');
       }
       for (const [name, v] of [['console address', process.env.SIGNET_PUBLIC_URL], ['cloud LLM', process.env.SIGNET_LLM_BASE_URL]] as const) {
         if (!v) continue;

@@ -7,7 +7,7 @@ import { dropTestDatabase } from './database';
 import type { Principal } from '../src/rbac';
 
 process.env.SIGNET_DATA_DIR = mkdtempSync(join(tmpdir(), 'signet-onboard-'));
-process.env.SIGNET_DB_SCHEMA = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+process.env.MONGODB_DATABASE = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
 process.env.SIGNET_SINGLE_OPERATOR = 'true';
 
 after(async () => {

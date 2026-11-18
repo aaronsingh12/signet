@@ -8,7 +8,7 @@ import { dropTestDatabase } from './database';
 // Compliance framework catalogue (BP 9): built-in pack, licence rules, per-tenant enable, scores with
 // coverage gaps, and the OSCAL importer for NIST SP 800-53 catalogs and FedRAMP profiles.
 process.env.SIGNET_DATA_DIR = mkdtempSync(join(tmpdir(), 'signet-fw-'));
-process.env.SIGNET_DB_SCHEMA = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+process.env.MONGODB_DATABASE = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
 const { db } = await import('../src/db');
 const fw = await import('../src/frameworks');
 const controls = await import('../src/controls');

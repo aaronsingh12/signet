@@ -10,7 +10,7 @@ import { dropTestDatabase } from './database';
 // Test Lab attack suites (BP 6 Stage 4): Signet probes against the agent's test address, imported garak /
 // promptfoo / generic reports, and the Test-stage gate for T1/T2.
 process.env.SIGNET_DATA_DIR = mkdtempSync(join(tmpdir(), 'signet-attack-'));
-process.env.SIGNET_DB_SCHEMA = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+process.env.MONGODB_DATABASE = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
 process.env.SIGNET_TOOL_PRIVATE_DESTINATIONS = 'allow'; // the stand-in agents run on this machine
 const attacklab = await import('../src/attacklab');
 const registry = await import('../src/registry');

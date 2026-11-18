@@ -7,7 +7,7 @@ import { dropTestDatabase } from './database';
 
 // DET-ANOM baselines from the ledger and live scoring from shared counters (DA 3, SGC-MON-004).
 process.env.SIGNET_DATA_DIR = mkdtempSync(join(tmpdir(), 'signet-anom-'));
-process.env.SIGNET_DB_SCHEMA = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+process.env.MONGODB_DATABASE = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
 const anomaly = await import('../src/anomaly');
 const registry = await import('../src/registry');
 const ledger = await import('../src/ledger');

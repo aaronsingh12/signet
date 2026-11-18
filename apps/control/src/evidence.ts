@@ -14,7 +14,7 @@ import { tenant } from './tenant';
 
 // Evidence store (BP 8.3, E05, E31). Each UTC day's records are rolled into a Merkle tree; the root is
 // signed with the tenant ledger key and written, with the day's records, to write-once storage.
-// Local copies use read-only files. Vercel copies use PostgreSQL with append-only signed roots;
+// Local copies use read-only files. Vercel copies use MongoDB with append-only signed roots;
 // this is application-enforced retention, not independently administered S3 Object Lock.
 
 const WORM_DIR = join(DATA_DIR, 'worm', tenant.id);
@@ -65,7 +65,7 @@ export async function sealFinishedDays(): Promise<string[]> {
 
 export async function sealDay(day: string) {
   return tx(async () => {
-    await db.prepare('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))').get(`${db.schema}:daily-root:${day}`);
+    await db.lock();
     const existing = await db.prepare('SELECT jws FROM daily_root WHERE day = ?').get(day);
     if (existing) return verifyRootJws(String(existing.jws));
     return sealDayRecords(day);

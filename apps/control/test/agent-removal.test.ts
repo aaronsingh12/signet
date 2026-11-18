@@ -11,10 +11,10 @@ import type { Principal } from '../src/rbac';
 import type { LedgerRecord } from '@signet/core';
 
 const directory = mkdtempSync(join(tmpdir(), 'signet-erasure-'));
-if (!process.env.DATABASE_URL) process.loadEnvFile();
+if (!process.env.MONGODB_URL) process.loadEnvFile();
 process.env.SIGNET_HOME = directory;
 process.env.SIGNET_DATA_DIR = directory;
-process.env.SIGNET_DB_SCHEMA = 'test_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2, 10);
+process.env.MONGODB_DATABASE = 'test_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2, 10);
 
 after(dropTestDatabase);
 

@@ -8,7 +8,7 @@ import type { Principal } from '../src/rbac';
 
 const dir = mkdtempSync(join(tmpdir(), 'signet-deployment-'));
 process.env.SIGNET_DATA_DIR = dir;
-process.env.SIGNET_DB_SCHEMA = 'test_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2, 10);
+process.env.MONGODB_DATABASE = 'test_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2, 10);
 
 after(dropTestDatabase);
 

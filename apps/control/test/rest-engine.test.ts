@@ -13,7 +13,7 @@ import type { Principal } from '../src/rbac';
 import { dropTestDatabase } from './database';
 
 process.env.SIGNET_DATA_DIR = mkdtempSync(join(tmpdir(), 'signet-generic-rest-'));
-process.env.SIGNET_DB_SCHEMA = `test_rest_${Date.now().toString(36)}`;
+process.env.MONGODB_DATABASE = `test_rest_${Date.now().toString(36)}`;
 after(dropTestDatabase);
 
 function config(auth: ExternalConnectionConfig['auth'], header: string, path: string): ExternalConnectionConfig {

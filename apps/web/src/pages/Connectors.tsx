@@ -4,7 +4,7 @@ import { ApiError, api, useApi } from '../lib/api';
 import { useCan } from '../lib/auth';
 import { ago } from '../lib/format';
 import { EdgeRunners } from '../components/EdgeRunners';
-import { ExternalConnections, IdentityConnections } from '../components/ExternalConnections';
+import { ExternalConnections } from '../components/ExternalConnections';
 import { ServiceNowConnection } from '../components/ServiceNowConnection';
 
 // GRC connectors (BP 10): ServiceNow gets risks, CIs, control tests, indicator results, issues and
@@ -27,7 +27,6 @@ export function Connectors() {
       {adding && <NewConnector onDone={() => (setAdding(false), void reload())} onCancel={() => setAdding(false)} />}
       <div className="mb-4"><ServiceNowConnection /></div>
       <div className="mb-4"><ExternalConnections agentId={null} /></div>
-      <div className="mb-4"><IdentityConnections /></div>
       <div className="mb-4"><EdgeRunners /></div>
       {items.length ? (
         <div className="grid gap-4 xl:grid-cols-[320px_1fr]">

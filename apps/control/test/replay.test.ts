@@ -7,7 +7,7 @@ import { dropTestDatabase } from './database';
 
 // Detector pins and Replay (DA 3 "pinned and hashed", DA 6 mechanism 3, SGC-SELF-001 / 007).
 process.env.SIGNET_DATA_DIR = mkdtempSync(join(tmpdir(), 'signet-replay-'));
-process.env.SIGNET_DB_SCHEMA = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+process.env.MONGODB_DATABASE = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
 const core = await import('@signet/core');
 const detectors = await import('../src/detectors');
 const replay = await import('../src/replay');

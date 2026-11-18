@@ -66,8 +66,8 @@ Demo leakage and gaps found:
 
 | Item | State | Evidence |
 | --- | --- | --- |
-| Single-administrator mode restored (lost in the PostgreSQL merge) | implemented, tested | workflow test: one admin confirms a T2 tier and one approval fills owner, security and risk; ledger marks `waived_single_operator` |
-| Local PostgreSQL without TLS | implemented, tested | only `localhost` with `sslmode=disable`; remote hosts always `verify-full` |
+| Single-administrator mode | implemented, tested | workflow test: one admin confirms a T2 tier and one approval fills owner, security and risk; ledger marks `waived_single_operator` |
+| Local MongoDB replica set | implemented, tested | binds to `127.0.0.1`; transactions, persistence and signed ledger checks use MongoDB |
 | A1 deployment credential as API key | implemented, tested | connection test: `sdc_…` in `Authorization` or `api-key` reaches a tool through a live gateway; forged key 401 |
 | A2 `GET /v1/models` | implemented, tested | returns the tenant's one model |
 | A3 Vercel connector (projects, AI detection, set env, remove old key, redeploy) | implemented, tested against a stand-in | platforms test; not yet run against a real Vercel account |
@@ -82,7 +82,7 @@ Demo leakage and gaps found:
 | C4 quality: sampled LLM-judge scores | implemented, type-checked | off by default (`SIGNET_EVAL_SAMPLE_RATE`); not run against the live model |
 | D: ServiceNow agents into AICT tables | implemented, type-checked | used when the self-test finds AICT; not run against a real instance |
 
-Awaiting setup: `SIGNET_GATEWAY_PUBLIC_URL` on the deployed Signet; real platform credentials (Vercel token, AWS keys, Azure app, Google service account) for live checks; Cloud Run connect; scheduled usage sync (manual button today); e2e suites still target the pre-PostgreSQL stack.
+Awaiting setup: `SIGNET_GATEWAY_PUBLIC_URL` on the deployed Signet; real platform credentials (Vercel token, AWS keys, Azure app, Google service account) for live checks; Cloud Run connect; scheduled usage sync (manual button today); e2e database setup uses isolated MongoDB databases.
 
 ## Remaining items closed (2026-11-03)
 
@@ -92,9 +92,9 @@ Awaiting setup: `SIGNET_GATEWAY_PUBLIC_URL` on the deployed Signet; real platfor
 | Usage outside Signet: AWS CloudWatch (Bedrock per model), Azure Monitor (OpenAI/AI Services per account), Google Cloud Monitoring (Vertex per model) | implemented, tested against stand-ins | platforms test |
 | Scheduled usage sync (every 6 h, last 3 days; failures marked on the connection) | implemented, tested | local timer and Vercel maintenance job `platform-usage` |
 | C4 quality scoring against the live model | verified | e2e connectivity: gpt-oss judged a real answer (helpful 5, safe 5, on-policy 5) and the scores reached the ledger |
-| E2E suites on PostgreSQL (own schema per suite, dropped after) | verified | connectivity, gate-phase1, gate-phase2 all pass |
+| E2E suites on MongoDB (own database per suite, dropped after) | harness migrated; live IdP/cloud rerun pending | isolated database creation and cleanup use the MongoDB driver |
 | Fix: background jobs raced the control catalogue on a fresh database (foreign key error) | fixed | found by the e2e run |
 
-Running the e2e suites needs: `E2E_DATABASE_URL`, the Keycloak dev realm with test users, and `SIGNET_DEMO_OWNER_ID`, `SIGNET_DEMO_SECURITY_ID`, `SIGNET_DEMO_RISK_ID`, `SIGNET_DEMO_PLATFORM_ID`, `SIGNET_DEMO_PASSWORD`, `SIGNET_AUTOMATION_CLIENT_SECRET` (kept out of git on purpose).
+Running the e2e suites needs: `E2E_MONGODB_URL`, the Keycloak dev realm with test users, and `SIGNET_DEMO_OWNER_ID`, `SIGNET_DEMO_SECURITY_ID`, `SIGNET_DEMO_RISK_ID`, `SIGNET_DEMO_PLATFORM_ID`, `SIGNET_DEMO_PASSWORD`, `SIGNET_AUTOMATION_CLIENT_SECRET` (kept out of git on purpose).
 
 Still needing real accounts (code is done, only live confirmation is missing): Vercel token, AWS keys, Azure app registration, Google service account, Copilot Studio environment, OpenAI/Anthropic admin keys, a ServiceNow instance with AI Control Tower.

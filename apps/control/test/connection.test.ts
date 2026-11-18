@@ -11,7 +11,7 @@ import type { Principal } from '../src/rbac';
 
 const directory = mkdtempSync(join(tmpdir(), 'signet-connect-'));
 process.env.SIGNET_DATA_DIR = directory;
-process.env.SIGNET_DB_SCHEMA = 'test_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2, 10);
+process.env.MONGODB_DATABASE = 'test_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2, 10);
 process.env.SIGNET_TOOL_PRIVATE_DESTINATIONS = 'allow';
 
 async function listen(server: Server): Promise<number> {
@@ -236,7 +236,7 @@ test('OAuth and bootstrap identities reach a private API through a real outbound
   assert.equal((await fetch(`${controlUrl}/api/v1/connections/${rest.id}`, { headers: { cookie } })).status, 404);
   assert.equal((await fetch(`${controlUrl}/api/v1/connections`)).status, 401);
   } catch (error) {
-    context.diagnostic(logs.replaceAll(process.env.DATABASE_URL ?? 'not-configured', '[database URL redacted]'));
+    context.diagnostic(logs.replaceAll(process.env.MONGODB_URL ?? 'not-configured', '[database URL redacted]'));
     throw error;
   }
 });

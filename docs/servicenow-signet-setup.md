@@ -433,7 +433,7 @@ No working execution-history source was demonstrated. Incident lookup and summar
 
 ### Earlier local-runtime error: HTML returned instead of JSON
 
-Existing setup notes record `Unexpected token '<', "<!DOCTYPE ..." is not valid JSON`. A PostgreSQL `ECONNRESET` stopped the control process and the local service group; ngrok returned HTTP 502 HTML.
+If the console reports `Unexpected token '<', "<!DOCTYPE ..." is not valid JSON`, check whether ngrok returned HTTP 502 HTML because the control process stopped. Verify the local MongoDB replica set and inspect the control process error.
 
 Restoring `npm run dev` restored public `/healthz` to HTTP 200 JSON and protected API responses to JSON. The frontend helper also reports non-JSON status/content type more clearly. Permanent prevention of the database network reset was not established. If repeated, inspect database/network/process logs; regenerating OAuth credentials does not fix a stopped server.
 

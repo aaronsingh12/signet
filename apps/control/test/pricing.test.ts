@@ -7,7 +7,7 @@ import { decodeJwt } from '@signet/core';
 import { dropTestDatabase } from './database';
 
 process.env.SIGNET_DATA_DIR = mkdtempSync(join(tmpdir(), 'signet-pricing-'));
-process.env.SIGNET_DB_SCHEMA = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+process.env.MONGODB_DATABASE = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
 
 after(async () => {
   await dropTestDatabase();

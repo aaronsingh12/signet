@@ -7,7 +7,7 @@ import type { Principal } from '../src/rbac';
 import { dropTestDatabase } from './database';
 
 process.env.SIGNET_DATA_DIR = mkdtempSync(join(tmpdir(), 'signet-saved-client-'));
-process.env.SIGNET_DB_SCHEMA = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+process.env.MONGODB_DATABASE = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
 after(dropTestDatabase);
 
 test('saved clients survive repeated reads and concurrent creation, remain environment scoped, and change only on explicit regeneration', async () => {

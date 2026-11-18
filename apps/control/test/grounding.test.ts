@@ -8,7 +8,7 @@ import { dropTestDatabase } from './database';
 // DET-GROUND (DA 3 Tier 2): sampled answers are judged against their sources, the text is deleted once
 // judged, and an ungrounded answer is a finding for the owner only when the detector is active.
 process.env.SIGNET_DATA_DIR = mkdtempSync(join(tmpdir(), 'signet-ground-'));
-process.env.SIGNET_DB_SCHEMA = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+process.env.MONGODB_DATABASE = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
 const grounding = await import('../src/grounding');
 await import('../src/detectors'); // seeds DET-GROUND
 const registry = await import('../src/registry');

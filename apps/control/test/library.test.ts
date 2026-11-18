@@ -8,7 +8,7 @@ import { dropTestDatabase } from './database';
 // Library packs (BP 9.1, 9.4): versioned library, adopted automatically or after review, signed packs
 // imported offline only from trusted keys, every step in the ledger.
 process.env.SIGNET_DATA_DIR = mkdtempSync(join(tmpdir(), 'signet-library-'));
-process.env.SIGNET_DB_SCHEMA = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+process.env.MONGODB_DATABASE = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
 const core = await import('@signet/core');
 const controls = await import('../src/controls');
 const library = await import('../src/library');

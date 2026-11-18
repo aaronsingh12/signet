@@ -8,7 +8,7 @@ import { dropTestDatabase } from './database';
 // Audit packs (BP 9.6): signed per-framework exports with requirements, controls, inventory,
 // independence statement, activity, ledger roots and a framework-specific section.
 process.env.SIGNET_DATA_DIR = mkdtempSync(join(tmpdir(), 'signet-auditpack-'));
-process.env.SIGNET_DB_SCHEMA = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+process.env.MONGODB_DATABASE = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
 const controls = await import('../src/controls');
 const registry = await import('../src/registry');
 const workflow = await import('../src/workflow');

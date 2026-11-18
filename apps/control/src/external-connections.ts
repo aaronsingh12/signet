@@ -436,7 +436,6 @@ async function importExternalAgents(row: Row, records: ImportedRecord[], actor: 
   const deadline = Date.now() + 240000;
   const { config } = await storedOf(row);
   await tx(async () => {
-    await db.prepare("SET LOCAL statement_timeout = '30s'").run();
     for (const record of records) {
       if (Date.now() > deadline) throw new PolicyError('SYNC_TIMEOUT', 'Agent import exceeded its four-minute budget; narrow the provider scope and retry', 504);
       const prior = await db.prepare('SELECT agent_id FROM external_agent_mapping WHERE connection_id = ? AND external_id = ?').get(row.id, record.id);
@@ -491,7 +490,6 @@ export async function sync(id: string, actor: Principal): Promise<ExternalConnec
           if (!config.executions_mapping) throw invalid('Configure the documented execution response mapping before sync');
           const result = await readMappedRecords(row, 'executions', mapped.external_id, config.executions_mapping, actor);
           await tx(async () => {
-            await db.prepare("SET LOCAL statement_timeout = '30s'").run();
             for (const record of result.records) {
               if (Date.now() - startedAt > 240000) throw new PolicyError('SYNC_TIMEOUT', 'Execution persistence exceeded the sync budget', 504);
               await db.prepare('INSERT INTO external_observation (connection_id, external_agent_id, external_id, kind, metadata, observed_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(connection_id, external_agent_id, kind, external_id) DO UPDATE SET metadata = excluded.metadata, observed_at = excluded.observed_at').run(id, mapped.external_id, record.id, 'execution', JSON.stringify(normalizeExecution(record)), nowIso());
@@ -585,7 +583,7 @@ export async function receiveWebhook(id: string, raw: Buffer, timestamp: string,
       await db.prepare('INSERT INTO external_operation_run (id, tenant_id, connection_id, operation, outcome, actor, started_at, completed_at, correlation_id, record_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(newId('evt'), tenant.id, id, 'webhook', 'succeeded', 'svc:connection-webhook', nowIso(), nowIso(), eventId, records.length);
     });
   } catch (error) {
-    if (error instanceof Error && 'code' in error && error.code === '23505') throw new PolicyError('WEBHOOK_REPLAY', 'Webhook event ID has already been processed', 409);
+    if (error instanceof Error && 'code' in error && error.code === 11000) throw new PolicyError('WEBHOOK_REPLAY', 'Webhook event ID has already been processed', 409);
     throw error;
   }
   return { accepted: true, records: records.length };

@@ -31,9 +31,9 @@ export async function eraseAgentLedger(agentId: string, identifiers: string[]): 
       : { ...original, data: redacted as Record<string, Json> };
     replacements.push({ ...replacement, erasure_proof: signJws({ format: 'signet-ledger-erasure/1', record: replacement }, keys.ledger, 'signet-erasure') });
   }
-  (await db.exec('ALTER TABLE ledger_record DISABLE TRIGGER ledger_no_update'));
-  const update = db.prepare('UPDATE ledger_record SET record_id = ?, kind = ?, ts = ?, agent_id = ?, cert_id = ?, data = ?, erasure_proof = ? WHERE seq = ?');
-  for (const record of replacements) (await update.run(record.record_id, record.kind, record.ts, record.agent_id, record.cert_id, JSON.stringify(record.data), record.erasure_proof!, record.seq));
-  (await db.exec('ALTER TABLE ledger_record ENABLE TRIGGER ledger_no_update'));
+  await db.editErasedLedger(async () => {
+    const update = db.prepare('UPDATE ledger_record SET record_id = ?, kind = ?, ts = ?, agent_id = ?, cert_id = ?, data = ?, erasure_proof = ? WHERE seq = ?');
+    for (const record of replacements) (await update.run(record.record_id, record.kind, record.ts, record.agent_id, record.cert_id, JSON.stringify(record.data), record.erasure_proof!, record.seq));
+  });
   return { records: replacements.length, days: [...new Set(replacements.map((record) => record.ts.slice(0, 10)))] };
 }

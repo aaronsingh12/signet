@@ -44,12 +44,12 @@ export async function requireIdentityProvider() {
   }
 }
 
-// The suites need a PostgreSQL database (each suite gets its own schema, dropped afterwards) and the
+// The suites need a MongoDB replica set (each suite gets its own database, dropped afterwards) and the
 // Keycloak dev realm: they exercise separation of duties between real people, so the stack runs with
 // OIDC sign-in and single-operator mode off, and with quality scoring on every answer (C4, live model).
 function databaseUrl(): string {
-  const url = process.env.E2E_DATABASE_URL ?? process.env.DATABASE_URL;
-  if (!url) throw new Error('set E2E_DATABASE_URL (or DATABASE_URL) to a PostgreSQL database for the e2e suites, e.g. postgres://postgres:postgres@localhost:5432/signet?sslmode=disable');
+  const url = process.env.E2E_MONGODB_URL ?? process.env.MONGODB_URL;
+  if (!url) throw new Error('Set E2E_MONGODB_URL (or MONGODB_URL) to a MongoDB replica set URI');
   return url;
 }
 
@@ -59,11 +59,11 @@ export async function startStack(label: string): Promise<Stack> {
   const dataDir = mkdtempSync(join(tmpdir(), `signet-e2e-${label}-`));
   const stackEnv: Record<string, string> = {
     SIGNET_DATA_DIR: dataDir,
-    DATABASE_URL: database,
+    MONGODB_URL: database,
     SIGNET_AUTH_MODE: 'oidc',
     SIGNET_SINGLE_OPERATOR: 'false',
     SIGNET_EVAL_SAMPLE_RATE: '1',
-    SIGNET_DB_SCHEMA: `test_${Date.now().toString(36)}_${randomBytes(4).toString('hex')}`,
+    MONGODB_DATABASE: `test_${Date.now().toString(36)}_${randomBytes(4).toString('hex')}`,
     SIGNET_CONTROL_PORT: String(PORTS.control),
     SIGNET_CONTROL_URL: `http://localhost:${PORTS.control}`,
     SIGNET_GATEWAY_URL: `http://localhost:${PORTS.gw1}`,
@@ -93,7 +93,7 @@ export async function startStack(label: string): Promise<Stack> {
     await new Promise((r) => setTimeout(r, 500));
     if (!keepData) {
       rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
-      await dropSchema(database, stackEnv.SIGNET_DB_SCHEMA!);
+      await dropDatabase(database, stackEnv.MONGODB_DATABASE!);
     }
   };
   try {
@@ -130,14 +130,11 @@ export async function startStack(label: string): Promise<Stack> {
   } };
 }
 
-// Remove only this suite's isolated schema (test_…), never public.
-async function dropSchema(url: string, schema: string) {
-  if (!/^test_[a-z0-9_]+$/.test(schema)) return;
-  const { default: pg } = await import('pg');
-  const u = new URL(url);
-  const local = ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname) && u.searchParams.get('sslmode') === 'disable';
-  if (!local) u.searchParams.set('sslmode', 'verify-full');
-  const client = new pg.Client({ connectionString: u.toString() });
+// Remove only this suite's isolated database, never the configured application database.
+async function dropDatabase(url: string, name: string) {
+  if (!/^test_[a-z0-9_]+$/.test(name)) throw new Error('E2E cleanup refused: expected a test_ MongoDB database');
+  const { MongoClient } = await import('mongodb');
+  const client = new MongoClient(url);
   await client.connect();
-  try { await client.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`); } finally { await client.end(); }
+  try { await client.db(name).dropDatabase(); } finally { await client.close(); }
 }

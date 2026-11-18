@@ -7,7 +7,7 @@ import { dropTestDatabase } from './database';
 
 // SCIM 2.0 provisioning (BP 11.4) and owner leavers (BP 6 Stage 7).
 process.env.SIGNET_DATA_DIR = mkdtempSync(join(tmpdir(), 'signet-scim-'));
-process.env.SIGNET_DB_SCHEMA = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+process.env.MONGODB_DATABASE = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
 process.env.SIGNET_SINGLE_OPERATOR = 'false';
 const { db } = await import('../src/db');
 const scim = await import('../src/scim');

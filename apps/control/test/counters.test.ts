@@ -7,7 +7,7 @@ import { dropTestDatabase } from './database';
 
 // Counters shared across instances: limits, sign-in throttling and stale gateway cleanup.
 process.env.SIGNET_DATA_DIR = mkdtempSync(join(tmpdir(), 'signet-counters-'));
-process.env.SIGNET_DB_SCHEMA = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+process.env.MONGODB_DATABASE = 'test_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
 
 after(async () => {
   await dropTestDatabase();

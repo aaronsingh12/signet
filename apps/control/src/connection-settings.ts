@@ -21,7 +21,7 @@ function address(value: string, field: string): string {
   return url.origin;
 }
 
-/** Read each request from PostgreSQL so hosted instances immediately use UI changes. Existing environment configuration remains valid until settings are saved. */
+/** Read each request from MongoDB so hosted instances immediately use UI changes. Existing environment configuration remains valid until settings are saved. */
 export async function connectionAddresses(): Promise<ConnectionAddresses> {
   const saved = await db.prepare('SELECT control_url, gateway_url FROM connection_settings WHERE tenant_id = ?').get(tenant.id) as { control_url: string; gateway_url: string } | undefined;
   if (saved) return { ...saved, control_url_source: 'database', gateway_url_source: 'database' };

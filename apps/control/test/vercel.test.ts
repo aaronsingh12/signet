@@ -8,10 +8,10 @@ import { dropTestDatabase } from './database';
 
 const directory = mkdtempSync(join(tmpdir(), 'signet-vercel-'));
 process.env.SIGNET_DATA_DIR = directory;
-process.env.SIGNET_DB_SCHEMA = 'test_' + Date.now().toString(36) + '_' + randomBytes(4).toString('hex');
+process.env.MONGODB_DATABASE = 'test_' + Date.now().toString(36) + '_' + randomBytes(4).toString('hex');
 after(dropTestDatabase);
 
-test('Vercel uses stable signing keys and stores signed evidence and erasures in PostgreSQL', async () => {
+test('Vercel uses stable signing keys and stores signed evidence and erasures in MongoDB', async () => {
   const { generateSigningKey, GENESIS_HASH, hashRecord } = await import('@signet/core');
   process.env.SIGNET_SIGNING_KEYS = JSON.stringify({ ca: generateSigningKey('cloud-ca'), token: generateSigningKey('cloud-token'), ledger: generateSigningKey('cloud-ledger') });
   process.env.VERCEL = '1';

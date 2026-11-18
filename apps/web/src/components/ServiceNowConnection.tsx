@@ -3,6 +3,7 @@ import { ArrowUpRight, Link2, RefreshCw, ServerCog } from 'lucide-react';
 import { Card, ErrorNote, Modal } from './ui';
 import { EditServiceNowSetup, ServiceNowSetup } from './ServiceNowSetup';
 import { ConnectionIcon } from './ConnectionIcon';
+import { ServiceNowAgentCards } from './PlatformAgentCards';
 import { ServiceNowAgents } from './ServiceNowAgents';
 import { api, useApi } from '../lib/api';
 import { useCan } from '../lib/auth';
@@ -32,7 +33,7 @@ export function ServiceNowConnection() {
   const [adding, setAdding] = useState(false);
   return <div className="space-y-4">
     <Card>
-      <h2 className="text-base font-semibold">ServiceNow — All connections{data ? ` (${data.items.length})` : ''}</h2>
+      <h2 className="text-base font-semibold">ServiceNow connections and AI agents</h2>
       {canManage ? <button type="button" data-testid="servicenow-add-connection" className="btn-primary mt-3" onClick={() => setAdding(true)}>Add ServiceNow AI Agents</button>
         : <p className="mt-2 text-sm text-ink-3">A Tenant Admin can manage these connections.</p>}
       {loading && <p role="status">Loading connections…</p>}
@@ -41,6 +42,7 @@ export function ServiceNowConnection() {
     </Card>
     <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,220px))] gap-4">
       {data?.items.map(connection => <SavedServiceNowConnection key={connection.id} connection={connection} onChanged={() => { void reload(); }} />)}
+      <ServiceNowAgentCards />
     </div>
     {adding && <Modal title="Add ServiceNow AI Agents" onClose={() => setAdding(false)}>
       <ServiceNowSetup onSaved={() => { void reload(); }} onCancel={() => setAdding(false)} />
