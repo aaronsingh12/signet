@@ -50,7 +50,7 @@ Demo leakage and gaps found:
 | A12 Bypass detection | implemented, verified | e2e scenario 7: names reported, values never sent, Discovery finding marked detected-not-enforced |
 | A13 Log-based discovery | implemented, verified | e2e scenario 7: 5 records, 3 AI matches, gateway egress skipped |
 | Console: Propose type, Connection tab, Discovery, Command Center | implemented, type-checked, builds | not yet clicked through in a browser |
-| Docs | implemented | docs/connect-agents.md, docs/egress.md, sdk/python/README.md, .env.example, OpenAPI |
+| Docs | implemented | docs/connect-agents.md, docs/egress.md, sdk/python/README.md, OpenAPI |
 
 ## Awaiting external setup
 

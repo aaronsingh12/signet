@@ -21,6 +21,10 @@ export async function api<T = any>(path: string, init?: { method?: string; body?
     credentials: 'same-origin',
   });
   const text = await r.text();
+  const contentType = r.headers.get('content-type') ?? '';
+  if (text && !contentType.includes('application/json') && !contentType.includes('+json')) {
+    throw new ApiError(r.status, 'API_RESPONSE_FORMAT', `Signet API /api/v1${path} returned HTTP ${r.status} with ${contentType || 'no Content-Type'} instead of JSON. Check that the Signet control server and public tunnel are running.`);
+  }
   const json = text ? JSON.parse(text) : {};
   if (!r.ok) {
     if (r.status === 401 && !location.pathname.startsWith('/login')) location.assign(`/login?return_to=${encodeURIComponent(location.pathname + location.search)}`);

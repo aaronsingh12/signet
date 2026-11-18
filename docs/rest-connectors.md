@@ -118,7 +118,7 @@ Automated tests use isolated PostgreSQL schemas, mocked provider HTTP servers, a
 
 ## Implementation file map
 
-- [.env.example](../.env.example)
+- Configure environment variables in the repository root `.env`.
 - [Dockerfile](../Dockerfile)
 - [Dockerfile.gateway](../Dockerfile.gateway)
 - [Dockerfile.vercel](../Dockerfile.vercel)

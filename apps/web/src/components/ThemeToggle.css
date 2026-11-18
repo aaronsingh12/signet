@@ -1,0 +1,74 @@
+.theme-flight {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  pointer-events: none;
+  overflow: hidden;
+  --flight-surface: #0f1726;
+  color: #a5b4fc;
+}
+
+.theme-flight--light {
+  --flight-surface: #f1f5f9;
+  color: #d89a34;
+}
+
+.theme-flight-sweep {
+  position: absolute;
+  inset: 0;
+  background: var(--flight-surface);
+}
+
+.theme-flight-sweep--cover {
+  animation: theme-sky-cover 2100ms cubic-bezier(.4, 0, .2, 1) both;
+}
+
+.theme-flight-sweep--reveal {
+  animation: theme-sky-reveal 800ms ease-out both;
+}
+
+.theme-flight-bird {
+  position: absolute;
+  bottom: -100px;
+  left: -100px;
+  width: clamp(64px, 8vw, 112px);
+  filter: drop-shadow(0 5px 12px #0003);
+  animation: theme-bird-flight 2400ms linear both;
+}
+
+.theme-flight-bird--0 { --bird-x: -8vw; --bird-y: -6vh; }
+.theme-flight-bird--1 { --bird-x: 0vw; --bird-y: 0vh; animation-delay: 70ms; }
+.theme-flight-bird--2 { --bird-x: 8vw; --bird-y: 6vh; animation-delay: 140ms; }
+.theme-flight-bird--3 { --bird-x: -16vw; --bird-y: -12vh; animation-delay: 210ms; }
+.theme-flight-bird--4 { --bird-x: 16vw; --bird-y: 12vh; animation-delay: 240ms; }
+.theme-flight-bird svg { width: 100%; height: auto; transform: rotate(45deg); }
+.theme-flight-wing { transform-origin: 40px 32px; animation: theme-wingbeat 360ms ease-in-out infinite alternate; }
+
+@keyframes theme-sky-cover {
+  from { clip-path: circle(0 at 0 100%); }
+  to { clip-path: circle(150vmax at 0 100%); }
+}
+
+@keyframes theme-sky-reveal {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes theme-bird-flight {
+  0% { transform: translate(0, 0) scale(.75); opacity: 0; }
+  10% { opacity: 1; }
+  35% { transform: translate(calc(35vw + var(--bird-x)), calc(-42vh + var(--bird-y))) scale(1); }
+  65% { transform: translate(calc(70vw + var(--bird-x)), calc(-70vh + var(--bird-y))) scale(1.05); }
+  90% { opacity: 1; }
+  100% { transform: translate(calc(115vw + var(--bird-x)), calc(-115vh + var(--bird-y))) scale(.85); opacity: 0; }
+}
+
+@keyframes theme-wingbeat {
+  from { transform: scaleY(1); }
+  to { transform: scaleY(.25); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .theme-flight-bird { display: none; }
+  .theme-flight-sweep { animation-duration: 1ms; }
+}

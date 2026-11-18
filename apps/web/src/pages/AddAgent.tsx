@@ -7,7 +7,8 @@ import { RestConnectionWizard } from '../components/RestConnectionWizard';
 import { newConnectionDraft } from '../components/ExternalConnections';
 import { ConnectionIntake, type IntakeConnection } from '../components/ConnectionIntake';
 import type { ConnectionMethod } from '@signet/core/types';
-import { ErrorNote, TierChip } from '../components/ui';
+import { ErrorNote, Modal, TierChip } from '../components/ui';
+import { ServiceNowSetup } from '../components/ServiceNowSetup';
 import { ApiError, api, useApi } from '../lib/api';
 import { useCan, useMe } from '../lib/auth';
 import { Plugins } from './Plugins';
@@ -104,6 +105,7 @@ export function AddAgentFlow() {
   const { data: templates } = useApi<{ items: TemplateOption[] }>('/templates');
   const useTemplate = (t: TemplateOption) => set({ template: t.id, autonomy: t.autonomy, users: t.users_affected, decisions: t.decisions_about_individuals, data: t.data_touched, plannedTools: t.suggested_actions.map((a) => `${a.name} (${a.impact})`).join(', ') });
   const [step, setStep] = useState(0);
+  const [addingServiceNow, setAddingServiceNow] = useState(false);
   const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
@@ -282,14 +284,23 @@ export function AddAgentFlow() {
           {error && <div className="mt-5"><ErrorNote error={error} /></div>}
           {actionsRow}
         </div>
-        <aside className="flow-why">
+        <aside className="space-y-4">
+          <div className="flow-why">
           {step === 0 && <><h3>Why we ask</h3><p>Every agent needs a clear job and a named person responsible. If something goes wrong, Signet knows who to contact.</p></>}
           {step === 1 && <><h3>Connect first</h3><p>Enter your provider's credentials here. Signet verifies the API before asking safety questions. Runtime access is enabled after approval.</p></>}
           {step === 2 && <><h3>Connection ready</h3><p>Now tell us who the agent affects and what data it can use. These answers decide the safety review.</p></>}
           {step === 3 && <><h3>Review, then deploy</h3><p>Your existing risk checks, assessments and approval requirements still apply. Deployment settings follow approval.</p></>}
+          </div>
+          {step === 0 && can('tenant.admin') && <div className="flow-why">
+            <button type="button" data-testid="add-servicenow-ai-agents" className="btn-primary w-full" onClick={() => setAddingServiceNow(true)}>Add ServiceNow AI Agents</button>
+            <Link data-testid="servicenow-connections-list" className="btn-ghost mt-3 w-full justify-center" to="/settings/systems">All connections</Link>
+          </div>}
         </aside>
       </div>
       {addingLlm && <AgentLlmPanel onClose={() => setAddingLlm(false)} onSaved={(model) => { set({ model }); setAddingLlm(false); void reloadCatalogue(); }} />}
+      {addingServiceNow && <Modal title="Add ServiceNow AI Agents" onClose={() => setAddingServiceNow(false)}>
+        <ServiceNowSetup onSaved={() => {}} onCancel={() => setAddingServiceNow(false)} />
+      </Modal>}
       {adding && <AddActionPanel onClose={() => setAdding(false)} onAdd={(a) => { set({ actions: [...d.actions.filter((x) => `${x.server}.${x.name}` !== `${a.server}.${a.name}`), a] }); setAdding(false); }} />}
     </FlowFrame>
   );
