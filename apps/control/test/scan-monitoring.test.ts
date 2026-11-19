@@ -62,6 +62,18 @@ test('verified idle workloads enter monitoring without promoting rollout, and sc
   assert.equal(older.next_cursor, null);
   assert.ok(!JSON.stringify([first, older]).includes('PRIVATE'));
   assert.deepEqual(Object.keys(first.items[0]!).sort(), ['record_id', 'scanned_at', 'result', 'input_check', 'output_check'].sort());
+  const tool = await append({ kind: 'transaction', agent_id: setup.agent_id, cert_id: lc.data.cert_id, data: { action_type: 'tool_call', outcome: 'success', policy_decision: 'allow', args: { text: 'PRIVATE TOOL INPUT' }, response: 'PRIVATE TOOL RESPONSE' } });
+  await append({ kind: 'transaction', agent_id: setup.agent_id, data: { action_type: 'detector_score', policy_decision: 'none' } });
+  const tools = await scanHistory(setup.agent_id, null, 1);
+  assert.equal(tools.items[0]?.record_id, tool.record_id);
+  assert.equal(tools.items[0]?.result, 'completed');
+  assert.equal(tools.items[0]?.input_check, 'not_recorded');
+  assert.equal(tools.items[0]?.output_check, 'not_recorded');
+  assert.ok(tools.next_cursor);
+  const chats = await scanHistory(setup.agent_id, tools.next_cursor, 25);
+  assert.deepEqual(chats.items.map(scan => scan.record_id), [first.items[0]!.record_id, historical.record_id]);
+  assert.equal(chats.next_cursor, null);
+  assert.ok(!JSON.stringify([tools, chats]).includes('PRIVATE'));
   assert.equal((await status(setup.agent_id)).state, 'connected');
   await workflow.advanceDeploy(lc.id, admin, { to: 'enforce', dev_override: true, reason: 'Verify rollout promotion remains available during monitoring in the isolated integration test' });
   assert.equal((await workflow.get(lc.id)).stage, 'monitor');

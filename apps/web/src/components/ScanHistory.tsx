@@ -6,7 +6,7 @@ import { Card, Empty, ErrorNote, Mono, Pill } from './ui';
 const CHECK_LABELS: Record<ScanCheck, string> = { passed: 'Passed', blocked: 'Blocked', not_run: 'Not run', not_recorded: 'Not recorded' };
 const RESULT_LABELS: Record<ScanHistoryResponse['items'][number]['result'], string> = { completed: 'Completed', blocked: 'Blocked by Signet', review: 'Needs review', failed: 'Service error' };
 
-/** Keep a paginated, automatically refreshed view of chat checks without fetching chat content. */
+/** Keep a paginated, automatically refreshed view of gateway checks without fetching chat content. */
 export function ScanHistory({ agentId }: { agentId: string }) {
   const [cursor, setCursor] = useState<string | null>(null);
   const path = `/agents/${agentId}/scans?limit=25${cursor === null ? '' : `&cursor=${encodeURIComponent(cursor)}`}`;
@@ -33,10 +33,10 @@ export function ScanHistory({ agentId }: { agentId: string }) {
   return (
     <div className="mt-6" data-testid="scan-history">
       <Card title="Scan history" action={<span className="text-xs text-ink-3">Updates every 10 seconds</span>}>
-        <p className="mb-3 text-xs text-ink-3">Chat checks with date and time. Message text, AI replies and user identities are never displayed here. Times use {Intl.DateTimeFormat().resolvedOptions().timeZone}.</p>
+        <p className="mb-3 text-xs text-ink-3">Gateway chat and tool checks with date and time. Request content, responses and user identities are never displayed here. Times use {Intl.DateTimeFormat().resolvedOptions().timeZone}.</p>
         <ErrorNote error={failure} />
         {!data && !failure && <p role="status" className="text-sm text-ink-3">Loading scan history...</p>}
-        {data && !data.items.length && <Empty>No chat scans recorded yet. The first gateway request will appear here.</Empty>}
+        {data && !data.items.length && <Empty>No gateway checks recorded yet. The first chat or tool request through Signet will appear here.</Empty>}
         {data && data.items.length > 0 && <div className="overflow-x-auto"><table className="w-full" data-testid="scan-history-table">
           <thead><tr>{['Date and time', 'Result', 'Input check', 'Reply check', 'Reference'].map((label) => <th key={label} className="th">{label}</th>)}</tr></thead>
           <tbody>{data.items.map((scan) => <tr key={scan.record_id} data-testid="scan-history-row">

@@ -17,7 +17,7 @@ export async function scanHistory(agentRef: string, beforeSeq: number | null, li
          WHEN data::jsonb#>>'{input_safety,category}' IS NOT NULL AND data::jsonb#>>'{input_safety,category}' <> 'allow' THEN 'not_run'
          ELSE 'not_recorded' END AS output_check
     FROM ledger_record WHERE tenant_id = ? AND agent_id = ? AND kind = 'transaction'
-      AND data::jsonb->>'action_type' = 'llm_call' ${beforeSeq === null ? '' : 'AND seq < ?'}
+      AND data::jsonb->>'action_type' IN ('llm_call', 'tool_call') ${beforeSeq === null ? '' : 'AND seq < ?'}
     ORDER BY seq DESC LIMIT ?`).all(tenant.id, agent.id, ...(beforeSeq === null ? [] : [beforeSeq]), limit + 1);
   const rows = stored.map((row): ScanEntry & { seq: number } => {
     const result = SCAN_RESULTS.find((value) => value === row.result);

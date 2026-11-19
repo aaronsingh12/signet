@@ -3,7 +3,7 @@ import { ArrowUpRight, Link2, RefreshCw, ServerCog } from 'lucide-react';
 import { Card, ErrorNote, Modal } from './ui';
 import { EditServiceNowSetup, ServiceNowSetup } from './ServiceNowSetup';
 import { ConnectionIcon } from './ConnectionIcon';
-import { ServiceNowAgentCards } from './PlatformAgentCards';
+import { UnlinkedServiceNowAgentCards } from './PlatformAgentCards';
 import { ServiceNowAgents } from './ServiceNowAgents';
 import { api, useApi } from '../lib/api';
 import { useCan } from '../lib/auth';
@@ -42,7 +42,7 @@ export function ServiceNowConnection() {
     </Card>
     <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,220px))] gap-4">
       {data?.items.map(connection => <SavedServiceNowConnection key={connection.id} connection={connection} onChanged={() => { void reload(); }} />)}
-      <ServiceNowAgentCards />
+      <UnlinkedServiceNowAgentCards />
     </div>
     {adding && <Modal title="Add ServiceNow AI Agents" onClose={() => setAdding(false)}>
       <ServiceNowSetup onSaved={() => { void reload(); }} onCancel={() => setAdding(false)} />

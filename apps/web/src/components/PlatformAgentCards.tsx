@@ -4,12 +4,13 @@ import { agentState, useAgentAnalytics, type AgentAnalytics } from '../lib/analy
 import { Card, ErrorNote } from './ui';
 import { ConnectionIcon } from './ConnectionIcon';
 
-export function ServiceNowAgentCards() {
+export function UnlinkedServiceNowAgentCards() {
   const { data, error, loading } = useAgentAnalytics();
+  const agents = data?.agents.filter(agent => agent.servicenow !== null && !agent.servicenow.linked);
   return <>
     <ErrorNote error={error} />
     {loading && !data && <p role="status">Loading ServiceNow agents...</p>}
-    {data && <AgentCards agents={data.agents.filter(agent => agent.servicenow !== null)} />}
+    {agents && agents.length > 0 && <AgentCards agents={agents} />}
   </>;
 }
 
