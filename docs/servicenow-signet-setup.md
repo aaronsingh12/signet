@@ -1,485 +1,666 @@
-# ServiceNow ko Signet se connect karna: easy step-by-step guide
+﻿# ServiceNow AI agent ko Signet se connect karna
 
-Ye guide existing ServiceNow AI agent ke MCP tool calls Signet gateway se route karne ke liye hai. UI labels instance/release aur permissions ke according thode alag ho sakte hain. Instructions screenshots aur repository ke implemented flow par based hain.
+Easy Hinglish guide: basics, complete connection steps, real incident test aur faced errors. UI labels ServiceNow release aur permissions ke according thode alag ho sakte hain.
 
-## 1. Pehle samjho: kya connect ho raha hai?
+- [Part A - Basics aur preparation](#part-a---basics-aur-preparation)
+- [Part B - Complete connection steps](#part-b---complete-connection-steps)
+- [Part C - Pehle try kiya manual connection path](#part-c---pehle-try-kiya-manual-connection-path)
+- [Part D - Faced errors aur resolutions](#part-d---faced-errors-aur-resolutions)
+- [Part E - Final verification checklist](#part-e---final-verification-checklist)
 
-Do connections bante hain:
+## Current result
 
-| Direction | Kaam | Credentials kaun deta hai? |
+| Check | Evidence |
+| --- | --- |
+| Signet -> ServiceNow connection | OAuth Authorized; two incident tools discovered |
+| Editable agent | Protected original ki copy banayi gayi |
+| Copy onboarding | Copy ki sys_id linked; Signet approval aur credentials configure hue |
+| Control Tower | Copy agent aur pehle gateway asset ke Managed/Deployed screenshots mile |
+| Direct OAuth MCP registration | `Navin` record Authenticate hua; warning hati aur Re-authenticate button aaya |
+| Agent mein tools | Incident summarization tool aur input definition load hue |
+| ServiceNow real test | `INC0010012` summarization Completed; result mein `success: True` |
+| Signet execution evidence | Same call ka final Activity screenshot abhi supplied nahi; verification baaki |
+| Execution-history monitoring | Separate source ka successful sync verify nahi hua |
+
+**ServiceNow tool test successful hai. Full gateway coverage ka final proof correct agent/action/route ki Signet Activity entry hai.**
+
+# Part A - Basics aur preparation
+
+## A1. Kya connect ho raha hai?
+
+```text
+ServiceNow AI agent (Copy)
+    -> Signet gateway
+    -> ServiceNow Incident MCP Server
+    -> Tool result
+```
+
+Do alag OAuth connections chahiye:
+
+| Connection | Kaam | Client ID/Secret kaun deta hai? |
 | --- | --- | --- |
-| Signet → ServiceNow | ServiceNow MCP tools discover aur access karna | ServiceNow |
-| ServiceNow AI agent → Signet → ServiceNow MCP | Agent ki routed tool calls par Signet policy/evidence lagana | Signet |
+| Signet -> ServiceNow | Upstream MCP tools discover/access karna | ServiceNow |
+| ServiceNow -> Signet | Agent ki routed requests authenticate karna | Signet |
 
-Isliye do alag OAuth configurations chahiye. Pehla `Nav Test` record doosre outbound OAuth record ka replacement nahi hai.
+Pehla `Nav Test` OAuth record doosre connection ka replacement nahi hai. Credentials interchange mat karo.
 
-Simple terms:
+## A2. Simple terms
 
-- **MCP server:** tools provide karta hai, jaise incident lookup.
-- **AI agent:** tools choose karke kaam karta hai.
-- **sys_id:** ServiceNow record ki 32-character identity. Agent link karte waqt AI agent ka ID chahiye, MCP server ka nahi.
-- **Gateway alias:** Signet mein registered route ka naam, jaise `servicenow-incidents`.
-- **Action name:** tool ka exact technical name, jaise `look_up_incident_records`.
-- **Connection alias:** ServiceNow mein URL aur credential ko jodne wala record.
+| Term | Meaning |
+| --- | --- |
+| MCP server | Tools provide karne wala endpoint |
+| AI agent | Instructions follow karke tools chalane wala agent |
+| sys_id | ServiceNow record ki 32-character identity |
+| Gateway tool alias | Signet route ka naam, jaise `servicenow-incidents` |
+| Action name | Exact technical tool name, jaise `incident_summarization` |
+| Connection alias | ServiceNow record jo connection aur credential ko reference karta hai |
+| Authorization URL | Browser login/consent shuru karne ka endpoint |
+| Token URL | Code ya credentials exchange karke access token lene ka endpoint |
+| Callback / Redirect URL | OAuth ke baad browser jahan wapas aata hai |
+| PKCE S256 | Authorization aur token exchange ko matching verifier se bind karta hai |
+| Supervised | Tool execution se pehle approval maangta hai |
 
-## 2. Is setup ki values aur current status
+AI agent, MCP server aur execution ke sys_id alag hain. Signet linking mein **AI agent** ka ID chahiye.
+
+## A3. Is setup ki values
 
 | Item | Value |
 | --- | --- |
 | ServiceNow instance | `https://techsnitchpvtltddemo2.service-now.com` |
-| ServiceNow MCP server | `Incident MCP Server` |
-| Upstream MCP URL | `https://techsnitchpvtltddemo2.service-now.com/sncapps/mcp-server/mcp/incident_mcp_server` |
+| Confirmed public Signet origin | `https://festive-dealt-talisman.ngrok-free.dev` |
+| Upstream server | `Incident MCP Server` |
+| Upstream URL | `https://techsnitchpvtltddemo2.service-now.com/sncapps/mcp-server/mcp/incident_mcp_server` |
 | Signet gateway alias | `servicenow-incidents` |
-| ServiceNow outbound OAuth provider | `Signet Incident OAuth` |
-| OAuth credential | `Signet Incident OAuth Credential` |
-| ServiceNow connection alias | `Signet_Incident_Gateway` |
-| HTTP connection | `Signet Incident HTTP Connection` |
-| ServiceNow client-side MCP registration | `Signet Incident Gateway` |
+| Signet registered tool | `mcp://servicenow-incidents` |
+| Protected original | `Incident context AI agent` |
+| Previously linked original sys_id | `ff52e1f12bd3f6100171f8014391bf98` |
+| Editable copy | `Incident context AI agent (Copy)` |
+| Copy sys_id | `6dfcea3e0f2457507e34bec300d1b216` |
+| Successful direct OAuth MCP record | `Navin` |
+| Test incident | `INC0010012` |
 
-**Current verified state:** upstream OAuth/discovery working; two incident tools discovered; Incident context AI agent manually linked; Signet approval completed; outbound provider, credential, HTTP connection and MCP registration created; Control Tower record shows **Deployed**.
+`<PUBLIC_SIGNET_URL>` neeche current public Signet origin ka placeholder hai. Is setup mein festive ngrok address use hua. Form mein actual URL paste karo, angle brackets nahi.
 
-**Current remaining work:** the protected original was copied as **Incident context AI agent (Copy)**, sys_id `6dfcea3e0f2457507e34bec300d1b216`. The copy is editable, linked/approved in Signet, and shown Managed/Deployed in Control Tower. Its MCP picker still reports **There are no tools from this MCP server**. The exact discovery failure remains unconfirmed; real governed execution and activity monitoring are not yet verified.
+## A4. URL reference
 
-Latest screenshot has a different public hostname and selected alias `mcp://signet-demo`. Its association with this incident server is not confirmed. Do not assume it is the same route.
+| Purpose | URL |
+| --- | --- |
+| Public Signet origin | `<PUBLIC_SIGNET_URL>` |
+| ServiceNow-issued inbound OAuth callback | `<PUBLIC_SIGNET_URL>/api/v1/plugins/servicenow/callback` |
+| ServiceNow agent ke liye Signet MCP URL | `<PUBLIC_SIGNET_URL>/v1/mcp/servicenow-incidents` |
+| Signet Authorization URL | `<PUBLIC_SIGNET_URL>/api/v1/identity/authorize` |
+| Signet Token URL | `<PUBLIC_SIGNET_URL>/api/v1/identity/token` |
+| Is outbound ServiceNow flow ka callback | `https://techsnitchpvtltddemo2.service-now.com/oauth_redirect.do` |
 
-## 3. Before starting
+Last callback actual Authenticate request ke `redirect_uri` se confirm hua. Doosre instance/client mein uska actual supplied callback use karo.
 
-1. Signet must be running and accessible over public HTTPS.
-2. ServiceNow must support MCP and AI Agent Studio.
-3. Your ServiceNow account needs permissions for the relevant configuration and reviews.
-4. Choose an existing AI agent that you can edit. Open **Add tools and information** and confirm **Add tool** is enabled before doing its identity-specific setup.
-5. Keep secrets/tokens private. This guide intentionally does not contain them.
+Ngrok hostname badle to Signet public/Hosted addresses, ServiceNow inbound redirect, outbound Authorization/Token URLs aur HTTP MCP URL align karo. Allowed-host configuration bhi check karo. Sirf hostname badalne par secret regeneration zaroori nahi.
 
-For this repository, local startup is:
+## A5. Prerequisites aur startup
+
+- Repository dependencies aur configured MongoDB replica set available hon.
+- Signet console/control/gateway public HTTPS se reachable hon.
+- ServiceNow mein MCP, AI Agent Studio aur required configuration/review permissions hon.
+- Appropriate Signet linking, approval aur identity-management permissions hon.
+- Agent editor mein Add tool enabled ho; protected agent ko pehle identify karo.
+- Client secrets/tokens private rakho; shared screenshots mein hide karo.
+
+Repository root se:
 
 ```powershell
 npm ci
 npm run dev
 ```
 
-In a separate terminal, if Signet web is configured on port 8000:
+Separate terminal mein, configured web port expose karo. Is setup mein port 8000 tha:
 
 ```powershell
 ngrok http 8000
 ```
 
-Only the repository root `.env` is used for file-based environment configuration. ServiceNow connection values are saved through Signet UI; do not create another env file for them.
+File-based environment config sirf repository root `.env` mein rakho. `.env.local` ya per-app env file mat banao. ServiceNow integration fields Signet UI mein save hote hain. Secrets Git/docs mein mat rakho.
 
-## 4. Public URL: copy the current address carefully
+# Part B - Complete connection steps
 
-Use `<PUBLIC_SIGNET_URL>` below to mean your currently working public Signet origin, without a trailing slash or path.
+Ye primary sequence direct **OAuth 2.1 Manual Registration + Authorization Code** path use karta hai, jis par tool discovery aur summarization test successful hue.
 
-Earlier setup used:
+## Step 1. ServiceNow upstream MCP URL lo
 
-```text
-https://festive-dealt-talisman.ngrok-free.dev
-```
+1. ServiceNow -> **MCP Server Console -> Servers** kholo.
+2. **Incident MCP Server** kholo; server Active hona chahiye.
+3. **Server URL** copy karo. A3 mein is setup ka URL diya hai.
+4. Required tools enabled check karo: **Incident summarization** aur **Look up incident records**.
 
-Latest screenshot shows:
+MCP endpoint ko AI agent ke naam se invent mat karo.
 
-```text
-https://another-unplanned-throwing.ngrok-free.dev
-```
+## Step 2. ServiceNow inbound OAuth banao
 
-An address shown in a screenshot is not proof that all saved connections were updated. Confirm the active deployment first.
+1. Server par **Set up OAuth** kholo.
+2. Inbound **Authorization code grant** choose karo.
+3. Fill:
 
-| Purpose | URL to use |
+| Field | Value |
 | --- | --- |
-| Signet console/public origin | `<PUBLIC_SIGNET_URL>` |
-| ServiceNow OAuth callback | `<PUBLIC_SIGNET_URL>/api/v1/plugins/servicenow/callback` |
-| Signet token endpoint | `<PUBLIC_SIGNET_URL>/api/v1/identity/token` |
-| Incident gateway MCP endpoint | `<PUBLIC_SIGNET_URL>/v1/mcp/servicenow-incidents` |
-
-Replace the placeholder with the actual HTTPS origin. Do not paste angle brackets into a form.
-
-If ngrok hostname changes, update Signet saved public URL, ServiceNow inbound redirect URL, outbound Token URL and HTTP Connection URL. Reauthorize/re-prepare routes as required by changed settings. Also check the local allowed-host configuration. Do not regenerate client secrets merely because a hostname changed.
-
-## 5. Get the ServiceNow upstream MCP URL
-
-1. ServiceNow → **MCP Server Console → Servers**.
-2. Open **Incident MCP Server**.
-3. Confirm server is **Active**.
-4. Copy its **Server URL**. For this setup:
-
-```text
-https://techsnitchpvtltddemo2.service-now.com/sncapps/mcp-server/mcp/incident_mcp_server
-```
-
-5. Confirm required tools are enabled. Screenshots show **Incident summarization** and **Look up incident records**.
-
-## 6. Create inbound ServiceNow OAuth: Signet accesses ServiceNow
-
-1. On the MCP server, select **Set up OAuth**.
-2. Choose **Authorization code grant** in the inbound integration flow.
-3. Fill the form:
-
-| Field | What to enter |
-| --- | --- |
-| Name | `Nav Test`, or a descriptive name |
-| Provider name | `Signet` or your chosen label |
+| Name | `Nav Test`, ya descriptive label |
+| Provider name | `Signet`, ya chosen label |
 | Redirect URLs | `<PUBLIC_SIGNET_URL>/api/v1/plugins/servicenow/callback` |
 | Active | Checked |
 | This is a public client | Unchecked |
-| Token Format | `JWT` was used in this setup |
-| Access token lifespan | `1800` seconds was used |
-| Refresh token lifespan | `8640000` seconds was used |
+| Token Format | Is setup mein `JWT` |
+| Access token lifespan | Is setup mein `1800` seconds |
+| Refresh token lifespan | Is setup mein `8640000` seconds |
 
-4. Save and securely copy the ServiceNow-issued **Client ID** and **Client secret**.
-5. Scope/API policies and the authorizing user's ACLs must permit the required operations. Do not broaden permissions just to hide a permission error.
+4. Save karo; ServiceNow-issued Client ID aur Secret securely copy karo.
+5. Authorized user's ACLs/OAuth API policies required access permit karni chahiye. Broad access default fix nahi hai.
 
-**Issue seen:** Active was unchecked in the new-record screenshot. It was subsequently checked and the record saved.
+## Step 3. Signet mein connection save, authorize aur discover karo
 
-Do not replace this record with Signet-issued credentials later. It continues to serve the upstream connection.
-
-## 7. Add the connection in Signet and discover tools
-
-1. Signet → **Add an agent → Add ServiceNow AI Agents**, or open **Settings → Connections/Systems** and use the ServiceNow add button.
+1. Signet -> **Settings -> Connections/Systems -> Add ServiceNow AI Agents** kholo. Add an agent page par bhi button ho sakta hai.
 2. Fill:
 
 | Signet field | Value |
 | --- | --- |
 | Public Signet / Gateway URL | `<PUBLIC_SIGNET_URL>` |
 | ServiceNow instance URL | `https://techsnitchpvtltddemo2.service-now.com` |
-| ServiceNow MCP server URL | URL copied in step 5 |
-| OAuth Client ID | ServiceNow-issued ID from step 6 |
-| OAuth Client Secret | ServiceNow-issued secret from step 6 |
+| ServiceNow MCP server URL | Step 1 ka copied upstream URL |
+| OAuth Client ID | Step 2 ka ServiceNow-issued ID |
+| OAuth Client Secret | Step 2 ka matching secret |
 
-3. Compare the form's **ServiceNow Redirect URL** with the registered redirect. They must match exactly.
-4. Click **Save and connect**.
-5. Complete ServiceNow login/consent.
-6. Back in Signet, confirm **Authorized** and click **Discover tools**.
-
-Expected discovered tools:
+3. Generated **ServiceNow Redirect URL** ko Step 2 registration se exactly match karo.
+4. **Save and connect** -> ServiceNow login/consent complete karo.
+5. Signet par **Authorized** verify karo.
+6. **Discover tools** dabao.
 
 | Display label | Exact action name |
 | --- | --- |
 | Incident summarization | `incident_summarization` |
 | Look up incident records | `look_up_incident_records` |
 
-Discovery proves tool metadata access. It does not prove agent traffic or execution-history monitoring.
+Technical names approval mein use honge. Discovery execution-history monitoring nahi hai.
 
-## 8. Select and link an existing editable agent
+## Step 4. Editable agent select karo
 
-1. In ServiceNow → **AI Agent Studio → Create and manage → AI agents**, open the intended existing agent.
-2. Check its description, instructions, tools and active status. Incident-related names alone do not prove it uses your MCP server.
-3. Confirm there is no blocking protection policy and **Add tool** is enabled.
-4. Copy the AI agent record's **sys_id** using **Copy sys_id** where available, or the record URL's `sys_id` parameter. Do not copy an execution ID or MCP server ID.
-5. In Signet's ServiceNow connection → **Link existing ServiceNow agent**.
-6. Try **Load agents from ServiceNow**. If permitted, select the correct agent.
-7. For manual linking, enter the actual sys_id, exact name and actual purpose, then click **Link agent to Signet**.
+1. ServiceNow -> **AI Agent Studio -> Create and manage -> AI agents** kholo.
+2. Description/instructions/tools check karo; sirf incident-related name enough nahi.
+3. **Add tools and information** mein **Add tool** enabled verify karo.
+4. Is setup ka original protected tha. User ne duplicate **Incident context AI agent (Copy)** create kiya.
+5. Duplicate banana ho to available record actions mein copy option inspect karo. Exact copy-menu label ka screenshot capture nahi hua tha.
+6. Copy kholkar editability verify karo aur uska actual sys_id copy karo.
 
-Linking registers identity in Signet. It does not create or modify the ServiceNow agent.
+Description ka "strictly read-only" incident data modify na karne ki instruction hai; editor protection policy se alag hai.
 
-### Error: SERVICENOW_PERMISSIONS / HTTP 403
+## Step 5. Copy ko Signet mein link karo
 
-Observed request:
+1. Signet ServiceNow connection -> **Link existing ServiceNow agent**.
+2. **Load agents from ServiceNow** permitted ho to correct agent select karo.
+3. Listing HTTP 403 ho to actual known record manually link karo:
+
+| Field | Value |
+| --- | --- |
+| ServiceNow AI agent sys_id | `6dfcea3e0f2457507e34bec300d1b216` |
+| Agent name | `Incident context AI agent (Copy)` |
+| What does this agent do? | `Retrieves incident details and related context without modifying records.` |
+
+4. **Link agent to Signet** dabao.
+
+Copy automatically onboard nahi hoti. Original ki linking copy par apply nahi hoti. Linking identity register karti hai; original ServiceNow record modify nahi karti.
+
+## Step 6. Signet gateway route prepare karo
+
+1. Connection mein **Govern MCP tool calls through Signet** kholo.
+2. **Gateway alias:** `servicenow-incidents` type karo.
+3. **Prepare gateway route** dabao.
+4. Verify **Registered tool alias: servicenow-incidents**.
+5. Generated URL copy karo:
+
+```text
+https://festive-dealt-talisman.ngrok-free.dev/v1/mcp/servicenow-incidents
+```
+
+Same upstream ka existing route reuse kar sakte ho. Gateway alias isi section mein milta hai; ServiceNow connection alias alag cheez hai.
+
+## Step 7. Copy ki Review and approval complete karo
+
+1. Linked copy ke card ka **Review and approval** button dabao.
+2. Review/setup form mein **Tools it may call** tak scroll karo.
+3. **Add a registered tool...** se `mcp://servicenow-incidents` select karo.
+4. First action aur **Add action** se second action bharo:
+
+| Action name | Impact |
+| --- | --- |
+| `look_up_incident_records` | `read` |
+| `incident_summarization` | `read` |
+
+5. **Environments:** `dev`.
+6. Actual required data permissions, prohibited categories, limits aur review fields check karo.
+7. Save aur required approval workflow complete karo.
+8. Deploy screen par **Approval is complete** verify karo.
+
+Action field search box nahi hai. Names Step 3 ke Discovered tools se copy karke manually enter karo. Sensitive-data restrictions sirf validation pass karne ke liye relax mat karo.
+
+## Step 8. Copy ke Signet credentials lo
+
+1. Copy card -> **Gateway setup**, ya approved agent Deploy page kholo.
+2. **Connect your agent** mein:
+
+| Field | Value |
+| --- | --- |
+| Connection direction | `External agent calls Signet OAuth` |
+| Environment | `dev` |
+| Connection label | `Incident Copy Test` |
+
+3. **Generate Client ID & Secret** dabao; already saved hain to wahi restore honge.
+4. Copy agent ke credentials securely save karo. Original agent ya Nav Test ke credentials yahan use nahi honge.
+5. Dynamic Authorization/Token URLs configured **Hosted Signet control address** se bante hain.
+
+## Step 9. Signet mein ServiceNow callback register karo
+
+1. Gateway setup -> **OAuth Authorization Code** section kholo.
+2. **External platform callback URL** mein actual outbound callback bharo:
+
+```text
+https://techsnitchpvtltddemo2.service-now.com/oauth_redirect.do
+```
+
+3. **Save callback URL** dabao.
+4. Same Client ID ke liye callback save hona chahiye jo ServiceNow mein use hoga.
+
+Ye inbound `/api/v1/plugins/servicenow/callback` nahi hai. Callback save/change is client ke pending requests, codes aur refresh tokens invalidate karta hai; Authenticate dobara karo.
+
+## Step 10. Direct OAuth 2.1 MCP registration banao
+
+1. **AI Agent Studio -> Settings -> Manage MCP servers -> New**.
+2. Fill:
+
+| Field | Value |
+| --- | --- |
+| Name | Is setup mein `Navin` |
+| Authentication type | `OAuth 2.1` |
+| MCP server URL | `<PUBLIC_SIGNET_URL>/v1/mcp/servicenow-incidents` |
+
+3. **Next** dabao; next form:
+
+| Field | Value |
+| --- | --- |
+| Client registration type | `Manual Registration` |
+| Grant type | `Authorization Code` |
+| Token authentication method | `Client Secret Basic` |
+| Client ID | Step 8 ka copy agent ID |
+| Client secret | Step 8 ka matching secret |
+| Auth scopes | `mcp`, ya empty; granted scope mcp hai |
+| Authorization URL | `<PUBLIC_SIGNET_URL>/api/v1/identity/authorize` |
+| Token URL | `<PUBLIC_SIGNET_URL>/api/v1/identity/token` |
+| Token Revocation URL | Blank; public endpoint advertised nahi hai |
+
+4. **Add/Save** dabao.
+5. Auto-generated connection alias rehne do. Navin mein `AutoGen_Navin_..._OAuthProviderAlias` bana tha.
+
+Signet mein PKCE S256 mandatory hai. Actual ServiceNow request mein S256 challenge aayi. Dynamic Client Registration implement nahi hai; Manual Registration use karo.
+
+## Step 11. Navin Authenticate karo
+
+1. Saved **Navin** record par **Authenticate** dabao.
+2. Signet login khule to appropriate owner/administrator se sign in karo.
+3. Consent page par agent name, callback aur environment check karo.
+4. **Allow access** dabao; ServiceNow par wapas aane do.
+5. Token warning hatna aur **Re-authenticate** dikhna check karo.
+
+Code five-minute, single-use hai. Refresh token rotate hota hai; external client ko latest replacement preserve karna chahiye. Token alone real gateway call ka proof nahi.
+
+## Step 12. AI Control Tower review verify karo
+
+1. MCP record ka **View approval record** kholo.
+2. Gateway MCP asset aur copied AI agent alag records hain; correct identity/URL verify karo.
+3. Applicable workflow: **Start review -> Lifecycle**.
+4. Assess, Build and test, Deploy ke actual required tasks/reviews complete karo.
+5. Authorized reviewer hi completed work ko **Mark as complete** kare.
+
+Empty task list assessment-complete proof nahi. Screenshots mein pehle Signet Incident Gateway aur baad mein copy agent Managed/Deployed dikhte hain. Navin ka status uske apne record par check karo; old gateway approval ko naye record ki approval mat samjho.
+
+## Step 13. Copy mein Navin ka tool attach karo
+
+1. **Create and manage -> AI agents -> Incident context AI agent (Copy)**.
+2. **Add tools and information -> Add tool -> MCP server tool**.
+3. Server: **Navin**.
+4. Tool: **Incident summarization**.
+5. Input definition load hogi: `incidentNumber`, type `string`.
+6. Grey input definition mein abhi actual incident number nahi bharna; execution ke waqt value jayegi.
+7. Settings:
+
+| Field | Value |
+| --- | --- |
+| Name | Existing `Incident summarization`, ya `Signet Incident Summarization` |
+| Tool description | Existing summary description; gateway use clearly describe kar sakte ho |
+| Execution mode | `Supervised` |
+| Display output | On |
+
+8. Dialog mein **Add/Save**; agent editor mein **Save and continue**.
+9. Required agent configuration save karke correct active version test karo.
+10. Lookup required ho to Navin se **Look up incident records** separately add karo. Session mein summarization attachment/test verify hua.
+
+Copy mein inherited native scripts bhi hain. Execution details mein intended MCP tool verify karo; similar display name routing ka proof nahi.
+
+## Step 14. INC0010012 ka real test
+
+1. **Testing -> Manual Test** kholo.
+2. Select:
+
+| Field | Value |
+| --- | --- |
+| Test type | `AI agent or workflow` |
+| Name | `Incident context AI agent (Copy)` |
+| Version | Correct saved active version; screenshot mein `1 - V1 (Active)` |
+
+3. Task paste karo:
+
+```text
+Summarize incident INC0010012 using the MCP incident summarization tool from the Navin server connected through Signet.
+
+Pass incidentNumber as INC0010012. Request approval before executing the supervised tool. Do not modify the incident. If the tool fails, report the error instead of using another tool.
+```
+
+4. **Continue to test chat response** dabao.
+5. Agent permission maange to incident/action verify karke **Yes** do.
+6. **AI agent decision logs** mein tool details inspect karo.
+
+Observed: **Tool - Incident summarization: Completed**, result mein `success: True`, aur incident summary returned. Summary mein mentioned past record changes ko is test ke writes mat samjho.
+
+Apne instance par accessible real test incident use karo.
+
+## Step 15. Signet mein same real request verify karo
+
+1. Signet -> **Incident context AI agent (Copy)** kholo.
+2. **Activity / Connection activity and diagnostics** refresh karo.
+3. Test time ki entry check karo:
+
+| Check | Expected |
+| --- | --- |
+| Agent | Copy ki identity; original nahi |
+| Action | `incident_summarization` |
+| Route | `servicenow-incidents` |
+| Outcome | Actual status/result shown in evidence |
+
+Final Signet evidence conversation mein abhi nahi mila. **Test Gateway Connection** reachability check hai; external agent impersonate karke governed tool call create nahi karta. Token, discovery aur Deployed labels execution proof nahi hain.
+
+## Step 16. Activity monitoring alag configure karo, agar required ho
+
+1. Linked agent -> **Configure activity monitoring**.
+2. Documented read-only execution/activity API aur credentials do.
+3. Request ko correct copy agent par scope karo; actual response fields map karo.
+4. **Activity sources and sync** run karke imported agent-specific executions verify karo.
+
+Incident lookup/summarization execution-history API nahi hain. Working history sync verify nahi hua. Native tools/model calls jo Signet bypass karte hain automatically intercept nahi hote. Shadow se enforce move karna separate rollout decision hai.
+
+# Part C - Pehle try kiya manual connection path
+
+Ye **Client Credentials + manually created connection alias** path bhi try hua tha. Fresh direct Navin flow follow kar rahe ho to ye records dobara banana zaroori nahi. Old path mein no-tools issue aaya; exact root cause establish nahi hua. Baad mein Part B wale Authorization Code flow par discovery aur real test successful hue.
+
+## C1. Outbound OAuth provider
+
+1. **All -> System OAuth -> Application Registry -> New**.
+2. **Connect to a third party OAuth Provider - Outbound** select karo.
+3. Fill:
+
+| Field | Value |
+| --- | --- |
+| Name | `Signet Incident OAuth` |
+| Client ID / Secret | Intended copy agent ke Signet-issued credentials |
+| Default Grant type | `Client Credentials` |
+| Token URL | `<PUBLIC_SIGNET_URL>/api/v1/identity/token` |
+| Send Credentials | `In Request Body (Form URL-Encoded)` |
+| Active | Checked |
+| Public Client / Use mutual authentication | Unchecked |
+| Authorization URL / Token Revocation URL / OAuth API Script | Blank |
+
+Token URL locked ho to lock icon se unlock karo. Auto-generated Redirect URL unchanged rakho. Submit/reopen karke **OAuth Entity Profiles** mein `Signet Incident OAuth default_profile`, grant Client Credentials verify karo.
+
+Ye Nav Test inbound record se alag provider hai.
+
+## C2. OAuth credential aur token
+
+1. **All -> Connections & Credentials -> Credentials -> New -> OAuth 2.0 Credentials**.
+2. Name: `Signet Incident OAuth Credential`.
+3. Active checked; **OAuth Entity Profile** lookup se generated default profile select karo.
+4. **Connect to OAuth Server via MID Server** unchecked.
+5. Submit/reopen -> **Related Links -> Get OAuth Token**.
+
+Baad mein credential kholna ho to All mein Credentials search karo; Name se record find karke open karo. Application Registry provider aur Credential record alag hain.
+
+## C3. Connection alias banao
+
+1. **Connection & Credential Aliases -> New**.
+2. Fill:
+
+| Field | Value |
+| --- | --- |
+| Name | `Signet Incident Gateway` |
+| ID | Auto-generated; saved value `Signet_Incident_Gateway` |
+| Type | `Connection and Credential` |
+| Connection type | `HTTP` |
+| Support Multiple Active Connections | Unchecked |
+| Parent Alias / Configuration Template | Blank |
+| Default Retry Policy | Existing default |
+
+3. Submit aur saved alias reopen karo. Grey ID force-edit mat karo.
+
+## C4. Actual HTTP connection attach karo
+
+1. Alias record ke neeche **Connections -> New** dabao.
+2. Fill:
+
+| Field | Value |
+| --- | --- |
+| Name | `Signet Incident HTTP Connection` |
+| Credential | Lookup se `Signet Incident OAuth Credential` |
+| Connection alias | `Signet_Incident_Gateway` |
+| Connection URL | `<PUBLIC_SIGNET_URL>/v1/mcp/servicenow-incidents` |
+| Active | Checked |
+| Domain | `global` |
+| URL builder / Use MID server | Unchecked |
+| Connection timeout | Is setup mein blank |
+
+3. Submit. Alias par **Connections (1)**, Active true, correct credential verify karo.
+4. Full URL ke liye connection record open karo; Host column alone path nahi dikhata.
+
+## C5. Existing alias se MCP server register karo
+
+1. **AI Agent Studio -> Settings -> Manage MCP servers -> New**.
+2. Name **Signet Incident Gateway**, authentication **Others**.
+3. Connection alias **Signet_Incident_Gateway** select karke save karo.
+4. Applicable Control Tower status/review correct record/URL ke liye verify karo.
+
+**Original se copy identity switch:** old provider ka Client ID/Secret copy ke credentials se update karke credential ka Get OAuth Token dobara kiya gaya. Shared provider update us connection ke consumers ki identity bhi badalta hai. Direct Navin registration ka auto-generated alias alag hai.
+
+# Part D - Faced errors aur resolutions
+
+Har entry mein observed problem aur actual known outcome diya hai. Jo root cause establish nahi hua, use confirmed fix ke roop mein present nahi kiya gaya.
+
+## Error 1. OAuth setup required / Active unchecked
+
+**Kahan:** upstream Incident MCP Server aur inbound OAuth form.
+
+**Meaning:** client access ke liye OAuth setup required tha; initial new-record form mein Active unchecked tha.
+
+**Action:** inbound Authorization Code form complete, Active checked, Save; Signet settings aur consent complete.
+
+**Result:** connection Authorized aur tools discovered.
+
+## Error 2. SERVICENOW_PERMISSIONS - AI agent listing HTTP 403
 
 ```text
 GET /api/now/table/sn_aia_agent
 HTTP 403
 ```
 
-**Meaning:** the authorized account/OAuth policy does not allow the required Table API read. MCP tool permissions do not automatically grant Table API permissions.
+**Meaning:** authorized user ke table/field ACLs ya OAuth API policies Table API read permit nahi kar rahe the. MCP tool access automatically Table API listing access nahi deta.
 
-**Resolution used:** manually linked the known agent record. Automatic listing permission was not fixed/verified. For listing, an administrator must check table/field read ACLs and OAuth API policies, then retry.
+**Action used:** actual known agent sys_id/name/purpose se manual linking.
 
-### Error: selected agent is protected/read-only
+**Result:** agent linked. Automatic listing permission ka fix verify nahi hua. Listing chahiye to administrator relevant ACL/API policy correct kare aur Load agents retry kare.
 
-The selected **Incident context AI agent** showed both:
+## Error 3. Protected original - read-only aur Add tool disabled
 
-- Record belongs to IT Service Management AI agent collection while current application is Global.
-- Record has a protection policy.
+**Messages:** record IT Service Management AI agent collection application mein hai, current scope Global hai; record has a protection policy.
 
-Its **Add tool** button was disabled. Switching scope alone is not a confirmed fix for protection.
+**Meaning:** original editor se modify nahi ho sakta tha. Scope switch alone protection hatane ka confirmed solution nahi.
 
-**Current outcome:** this agent cannot be used for attaching the Signet gateway through the shown editor. The earlier recommendation did not check editability first.
+**Action used:** user ne **Incident context AI agent (Copy)** duplicate banaya; editable fields/Add tool enabled verify kiya; copy ki own identity Signet mein link/approve ki.
 
-**Resolution used:** the user duplicated the original as `Incident context AI agent (Copy)`. Its Add tool button is enabled and offers MCP server tool. Link the copy using its own sys_id, approve its actions, generate its own Signet credentials and update the outbound provider before requesting a new token. The original protected record stays separate.
+**Correction to earlier selection:** original suggest karte waqt editability check nahi hui thi. Naye setup mein Part B Step 4 pehle check karo.
 
-The existing incident gateway/OAuth infrastructure can be reused. A different agent needs its own correct Signet link, approval and workload credentials. Do not use the protected agent's credentials to represent another agent. Keep unrelated existing records until their use has been reviewed.
+Description ka read-only instruction aur editor protection policy alag cheezein hain. Original/copy ka same name ya purpose same identity nahi banata.
 
-## 9. Prepare the Signet gateway route
+## Error 4. Review and approval / Tools it may call nahi mil raha
 
-1. In the ServiceNow connection, find **Govern MCP tool calls through Signet**.
-2. Enter **Gateway alias**: `servicenow-incidents`.
-3. Click **Prepare gateway route**.
-4. Confirm **Registered tool alias: servicenow-incidents**.
-5. Copy the generated MCP URL:
+**Meaning:** Connections page aur next review/setup form confuse ho rahe the.
 
-```text
-<PUBLIC_SIGNET_URL>/v1/mcp/servicenow-incidents
-```
+**Resolution:** linked agent card ka **Review and approval** button dabao; next form mein Tools it may call tak scroll karo.
 
-The alias field may initially show a placeholder such as `servicenow-cmdb`; type the intended alias explicitly.
+**Action names:** saved ServiceNow connection -> **Discovered tools** ke technical name copy karo. Action field manual hai; Add a registered tool dropdown alag hai.
 
-## 10. Review and approval: fill Tools it may call
-
-1. In the linked agent card, click **Review and approval**. This is a button next to **Gateway setup**, not the tool form itself.
-2. Open the agent's review/setup form and scroll to **Tools it may call**.
-3. Use **Add a registered tool…** to select `mcp://servicenow-incidents`.
-4. In the action row, enter `look_up_incident_records`, impact **read**.
-5. Click **Add action**. Enter `incident_summarization`, impact **read**.
-6. Set **Environments** to `dev` for this test.
-7. Review the real data restrictions and required fields. Do not change restrictions only to make validation pass.
-8. Save/complete the review and approval through the available workflow.
-9. Expected result: deploy page states **Approval is complete**.
-
-**Where do action names come from?** Go to the saved ServiceNow connection → **Discovered tools**. The technical name appears below the display title. The action field is a manual entry field, not a search box.
-
-**Latest screenshot caution:** selected tool was `mcp://signet-demo`. Only enter the incident action names there if that alias actually routes to the same Incident MCP server. Otherwise select/prepare the correct alias. Do not guess from similar names.
-
-Other validation errors recorded in the existing setup notes:
-
-| Error | What to check |
-| --- | --- |
-| Third-party agent needs a mapped REST platform connection or at least one company tool | Select the registered gateway tool and required actions for this MCP setup |
-| RB-INV-17: only T1/T2 seals may allow Restricted tags | Align the legitimate data requirements and seal tier; do not bypass the rule |
-
-## 11. Generate Signet credentials for this agent
-
-1. Open **Gateway setup**, or the approved agent's deploy page.
-2. Under **Connect your agent**:
-
-| Field | Value |
-| --- | --- |
-| Connection direction | `External agent calls Signet OAuth` |
-| Environment | `dev`, matching approval |
-| Connection label | `ServiceNow Incident Test` |
-
-3. Click **Generate Client ID & Secret**.
-4. Save the generated credentials securely. These are Signet-issued credentials, separate from `Nav Test`.
-5. Copy the displayed token endpoint. It must use the current public origin:
+## Error 5. RB-INV-17 - restricted special-category data
 
 ```text
-<PUBLIC_SIGNET_URL>/api/v1/identity/token
+RB-INV-17 only T1/T2 seals may allow Restricted tags (special_category)
 ```
 
-A token alone does not mark the agent connected. Regenerating credentials requires updating the corresponding ServiceNow outbound provider.
+**Meaning:** selected tier aur allowed special-category data incompatible the. Ye action-name error nahi tha.
 
-## 12. Create outbound OAuth provider in ServiceNow
+**Correction advised for this test:** special-category data required nahi ho to **Data it may send to the model** mein special category uncheck; **Data that must never be sent** mein checked rakho; save/review complete karo.
 
-1. **All → System OAuth → Application Registry → New**.
-2. Select **Connect to a third party OAuth Provider - Outbound**.
-3. Fill:
+Required ho to legitimate data requirement aur allowed tier/review align karo. Sirf validation bypass karne ke liye tier change mat karo. Later screenshot copy ke Gateway setup tak pahunchta hai; exact field-change screenshot separately supplied nahi hua.
 
-| Field | Value |
-| --- | --- |
-| Name | `Signet Incident OAuth` |
-| Client ID / Client Secret | Signet-generated credentials from step 11 |
-| Default Grant type | `Client Credentials` |
-| Token URL | `<PUBLIC_SIGNET_URL>/api/v1/identity/token` |
-| Send Credentials | `In Request Body (Form URL-Encoded)` |
-| Active | Checked |
-| Public Client | Unchecked |
-| Use mutual authentication | Unchecked |
+## Error 6. Third-party agent needs a connection or company tool
 
-4. Use the lock icon to unlock the Token URL field if necessary.
-5. Leave **Authorization URL**, **Token Revocation URL** and **OAuth API Script** empty for this setup. Keep auto-generated Redirect URL unchanged.
-6. Click **Submit**, reopen the saved record.
-7. Under **OAuth Entity Profiles**, confirm the generated `Signet Incident OAuth default_profile` with grant **Client Credentials**.
+Earlier related setup notes mein validation tha ki third-party agent ko mapped REST connection ya at least one company tool chahiye.
 
-Do not edit `Nav Test` to do this. That is the separate inbound provider.
+**Resolution for this MCP setup:** registered gateway tool aur required exact actions select karke save/approve karo. Ye current final summarization run ka error nahi tha.
 
-### Alternative: direct OAuth 2.1 manual registration with Authorization Code
+## Error 7. OAuth tokens not available / expire soon
 
-Signet also supports confidential Authorization Code clients with mandatory PKCE S256 and rotating refresh tokens. This is an alternative to the existing **Others + connection alias** client-credentials path; choose one connection path deliberately. It does not itself resolve an unidentified tools-discovery failure.
+**Old credential flow:** credential save hone ke baad token absent tha. **Get OAuth Token** request ke baad stored-token expiry banner aaya.
 
-1. Open the correct copied agent in Signet ? **Gateway setup**. Generate/restore that agent's saved Client ID and Secret.
-2. The credential panel displays **Authorization URL** and **Token URL**, derived from the saved Hosted Signet control address. Update Hosted Signet addresses first if the public origin changed.
-3. Under **OAuth Authorization Code**, register the external platform's exact callback URL. For the outbound ServiceNow provider, copy its generated Redirect URL (commonly `https://<instance>.service-now.com/oauth_redirect.do`). Verify the actual callback supplied by the chosen ServiceNow registration screen before saving it.
-4. Click **Save callback URL**. This is not the inbound `/api/v1/plugins/servicenow/callback`. Only an agent owner/authorized identity manager may configure it. Saving clears outstanding authorization requests, codes and refresh tokens for that client.
-5. In ServiceNow **Add MCP server**, use the registered Signet gateway MCP URL and **OAuth 2.1 ? Manual Registration**.
-6. Choose **Authorization Code**, **Client Secret Basic** (or Client Secret Post if offered), and enter the same agent's Signet-issued Client ID/Secret.
-7. Enter these URLs using the current configured public origin:
+**Direct Navin flow:** **OAuth Access or Refresh tokens are not available** banner aur Authenticate button aaye. Callback registration aur Signet consent ke baad warning hati; Re-authenticate button dikhne laga.
 
-| Field | Value |
-| --- | --- |
-| Authorization URL | `<PUBLIC_SIGNET_URL>/api/v1/identity/authorize` |
-| Token URL | `<PUBLIC_SIGNET_URL>/api/v1/identity/token` |
-| Auth scopes | `mcp` (or empty; the granted scope is mcp) |
-| Token Revocation URL | Leave blank; no public OAuth revocation endpoint is advertised |
+**Expiry handling:** fresh token/renewal ka result check karo. Purani screenshot ki expiry current token validity ka proof nahi. Fresh issue par past expiry dikhe to response lifetime aur instance/display timezone inspect karo; clock problem assume mat karo.
 
-8. The external client must send `response_type=code`, the exact registered `redirect_uri`, nonempty `state`, `code_challenge_method=S256` and a valid `code_challenge`. Its token exchange must send the matching `code_verifier`. Missing PKCE is explicitly rejected; a placeholder Authorization URL is not supported.
-9. Start authorization from ServiceNow. Sign in to Signet as the appropriate owner/administrator, verify the agent/environment/callback on the consent page and click **Allow access**. **Deny** returns `access_denied` with the original state.
-10. Signet returns a five-minute single-use code. ServiceNow exchanges it at the Token URL, authenticating with its client credentials. The result contains `access_token`, `token_type`, `expires_in`, `refresh_token` and `scope`.
-11. For renewal, the client sends `grant_type=refresh_token` with the latest refresh token and its client credentials. Every refresh replaces the previous refresh token; store the returned replacement. Refresh tokens expire after 30 days. Client/instance revocation and changed seals stop renewal.
-12. Continue tool attachment and a real gateway test. A completed consent screen alone does not verify tool discovery or execution.
+Token alone correct identity aur real tool call ka proof nahi hai.
 
-Protocol capabilities are available at `<PUBLIC_SIGNET_URL>/api/v1/identity/oauth-metadata`. Dynamic Client Registration is not implemented: manually register the existing Signet-issued client and its callback. ServiceNow's exact PKCE behavior in this UI must be verified with an actual authorization attempt; no live success is claimed from local integration tests.
+## Error 8. MCP server not available yet - Control Tower sync pending
 
-Implementation verification covers real local HTTP login, consent, callback/state binding, code exchange, Basic/body client authentication, PKCE rejection, single-use/concurrent code redemption, expiry, refresh rotation and revocation against an isolated MongoDB database. Security references: [OAuth Security BCP](https://www.rfc-editor.org/rfc/rfc9700.html) and [PKCE S256](https://www.rfc-editor.org/rfc/rfc7636.html).
+```text
+MCP server not available yet
+This MCP server is still being synced to AI Control Tower.
+```
 
-## 13. Create OAuth credential and request a token
+**Action:** kuch minutes baad refresh/retry. Later View approval record se gateway asset successfully open hua.
 
-1. **Connections & Credentials → Credentials → New → OAuth 2.0 Credentials**.
-2. Fill:
+**Result:** AI steward review se review workflow aur later Deployed screenshot mila.
 
-| Field | Value |
-| --- | --- |
-| Name | `Signet Incident OAuth Credential` |
-| Active | Checked |
-| OAuth Entity Profile | Select `Signet Incident OAuth default_profile` using lookup |
-| Connect to OAuth Server via MID Server | Unchecked |
+**Cause limit:** exact elapsed time, sync root cause ya scheduled job fix establish nahi hua. Earlier Perimetra investigation ki missing-CI warning is incident server ka confirmed cause nahi hai. OAuth recreation, shipped-script modification ya fake CI insertion is setup ka demonstrated fix nahi tha.
 
-3. Keep other fields at their existing values and **Submit**.
-4. Reopen the saved credential.
-5. Under **Related Links**, click **Get OAuth Token**.
+Persistent ho to AI steward/admin exact server/connection ki sync status aur related logs inspect kare.
 
-### Token messages seen
+## Error 9. AICT No data, wrong list ya pending lifecycle
 
-- **Access or Refresh tokens are not available:** credential existed but no token was available. Use **Get OAuth Token** after checking provider settings.
-- After requesting, banner changed to **Access token is available but will expire soon**. This confirms a token was stored, not that gateway tool traffic worked.
-- The displayed expiry was `2026-11-17 23:42:13`. Do not treat that old timestamp as evidence of a currently valid token. Request a fresh token before testing and inspect the resulting expiry/error. If a freshly issued token appears expired, inspect response lifetime and instance/display timezone before diagnosing a clock problem.
+**Observed:** Unmanaged MCP list empty thi; filter changes par copy-related records dikhe. Role/instructions records bhi similar name se the.
 
-For token-request failures, capture the actual status/response without secrets and check public URL, provider grant and agent-specific Signet credentials. No specific token-request failure response was shown in this flow.
+**Correction:** intended asset class, Managed/Unmanaged list, filters aur actual record identity verify karo. Sirf naam ya list title se record type decide mat karo.
 
-## 14. Create ServiceNow Connection & Credential Alias
+**Navigation:** Lifecycle tab mein review/tasks milte hain; Related Variants mein connection references. Empty onboarding tasks completed review ka proof nahi.
 
-1. **All → Connection & Credential Aliases → New**.
-2. Fill:
+**Result:** copied agent ka Managed/Deployed detail screenshot mila. Ye gateway execution evidence nahi hai.
 
-| Field | Value |
-| --- | --- |
-| Name | `Signet Incident Gateway` |
-| ID | Auto-generated; saved value was `Signet_Incident_Gateway` |
-| Type | `Connection and Credential` |
-| Connection type | `HTTP` |
-| Support Multiple Active Connections | Unchecked |
-| Parent Alias / Configuration Template | Empty |
-| Default Retry Policy | Keep existing default |
+## Error 10. There are no tools from this MCP server
 
-3. Click **Submit** and reopen the saved alias.
+**Observed:** old **Signet Incident Gateway** select karne par Select tool disabled aur no-tools error tha.
 
-If ID is grey, do not try to force-edit it. Use the generated ID in later references.
+**Checked:** full HTTP Connection URL, credential attachment, Active status, Token URL aur Client Credentials settings. Current festive hostname user ne confirm kiya. Gateway/copy ke AICT deployment ke baad bhi old flow mein error raha.
 
-## 15. Add the actual HTTP connection
+**Diagnostics attempted:** ngrok inspector aur F12 Network requests. Supplied captures mein dashboard requests aur ServiceNow exec/batch rows the; actual discovery response body/root cause nahi mila. Dashboard ka HTTP 200 MCP success nahi hai.
 
-1. In the alias record, open **Connections → New**. Use the New button inside this related list.
-2. Fill:
+**Working outcome:** **Navin + OAuth 2.1 Manual Registration + Authorization Code + callback registration + Authenticate/consent** path par tools load hue; incident summary test successful hua.
 
-| Field | Value |
-| --- | --- |
-| Name | `Signet Incident HTTP Connection` |
-| Credential | Select `Signet Incident OAuth Credential` using lookup |
-| Connection alias | `Signet_Incident_Gateway` |
-| Connection URL | `<PUBLIC_SIGNET_URL>/v1/mcp/servicenow-incidents` |
-| Active | Checked |
-| Domain | Keep `global` |
-| URL builder | Unchecked |
-| Use MID server | Unchecked |
-| Connection timeout | Left empty in this setup |
+**What remains unknown:** old Client Credentials path ka exact failure cause establish nahi hua. AICT approval ya Name/Description fill karna verified fix nahi tha.
 
-3. **Submit**.
-4. Verify alias shows **Connections (1)**, **Active true**, correct credential and **Use MID server false**.
-5. Open the connection to verify the full URL path; the Host column alone does not show it.
+Repeat ho to:
 
-## 16. Register Signet MCP gateway in AI Agent Studio
+1. Correct client identity, current hostname, full MCP URL aur registered route verify karo.
+2. F12 -> Network -> Fetch/XHR clear karke MCP server selection trigger karo.
+3. Relevant exec/batch Payload aur Response inspect karo; HTTP 200 alone enough nahi.
+4. Ngrok **http://127.0.0.1:4040** -> Clear Requests, same selection trigger, actual `/v1/mcp/servicenow-incidents` status/body inspect karo.
+5. Request na aaye to ServiceNow backend/cached tool-list path inspect karo; external request failure assume mat karo.
+6. Cookies, Authorization headers aur tokens share mat karo.
 
-1. **AI Agent Studio → Settings → Manage MCP servers → New**.
-2. Enter **Signet Incident Gateway**.
-3. Choose authentication **Others** where offered.
-4. Select connection alias `Signet_Incident_Gateway`.
-5. **Add/Save**.
-6. Reopen the record and verify server name and alias, then click **View approval record**.
+## Error 11. Authorization URL required; endpoint implemented nahi tha
 
-The existing **Signet Perimetra Gateway** is a separate setup. Do not replace it for this incident test.
+**Observed:** ServiceNow direct OAuth form Authorization URL maang raha tha; Signet pehle workload Client Credentials flow support karta tha.
 
-### Error: MCP server not available yet
+**Implementation:** browser login/consent, exact callback registration, mandatory S256 PKCE, five-minute single-use code, confidential client authentication aur rotating refresh tokens add hue. UI current Hosted Signet control address se dynamic Authorization/Token URLs dikhata hai.
 
-Popup said the MCP server was still being synced to AI Control Tower.
+**Result:** ServiceNow request S256 ke saath aayi; callback fix ke baad authentication, tool discovery aur test successful hue. Dummy Authorization URL nahi use ki gayi.
 
-**Resolution observed:** a later attempt opened the Control Tower record successfully. The exact sync mechanism/root cause and elapsed time were not established. No OAuth recreation, shipped-script modification or manual CI insertion was shown as necessary.
+Capabilities: `<PUBLIC_SIGNET_URL>/api/v1/identity/oauth-metadata`. Dynamic Client Registration implement nahi hai; Manual Registration use karo.
 
-If still pending: wait a few minutes, refresh and retry. If persistent, ask the AI steward/admin to inspect this exact server's registration/sync status and logs. An earlier Perimetra investigation had missing-CI warnings, but that does not establish the cause for this incident server. Do not copy unrelated log errors as its diagnosis.
+## Error 12. API_RESPONSE_FORMAT - callback settings API returned 404 HTML
 
-## 17. AI Control Tower review
+**Observed:** new callback API se JSON ke badle HTTP 404 text/html aaya.
 
-1. Confirm the record is **Signet Incident Gateway** and its related variant has the expected gateway MCP URL.
-2. Click **Start review**. Status changed from **AI steward review** to **In review**, phase **Assess**.
-3. Open **Lifecycle**. **Related Variants** only shows connection details, not the review workflow.
-4. Review the **Assess** stage. In this setup it showed **No onboarding tasks created** and buttons **Create new task** / **Mark as complete**.
-5. If assessment work is needed, create/assign the task. An empty list does not mean assessment is complete.
-6. The authorized reviewer completes the applicable assessment, build/test and deployment requirements before marking each stage complete.
+**Checked:** source mein new route tha; running local/public control ne new metadata route ko old authenticated API jaisa treat kiya. Frontend updated tha, running backend old version tha.
 
-The supplied final Control Tower screenshot shows **Assess**, **Build and test**, and **Deploy** marked **Complete**, lifecycle status **Deployed**. Intermediate task evidence was not supplied. This proves the displayed lifecycle state, not a successful Signet tool execution.
+**Resolution:** control/dev process restart. Session mein port 4100 process stop aur closed state verify ki gayi. Updated source next start par load hota hai.
 
-## 18. Attach gateway tools to the existing editable agent (pending)
+Normal restart:
 
-1. **AI Agent Studio → Create and manage → AI agents**.
-2. Open the verified editable existing agent.
-3. Open **Add tools and information → Add tool**.
-4. Inspect the available MCP option, choose **Signet Incident Gateway** if available, and select the required incident tools.
-5. Review the actual instructions so the test invokes gateway-provided tools rather than existing direct/native tools.
-6. Save through the available UI.
+1. Running `npm run dev` terminal mein Ctrl+C.
+2. Root se `npm run dev` dobara.
+3. Services ready hone par browser Ctrl+Shift+R.
+4. Ngrok current web port/address se running rakho.
 
-The copy's **Add tool ? MCP server tool** picker was opened. Selecting **Signet Incident Gateway** displayed an empty disabled Select tool field and **There are no tools from this MCP server**. Do not fill Name/Description to work around missing tools. Both saved gateway and Token URLs were checked against `festive-dealt-talisman.ngrok-free.dev`. The copied agent and gateway show Control Tower deployment complete, but discovery still fails. Browser Network responses and the actual ngrok MCP request/response are needed to determine the cause; no root cause or resolution is confirmed.
+Credentials regenerate karna old backend ka fix nahi hai.
 
-If **Add tool** is disabled and protection policy is displayed, stop editing that record and select an editable agent. The protected **Incident context AI agent** cannot complete this step through the shown UI.
+## Error 13. Register this client callback URL before authorizing
 
-## 19. Run one real test and verify Signet (pending)
+```text
+HTTP 400
+Register this client callback URL in Gateway setup before authorizing
+```
 
-1. Keep Signet/ngrok running. Confirm current public URLs and a valid outbound token.
-2. Use the agent's testing UI and a real accessible test incident number.
-3. Example request: `Use the Signet gateway lookup tool to retrieve incident <actual incident number> and summarize the result. Do not modify records.` Replace the placeholder first.
-4. Inspect execution/tool details to confirm a gateway-attached action actually ran. A prompt alone cannot guarantee routing.
-5. In Signet, refresh the agent's **Connection activity and diagnostics / Activity** views.
-6. Confirm authenticated gateway tool traffic under the correct agent, route, action and outcome. Investigate errors before claiming success.
+**Meaning:** Authenticate request wale Client ID ka callback Signet mein registered nahi tha.
 
-**Success requires:** a real routed request and Signet evidence. OAuth token creation, Control Tower Deployed status, tool discovery, or zero-traffic approval screens are insufficient.
+**Actual request:** `redirect_uri` ServiceNow `/oauth_redirect.do` tha; `code_challenge_method=S256` present tha.
 
-**Test Gateway Connection** checks reachability; it does not impersonate the external agent or generate a governed tool call. Keep **Shadow** while validating; changing to enforce is a separate rollout decision.
+**Resolution:** same copy Client ID ke Gateway setup -> OAuth Authorization Code mein exact callback save kiya (Part B Step 9), phir **Navin -> Authenticate** se fresh flow start kiya.
 
-## 20. Activity monitoring is a separate setup (pending)
+**Result:** warning hati aur Re-authenticate button aaya. Error page ka old URL refresh karna fresh Authenticate ka replacement nahi.
 
-The linked-agent card can show **Gateway enforcement not verified** and **Activity monitoring not configured or not verified** independently.
+## Error 14. Hostname / alias confusion
 
-For execution-history import:
+**Observed:** ek screenshot mein `another-unplanned-throwing.ngrok-free.dev` aur `mcp://signet-demo` tha. Baad mein festive hostname confirm hua; actual connections mein festive URL aur `servicenow-incidents` verify hua.
 
-1. Open **Configure activity monitoring**.
-2. Supply the documented read-only execution/activity API and credentials.
-3. Scope the execution request to the linked agent and map the actual response fields.
-4. Use **Activity sources and sync** to run/verify sync and agent-specific imported executions.
+**Resolution:** current configured origin aur actual registered route use karo. Unverified alias ko same incident upstream assume mat karo. ServiceNow upstream URL aur Signet outbound gateway URL interchange mat karo.
 
-No working execution-history source was demonstrated. Incident lookup and summarization tools do not automatically provide agent execution logs. Do not invent an activity endpoint or mark monitoring complete from tool discovery.
+## Error 15. Earlier runtime outage - HTML instead of JSON
 
-## 21. Troubleshooting quick reference
+Earlier project notes mein PostgreSQL-era `ECONNRESET` ke baad control/local service group stop hua aur ngrok ne HTTP 502 HTML diya. Frontend ne `Unexpected token '<'` show kiya.
 
-| Symptom | Meaning / next action | Observed outcome |
-| --- | --- | --- |
-| OAuth setup required | Complete ServiceNow inbound authorization-code setup and save Signet settings | Upstream authorization/discovery completed |
-| AI agent list HTTP 403 | Check Table API ACL/API policies; link known actual agent manually if needed | Manual link completed; listing permission unresolved |
-| Cannot find Review and approval | Look in linked agent card beside Gateway setup | Button located |
-| Cannot search action name | Copy technical name from Discovered tools; enter manually | Two incident action names identified |
-| Different tool alias selected | Verify its upstream route before entering actions | `signet-demo` mapping not confirmed |
-| No OAuth token | Request through credential's Get OAuth Token | Stored-token banner appeared |
-| Token expires soon/old expiry | Request fresh token and verify lifetime | Current valid token not established by old banner |
-| MCP still syncing | Retry then inspect exact server's sync with admin | Incident record later appeared in Control Tower |
-| No onboarding tasks | Review requirements; create tasks if needed | Later screenshot shows lifecycle Deployed |
-| Add tool greyed out | Protected original cannot be edited through shown UI | User-created copy is editable and separately linked |
-| There are no tools from this MCP server | Inspect actual discovery response and gateway logs | URLs checked; copied agent and gateway Deployed; root cause unresolved |
-| Gateway enforcement not verified | Need real authenticated traffic for correct identity | Real execution not yet demonstrated |
-| Monitoring not configured | Need separate execution-history source and successful sync | Pending |
-| ngrok hostname changed | Update all URL references consistently | Latest screen uses a different origin; alignment unverified |
+**Recorded resolution:** dev services restart ke baad `/healthz` HTTP 200 JSON aur protected API JSON response restored. API helper non-JSON status/content type clearly report karta hai.
 
-### Earlier local-runtime error: HTML returned instead of JSON
+**Current distinction:** repository ab MongoDB use karti hai. Ye historical outage diagnosis hai; current 404/future outage ko bina logs same database issue mat bolo. Current process, database/network aur tunnel logs inspect karo.
 
-If the console reports `Unexpected token '<', "<!DOCTYPE ..." is not valid JSON`, check whether ngrok returned HTTP 502 HTML because the control process stopped. Verify the local MongoDB replica set and inspect the control process error.
+# Part E - Final verification checklist
 
-Restoring `npm run dev` restored public `/healthz` to HTTP 200 JSON and protected API responses to JSON. The frontend helper also reports non-JSON status/content type more clearly. Permanent prevention of the database network reset was not established. If repeated, inspect database/network/process logs; regenerating OAuth credentials does not fix a stopped server.
+- [ ] Current public origin saved callback, Hosted Signet, Authorization/Token aur MCP URLs mein aligned hai.
+- [ ] ServiceNow upstream connection Authorized; exact incident tools discovered hain.
+- [ ] Editable copy ka actual sys_id linked hai.
+- [ ] Correct gateway alias aur actions intended agent/environment ke liye approved hain.
+- [ ] Client ID/Secret copy ke hain.
+- [ ] Same client ka actual outbound callback Signet mein registered hai.
+- [ ] Navin Authenticate aur Signet consent complete hain.
+- [ ] Applicable AICT reviews correct assets par complete hain.
+- [ ] Navin MCP tool copy mein attached aur correct saved active version selected hai.
+- [ ] Real incident test expected tool aur result deta hai.
+- [ ] Same call correct agent/action/route se Signet Activity mein verified hai.
+- [ ] Execution-history monitoring required ho to separate source/sync verified hai.
 
-## 22. Final checklist
-
-- [ ] Current public URL matches callback, saved Signet settings, token URL and HTTP MCP connection URL.
-- [ ] ServiceNow upstream connection is Authorized and exact incident tools discovered.
-- [ ] Existing selected agent is editable; Add tool is enabled.
-- [ ] Correct AI agent sys_id is linked in Signet.
-- [ ] Registered alias points to the intended incident MCP server.
-- [ ] Required exact actions are approved for the intended environment.
-- [ ] Outbound OAuth uses that same agent's Signet-issued credentials.
-- [ ] HTTP connection is active and references the intended credential/alias.
-- [ ] Control Tower lifecycle requirements are completed by the appropriate reviewer.
-- [ ] Gateway tools are attached to the editable agent.
-- [ ] Real tool execution is visible in Signet for the correct identity.
-- [ ] Activity monitoring is verified separately if required.
-
-This is a configuration guide; no code/test changes are required to follow it. Documentation alone does not validate a live connection. Keep secrets out of shared screenshots, this file and Git.
+Implementation validation mein typecheck/build aur real isolated-MongoDB HTTP integration tests login/consent, callback binding, PKCE, code expiry/replay, refresh rotation, revocation aur existing connection flows cover karte hain. Ye live Signet evidence ka replacement nahi. Is documentation update ne application configuration change ya connection test rerun nahi kiya.
