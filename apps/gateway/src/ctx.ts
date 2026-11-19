@@ -34,7 +34,7 @@ export interface Ctx {
   startedAt: number; // wall clock, for trace spans
   trace: TraceContext; // W3C trace context (BP 8.2 trace_id / span_id)
   lastMark: number;
-  actionType: 'llm_call' | 'tool_call';
+  actionType: 'llm_call' | 'tool_call' | 'guardrail_check';
   steps: Step[];
   rules: string[];
   reasons: string[];
@@ -309,15 +309,16 @@ export async function finish(ctx: Ctx, err: Halt | null, okBody: unknown): Promi
 // One span per decision with the OpenTelemetry GenAI conventions and Signet's decision; metadata only.
 function exportDecisionSpan(ctx: Ctx, data: { policy_decision: string; policy_rule_ids: string[]; outcome: string; error_code: string | null; data_classes_in: string[]; latency_ms_gateway: number }, refusal: Halt | null, recordId: string) {
   const tool = ctx.actionType === 'tool_call';
+  const guardian = ctx.actionType === 'guardrail_check';
   exportSpan({
     trace: ctx.trace,
-    name: tool ? `execute_tool ${ctx.target}` : `chat ${ctx.target}`,
+    name: guardian ? 'review servicenow content' : tool ? `execute_tool ${ctx.target}` : `chat ${ctx.target}`,
     startMs: ctx.startedAt,
     endMs: Date.now(),
     error: refusal ? `${refusal.code}: ${refusal.message}`.slice(0, 300) : null,
     attributes: {
-      'gen_ai.operation.name': tool ? 'execute_tool' : 'chat',
-      ...(tool ? { 'gen_ai.tool.name': ctx.target } : { 'gen_ai.request.model': ctx.target }),
+      'gen_ai.operation.name': guardian ? 'guardrail_check' : tool ? 'execute_tool' : 'chat',
+      ...(guardian ? { 'signet.guardrail': ctx.target } : tool ? { 'gen_ai.tool.name': ctx.target } : { 'gen_ai.request.model': ctx.target }),
       'gen_ai.usage.input_tokens': ctx.tokensIn || null,
       'gen_ai.usage.output_tokens': ctx.tokensOut || null,
       'gen_ai.agent.id': ctx.claims?.agent_id ?? null,

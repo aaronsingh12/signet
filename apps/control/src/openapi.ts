@@ -3,6 +3,7 @@
 type Op = { summary: string; permission?: string; public?: boolean; body?: string; runner?: boolean };
 
 const ops: Record<string, Record<string, Op>> = {
+  '/agents/{id}/servicenow-guardian': { get: { summary: 'Read authenticated ServiceNow BYOG setup and submitted review counts; does not assert native chat blocking', permission: 'identity.bootstrap' } },
   '/connect/settings': { put: { summary: 'Save public Control and Gateway origins in MongoDB; subsequent connections use them without restarting', permission: 'tenant.admin' } },
   '/edge-runners/{id}/tools': { post: { summary: 'Register a private HTTP tool and encrypted credential atomically', permission: 'connectors.manage and tools.manage and secrets.manage' } },
   '/edge-runners/{id}/tools/{alias}/credential': { put: { summary: 'Rotate a private tool credential; paired runners read the new value on their next request', permission: 'connectors.manage and secrets.manage' } },

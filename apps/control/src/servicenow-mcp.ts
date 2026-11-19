@@ -59,16 +59,21 @@ export async function completeServiceNowConnection(req: Request, res: Response, 
   }
   const credential = JSON.stringify({ access_token: result.access_token, refresh_token: result.refresh_token });
   const expiresAt = Date.now() + result.expires_in * 1000;
+  await saveServiceNowAuthorization(id, credential, expiresAt, actor);
+  res.setHeader('cache-control', 'no-store');
+  res.redirect('/settings/accounts');
+}
+
+/** Replaces OAuth tokens on the existing connection without resetting discovery or agent onboarding. */
+export async function saveServiceNowAuthorization(id: string, credential: string, expiresAt: number, actor: Principal): Promise<void> {
   await tx(async () => {
     const existing = await db.prepare('SELECT token_secret_id AS secret_id FROM servicenow_mcp_account WHERE tenant_id = ? AND id = ? FOR UPDATE').get(tenant.id, id) as { secret_id: string | null } | undefined;
     if (!existing) throw new PolicyError('SERVICENOW_CONFIG', 'This ServiceNow connection was removed during authorization; create a new connection to continue', 404);
     const secret = existing?.secret_id ? await rotateSecret(existing.secret_id, credential, actor)
       : await putSecret({ name: `servicenow-mcp-${newId('sec').slice(-16).toLowerCase()}`, kind: 'platform', value: credential }, actor);
-    await db.prepare('UPDATE servicenow_mcp_account SET token_secret_id = ?, expires_at = ?, updated_by = ?, updated_at = ?, tools_json = NULL, discovered_at = NULL WHERE tenant_id = ? AND id = ?')
+    await db.prepare('UPDATE servicenow_mcp_account SET token_secret_id = ?, expires_at = ?, updated_by = ?, updated_at = ? WHERE tenant_id = ? AND id = ?')
       .run(secret.id, expiresAt, actor.id, nowIso(), tenant.id, id);
   });
-  res.setHeader('cache-control', 'no-store');
-  res.redirect('/settings/accounts');
 }
 
 export interface ServiceNowConnectionView {

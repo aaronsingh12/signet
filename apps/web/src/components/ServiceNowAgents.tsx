@@ -5,6 +5,7 @@ import { useCan } from '../lib/auth';
 import { Card, ErrorNote, Modal } from './ui';
 import { ExternalConnectionEditor, ExternalConnections } from './ExternalConnections';
 import { ServiceNowGateway } from './ServiceNowGateway';
+import { ServiceNowGuardian } from './ServiceNowGuardian';
 
 interface LinkedAgent {
   agent_id: string; external_id: string; connection_id: string; name: string; handle: string;
@@ -75,6 +76,7 @@ function LinkServiceNowAgentForm({ path, onSaved }: { path: string; onSaved: () 
 function LinkedServiceNowAgent({ agent, onChanged }: { agent: LinkedAgent; onChanged: () => void }) {
   const [configuring, setConfiguring] = useState(false);
   const [showSources, setShowSources] = useState(false);
+  const [showGuardian, setShowGuardian] = useState(false);
   const can = useCan();
   return <div data-testid={`servicenow-linked-agent-${agent.agent_id}`} className="mt-4 rounded-xl border border-line p-4">
     <Link className="font-semibold text-royal" to={`/agents/${agent.agent_id}`}>{agent.name}</Link>
@@ -86,8 +88,10 @@ function LinkedServiceNowAgent({ agent, onChanged }: { agent: LinkedAgent; onCha
       <button type="button" className="btn-ghost" data-testid={`servicenow-monitoring-sources-${agent.agent_id}`} onClick={() => setShowSources(!showSources)}>Activity sources and sync</button>
       <Link className="btn-ghost" to={`/agents/${agent.agent_id}?tab=lifecycle`}>Review and approval</Link>
       <Link className="btn-ghost" to={`/agents/${agent.agent_id}?tab=connection`}>Gateway setup</Link>
+      {can('identity.bootstrap') && <button type="button" className="btn-ghost" data-testid={`servicenow-guardian-setup-${agent.agent_id}`} onClick={() => setShowGuardian(!showGuardian)}>Chat guardrails setup</button>}
     </div>
     {showSources && <div className="mt-4"><ExternalConnections agentId={agent.agent_id} /><button type="button" className="btn-ghost mt-2" onClick={onChanged}>Refresh coverage</button></div>}
+    {showGuardian && <ServiceNowGuardian agentId={agent.agent_id} />}
     {configuring && <Modal title="Configure ServiceNow activity monitoring" width="max-w-5xl" onClose={() => setConfiguring(false)}>
       <p className="mb-4 text-sm text-ink-2">Enter the documented read-only activity API and credentials. Use GET endpoints and scope the executions request with {'{agent_id}'} or this agent's exact sys_id. Configure its response mapping; leave discovery and remote actions disabled. Activity import does not intercept internal calls or grant gateway approval.</p>
       <ExternalConnectionEditor agentId={agent.agent_id} method="rest" existing={null} onSaved={() => { setConfiguring(false); setShowSources(true); onChanged(); }} onCancel={() => setConfiguring(false)} />

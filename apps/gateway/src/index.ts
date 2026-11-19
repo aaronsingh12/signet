@@ -1,6 +1,7 @@
 import express, { type Request, type Response } from 'express';
 import { destinationPolicyFromEnv, httpToolRequest, request, verifyJws, type ToolAlias } from '@signet/core';
 import { handleChat } from './chat';
+import { handleServiceNowGuardian } from './servicenow-guardian';
 import { type Done, Halt, hitlDecided, newCtx, preflight } from './ctx';
 import { isolation, modelInfo, startRuntime } from './detectors';
 import { runningHashes } from './pins';
@@ -90,6 +91,11 @@ const guard = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: R
   });
 
 // --- the cloud LLM, OpenAI-compatible (base-URL switch, BP 11.2) ---
+app.post('/v1/guardrails/servicenow', guard(async (req, res) => {
+  res.setHeader('cache-control', 'no-store');
+  send(res, await handleServiceNowGuardian(req.headers, req.body));
+}));
+
 app.post(['/v1/chat/completions', '/v1/llm/chat/completions'], guard(async (req, res) => {
   const d = await handleChat(req.headers, req.body);
   if (d.status === 200 && req.body?.stream === true) return sendStream(res, d);

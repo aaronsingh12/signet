@@ -23,6 +23,7 @@ export function agentState(agent: AgentAnalytics): { label: string; tone: string
   if (Date.parse(agent.valid_to) <= Date.now()) return { label: 'Approval expired', tone: 'warn', description: 'Renew this agent’s approval before it runs again.' };
   if (agent.enforcement === 'throttled') return { label: 'Limited', tone: 'warn', description: 'This agent is running with a reduced request limit.' };
   if (agent.enforcement === 'step_up') return { label: 'Extra checks', tone: 'warn', description: 'Additional safety checks apply to this agent.' };
+  if (agent.servicenow?.gateway_enforcement) return { label: 'MCP governed', tone: 'ok', description: 'Routed MCP tool calls are verified. Native chat needs a separately configured and tested ServiceNow Guardian provider.' };
   return { label: 'Governed', tone: 'ok', description: agent.provider.connection_ids.length ? 'Governance approval is active. REST monitoring reports provider activity; internal calls are not intercepted by Signet.' : 'An active approval and Signet safety checks cover this agent.' };
 }
 

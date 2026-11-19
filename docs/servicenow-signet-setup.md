@@ -2,6 +2,8 @@
 
 Easy Hinglish guide: basics, complete connection steps, real incident test aur faced errors. UI labels ServiceNow release aur permissions ke according thode alag ho sakte hain.
 
+Native chat prompt/response blocking ke liye separate [ServiceNow Guardian setup](servicenow-guardian-setup.md) follow karo. Ye MCP guide akeli native model traffic intercept nahi karti.
+
 - [Part A - Basics aur preparation](#part-a---basics-aur-preparation)
 - [Part B - Complete connection steps](#part-b---complete-connection-steps)
 - [Part C - Pehle try kiya manual connection path](#part-c---pehle-try-kiya-manual-connection-path)

@@ -17,6 +17,7 @@ test('ServiceNow agent linking reuses identities, maps read-only monitoring, rep
   const { create } = await import('../src/external-connections');
   const { agentAnalytics } = await import('../src/agent-analytics');
   const { prepareServiceNowGateway, serviceNowAccessToken } = await import('../src/servicenow-gateway');
+  const { saveServiceNowAuthorization, serviceNowConnection } = await import('../src/servicenow-mcp');
   const { putSecret, revealForGateway } = await import('../src/secrets');
   const { db } = await import('../src/db');
   const { permissionsFor } = await import('../src/rbac');
@@ -48,6 +49,25 @@ test('ServiceNow agent linking reuses identities, maps read-only monitoring, rep
   const savedRoute = await db.prepare('SELECT secret_id FROM servicenow_gateway_route WHERE connection_id = ?').get(settings.id) as { secret_id: string };
   assert.equal((await revealForGateway(savedRoute.secret_id)).value, 'test-provider-token');
   assert.equal((await linkedServiceNowAgents(settings.id))[0]!.gateway_enforcement, false);
+  const discoveredAt = new Date().toISOString();
+  await db.prepare('UPDATE servicenow_mcp_account SET expires_at = ?, discovered_at = ? WHERE id = ?')
+    .run(Date.now() - 1000, discoveredAt, settings.id);
+  assert.equal((await serviceNowConnection(settings.id)).authorized, false);
+  const preserved = await db.prepare('SELECT tools_json, discovered_at FROM servicenow_mcp_account WHERE id = ?').get(settings.id);
+  const agentBefore = await db.prepare('SELECT * FROM agent WHERE id = ?').get(linked.agent_id);
+  const sourceBefore = await db.prepare('SELECT * FROM external_connection WHERE id = ?').get(source.id);
+  const linksBefore = await linkedServiceNowAgents(settings.id);
+  for (const accessToken of ['reauthorized-token', 'reauthorized-again-token']) {
+    await saveServiceNowAuthorization(settings.id, JSON.stringify({ access_token: accessToken, refresh_token: 'renewed-refresh-token' }), Date.now() + 600000, actor);
+    assert.equal((await serviceNowConnection(settings.id)).authorized, true);
+    assert.equal(await serviceNowAccessToken(settings.id), accessToken);
+    assert.equal((await revealForGateway(savedRoute.secret_id)).value, accessToken);
+    assert.deepEqual(await db.prepare('SELECT tools_json, discovered_at FROM servicenow_mcp_account WHERE id = ?').get(settings.id), preserved);
+    assert.deepEqual(await db.prepare('SELECT secret_id FROM servicenow_gateway_route WHERE connection_id = ?').get(settings.id), savedRoute);
+    assert.deepEqual(await db.prepare('SELECT * FROM agent WHERE id = ?').get(linked.agent_id), agentBefore);
+    assert.deepEqual(await db.prepare('SELECT * FROM external_connection WHERE id = ?').get(source.id), sourceBefore);
+    assert.deepEqual(await linkedServiceNowAgents(settings.id), linksBefore);
+  }
   await removeServiceNowConnection(settings.id);
   assert.equal(await db.prepare('SELECT alias FROM tool WHERE alias = ?').get(route.alias), undefined);
   assert.equal(await db.prepare('SELECT id FROM secret WHERE id = ?').get(savedRoute.secret_id), undefined);

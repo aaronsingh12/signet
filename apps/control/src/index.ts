@@ -24,6 +24,7 @@ import * as live from './live';
 import * as oidc from './oidc';
 import * as plugins from './plugins';
 import * as serviceNowMcp from './servicenow-mcp';
+import { serviceNowGuardianSetup } from './servicenow-guardian';
 import { discoverServiceNowTools } from './servicenow-mcp-discovery';
 import { serviceNowSettings, createServiceNowSettings, updateServiceNowSettings, removeServiceNowConnection } from './servicenow-mcp-settings';
 import { linkServiceNowAgent, linkedServiceNowAgents, serviceNowLinksForAgent, availableServiceNowAgents } from './servicenow-agents';
@@ -282,6 +283,7 @@ api.put('/plugins/servicenow/connections/:id/settings', requires('tenant.admin')
 }));
 api.get('/plugins/servicenow/connections/:id/connect', requires('tenant.admin'), route(async (req, res) => serviceNowMcp.startServiceNowConnection(req.params.id!, res, principalOf(res))));
 api.get('/plugins/servicenow/connections/:id/agents', requires('tenant.admin'), route(async req => ({ items: await linkedServiceNowAgents(req.params.id!) })));
+api.get('/agents/:id/servicenow-guardian', requires('identity.bootstrap'), route(async (req, res) => serviceNowGuardianSetup(req.params.id!, principalOf(res))));
 api.get('/plugins/servicenow/connections/:id/agents/available', requires('tenant.admin'), route(async (req, res) => {
   res.setHeader('cache-control', 'no-store');
   return { items: await availableServiceNowAgents(req.params.id!) };
