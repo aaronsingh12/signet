@@ -1,4 +1,4 @@
-import { canonicalize, newId, sha256, type Tier } from '@signet/core';
+import { GUARDRAIL_PARAMS, canonicalize, newId, sha256, type Tier } from '@signet/core';
 import { db, nowIso, tx } from './db';
 import { PolicyError, forbidden, invalid, notFound } from './errors';
 import * as hub from './hub';
@@ -62,7 +62,7 @@ interface DecisionRow {
 type Row = Omit<ApprovalRequest, 'pack' | 'slots' | 'data'> & { pack: string; slots: string; data: string };
 const parse = (r: Row): ApprovalRequest => ({ ...r, pack: JSON.parse(r.pack), slots: JSON.parse(r.slots), data: JSON.parse(r.data) });
 
-const STEP_UP_SECONDS = 300; // BP 7.3: fresh MFA within 5 minutes for T1/T2 decisions and kill reversals
+const STEP_UP_SECONDS = GUARDRAIL_PARAMS.approval_reauth_seconds; // BP 7.3: fresh MFA within 5 minutes for T1/T2 decisions and kill reversals
 
 type Handler = (req: ApprovalRequest, outcome: Outcome, p: Principal | null, decision?: Decision) => Promise<void>;
 const handlers = new Map<ApprovalType, Handler>();

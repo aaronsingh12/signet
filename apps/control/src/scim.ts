@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { newId } from '@signet/core';
+import { GUARDRAIL_PARAMS, newId } from '@signet/core';
 import { db, nowIso, tx } from './db';
 import { PolicyError, forbidden, invalid, notFound } from './errors';
 import * as ledger from './ledger';
@@ -23,7 +23,7 @@ const SCHEMA = {
   patch: 'urn:ietf:params:scim:api:messages:2.0:PatchOp',
   error: 'urn:ietf:params:scim:api:messages:2.0:Error',
 };
-export const OWNER_GRACE_DAYS = 14; // 10 business days
+export const OWNER_GRACE_DAYS = GUARDRAIL_PARAMS.owner_grace_days; // 10 business days
 const MAX_PAGE = 200;
 
 export class ScimError extends Error {

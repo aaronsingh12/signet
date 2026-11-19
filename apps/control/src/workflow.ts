@@ -1,5 +1,5 @@
 import {
-  DEV_OVERRIDE_DISABLED, RESTRICTED_TAGS, canonicalize, devOverridesAllowed, evaluateTs, newId, promptDecision, scan, sha256,
+  DEV_OVERRIDE_DISABLED, GUARDRAIL_PARAMS, RESTRICTED_TAGS, canonicalize, devOverridesAllowed, evaluateTs, newId, promptDecision, scan, sha256,
   type CompiledPolicy, type DataTag, type Rollout, type Tier, DATA_TAGS } from '@signet/core';
 import * as approvals from './approvals';
 import { compilePolicy } from './compile';
@@ -531,14 +531,16 @@ export function runBaselineSuites(agent: AgentRow, manifest: SealInput, intake: 
   }
   results.push({ suite: 'hitl_rules', required: tier !== 'T4', passed: !f4.length, cases: n4, failures: f4, threshold: 'every rule holds' });
 
-  // 5. Functional golden set (owner-supplied): >= 85% for T1/T2 (BP 6 Stage 4).
+  // 5. Functional golden set (owner-supplied): >= functional_min_pct for T1/T2 (BP 6 Stage 4).
   const fs = evidence.functional_score;
-  results.push({ suite: 'functional', required: tier === 'T1' || tier === 'T2', passed: typeof fs === 'number' && fs >= 85, cases: 1, failures: typeof fs === 'number' && fs >= 85 ? [] : [typeof fs === 'number' ? `score ${fs} < 85` : 'no golden-set score supplied'], value: fs, threshold: '>= 85%' });
+  const minPct = GUARDRAIL_PARAMS.functional_min_pct;
+  results.push({ suite: 'functional', required: tier === 'T1' || tier === 'T2', passed: typeof fs === 'number' && fs >= minPct, cases: 1, failures: typeof fs === 'number' && fs >= minPct ? [] : [typeof fs === 'number' ? `score ${fs} < ${minPct}` : 'no golden-set score supplied'], value: fs, threshold: `>= ${minPct}%` });
 
-  // 6. Bias (when the agent affects individuals): disparity ratio within 0.8-1.25.
+  // 6. Bias (when the agent affects individuals): disparity ratio within the bias_ratio range.
   const br = evidence.bias_ratio;
-  const biasOk = typeof br === 'number' && br >= 0.8 && br <= 1.25;
-  results.push({ suite: 'bias', required: intake.decisions_about_individuals, passed: biasOk, cases: 1, failures: biasOk ? [] : [typeof br === 'number' ? `ratio ${br} outside 0.8-1.25` : 'no bias measurement supplied'], value: br, threshold: '0.8-1.25' });
+  const bias = GUARDRAIL_PARAMS.bias_ratio;
+  const biasOk = typeof br === 'number' && br >= bias.min && br <= bias.max;
+  results.push({ suite: 'bias', required: intake.decisions_about_individuals, passed: biasOk, cases: 1, failures: biasOk ? [] : [typeof br === 'number' ? `ratio ${br} outside ${bias.min}-${bias.max}` : 'no bias measurement supplied'], value: br, threshold: `${bias.min}-${bias.max}` });
 
   // 7. Independent red team (T1).
   const rt = evidence.red_team_report_sha256;
@@ -597,7 +599,7 @@ function certificateSlots(tier: Tier): approvals.Slot[] {
   const owner: approvals.Slot = { slot: 'owner', label: 'Owner', roles: [], count: 1, owner_only: true };
   const security: approvals.Slot = { slot: 'security', label: 'Security', roles: ['security_officer'], count: 1 };
   const risk: approvals.Slot = { slot: 'risk', label: 'Risk/Compliance', roles: ['risk_officer'], count: 1 };
-  const board: approvals.Slot = { slot: 'board', label: 'AI Governance Board (quorum 2)', roles: ['governance_board'], count: 2 };
+  const board: approvals.Slot = { slot: 'board', label: `AI Governance Board (quorum ${GUARDRAIL_PARAMS.board_quorum})`, roles: ['governance_board'], count: GUARDRAIL_PARAMS.board_quorum };
   return { T4: [], T3: [owner, security], T2: [owner, security, risk], T1: [owner, security, risk, board] }[tier];
 }
 
@@ -672,8 +674,9 @@ async function issueFromLifecycle(lc: Lifecycle, approvers: { user: string; at: 
 
 function deployPlanFor(tier: Tier): DeployPlan {
   // BP 6 path weight: T4 shadow 1 day, T3 3 days, T2 7 days + canary, T1 14 days + canary.
-  const days = { T1: 14, T2: 7, T3: 3, T4: 1 }[tier];
-  return { mode: 'shadow', canary: tier === 'T1' || tier === 'T2', canary_pct: 10, shadow_days: days, mode_since: nowIso(), overrides: [] };
+  const deploy = GUARDRAIL_PARAMS.deploy;
+  const days = deploy.shadow_days[tier];
+  return { mode: 'shadow', canary: deploy.canary_tiers.includes(tier), canary_pct: deploy.canary_pct, shadow_days: days, mode_since: nowIso(), overrides: [] };
 }
 
 export async function rollouts(): Promise<Record<string, Rollout>> {
@@ -707,7 +710,7 @@ export async function advanceDeploy(lcId: string, p: Principal, input: { to: 'ca
   if (input.to === 'canary' && !plan.canary) throw invalid(`${agent.tier} deployments go from shadow straight to enforce`);
   if (input.to === 'canary' && plan.mode !== 'shadow') throw new PolicyError('BP-6-S6', 'canary follows shadow', 409);
   if (input.to === 'enforce' && plan.canary && plan.mode !== 'canary') throw new PolicyError('BP-6-S6', `${agent.tier} deployments run a canary before full enforcement`, 409);
-  const needDays = plan.mode === 'shadow' ? plan.shadow_days : 1;
+  const needDays = plan.mode === 'shadow' ? plan.shadow_days : GUARDRAIL_PARAMS.deploy.canary_min_days;
   if (ageDays < needDays) {
     if (!(input.dev_override && devOverridesAllowed() && input.reason?.trim())) throw new PolicyError('BP-6-S6', `${plan.mode} has run ${ageDays.toFixed(2)} of ${needDays} days${input.dev_override && !devOverridesAllowed() ? `; ${DEV_OVERRIDE_DISABLED}` : ''}`, 422, { stats });
     overrides.push(`${plan.mode} period cut short by ${p.id}: ${input.reason}`);
@@ -715,7 +718,8 @@ export async function advanceDeploy(lcId: string, p: Principal, input: { to: 'ca
   if (stats.critical_would_block > 0 && !input.acknowledge_would_blocks) {
     throw new PolicyError('BP-6-S6', `${stats.critical_would_block} critical would-block decision(s) in ${plan.mode} need an explanation before moving on`, 422, { stats });
   }
-  if (plan.mode === 'canary' && stats.transactions >= 20 && stats.upstream_errors / stats.transactions > 0.05) throw new PolicyError('BP-6-S6', 'canary error rate is above 5%', 422, { stats });
+  const { canary_min_transactions: minTx, canary_max_error_share: maxErr } = GUARDRAIL_PARAMS.deploy;
+  if (plan.mode === 'canary' && stats.transactions >= minTx && stats.upstream_errors / stats.transactions > maxErr) throw new PolicyError('BP-6-S6', `canary error rate is above ${Math.round(maxErr * 100)}%`, 422, { stats });
   const gate = { from: plan.mode, to: input.to, stats, overrides: overrides.slice(plan.overrides.length) };
   (await tx(async () => {
     if (input.to === 'canary') {
@@ -770,7 +774,7 @@ export async function attest(agentId: string, p: Principal, input: { purpose_unc
   // Renewal (BP 4.3): inside the 30-day window an attestation renews the seal with the same manifest.
   const daysLeft = (Date.parse(active.certificate.valid_to) - Date.now()) / DAY;
   let renewed: string | null = null;
-  if (daysLeft <= 30) {
+  if (daysLeft <= GUARDRAIL_PARAMS.renewal_window_days) {
     const c = active.certificate;
     const manifest: SealInput = { models: c.models, tools: c.tools, data_classes: c.data_classes, hitl: c.hitl, limits: c.limits, environments: c.environments, tags: c.tags, ai_disclosure: c.ai_disclosure };
     const issued = (await signSeal(agent.id, manifest, { approvers: [...c.approvers, { user: `${p.id} (re-attestation)`, at: nowIso() }], evidence_refs: { ...(c.evidence_refs ?? {}), attestation_sha256: hash }, regulatory_category: c.regulatory_category ?? 'unclassified', minor: true, actor: p.id }));
@@ -887,7 +891,7 @@ export async function sweep() {
       if ((await enforcement.agentLevel(c.agent_id)) === 'active') (await enforcement.applyLadder({ agentId: c.agent_id }, 'quarantine', { actor: 'system:expiry', reason: 'seal expired without re-attestation', rule_id: 'RB-KILL-11', automatic: true }));
       continue;
     }
-    for (const mark of [30, 14, 7]) {
+    for (const mark of GUARDRAIL_PARAMS.reattest_reminder_days) {
       if (left <= mark && left > mark - 1) {
         const key = `reattest:${c.id}:${mark}`;
         if (!(await db.prepare('SELECT 1 FROM notification WHERE kind = ? AND link = ?').get(key, `/agents/${c.agent_id}`))) (await notify(c.owner, key, `${c.handle}: seal expires in ${Math.ceil(left)} days; re-attest to renew`, `/agents/${c.agent_id}`));

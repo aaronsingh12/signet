@@ -1,6 +1,6 @@
 import type { IncomingHttpHeaders } from 'node:http';
 import {
-  TOKEN_AUDIENCE, newId, rewrite, scan, sha256, tokenIssuer, verifyJws,
+  GUARDRAIL_PARAMS, PIPELINE_STEPS, TOKEN_AUDIENCE, newId, rewrite, scan, sha256, tokenIssuer, verifyJws,
   type CertificateBody, type CompiledPolicy, type DetectorResult, type Outcome, type WorkloadClaims,
 } from '@signet/core';
 import { appendRecord } from './ledgerclient';
@@ -15,7 +15,7 @@ import { exportSpan, traceFrom, traceparentOf, type TraceContext } from './otel'
 // record written before the agent gets an answer (RB-INV-15).
 
 export const ENV_NAME = process.env.SIGNET_ENV ?? 'dev';
-export const STEP_NAMES = ['', 'authenticate', 'resolve seal', 'kill and quarantine', 'seal validity', 'limits', 'normalise', 'manifest', 'DLP inbound', 'policy', 'human approval', 'credential injection', 'forward', 'DLP and guardrails outbound', 'log and score'];
+export const STEP_NAMES = ['', ...PIPELINE_STEPS.map((s) => s.name)]; // one list, shared with the Guardrails catalogue
 const LADDER_LEVEL: Partial<Record<Outcome, number>> = { deny: 1, require_approval: 1, step_up: 2, throttle: 3, quarantine: 4, kill: 5 };
 
 export interface Step {
@@ -140,9 +140,10 @@ export async function ladder(ctx: Ctx, action: 'kill' | 'quarantine' | 'throttle
 
 export async function recordOutOfManifest(ctx: Ctx, what: string, rules: string[], shadowOk = false): Promise<void> {
   const n = await limits.recordOutOfManifest(ctx.claims!.agent_id);
-  if (n >= 3) {
-    await ladder(ctx, 'kill', 'RB-KILL-04', `${n} out-of-manifest attempts in 10 minutes`, { last: what });
-    halt(ctx, 7, 403, 'out_of_manifest', `${what}; ${n} out-of-manifest attempts in 10 minutes, the agent has been killed`, 'kill', [...rules, 'RB-KILL-04'], 'blocked', { attempts_in_window: n });
+  const { attempts, window_minutes } = GUARDRAIL_PARAMS.out_of_manifest;
+  if (n >= attempts) {
+    await ladder(ctx, 'kill', 'RB-KILL-04', `${n} out-of-manifest attempts in ${window_minutes} minutes`, { last: what });
+    halt(ctx, 7, 403, 'out_of_manifest', `${what}; ${n} out-of-manifest attempts in ${window_minutes} minutes, the agent has been killed`, 'kill', [...rules, 'RB-KILL-04'], 'blocked', { attempts_in_window: n });
   }
   // The repeat-violation kill is enforced even in shadow; a single attempt is only would_block there.
   if (shadowOk && wouldBlock(ctx, 7, rules, what)) return;

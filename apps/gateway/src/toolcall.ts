@@ -1,5 +1,5 @@
 import type { IncomingHttpHeaders } from 'node:http';
-import { canonicalize, combine, sha256, type Outcome, type ToolAlias } from '@signet/core';
+import { GUARDRAIL_PARAMS, canonicalize, combine, sha256, type Outcome, type ToolAlias } from '@signet/core';
 import { type Ctx, type Done, Halt, decisionInputs, finish, halt, humanApproval, ladder, maskArgs, newCtx, preflight, recordOutOfManifest, sessionKey, step, wouldBlock } from './ctx';
 import { detectInjection, notDeployed } from './detectors';
 import { evaluate } from './engine';
@@ -22,7 +22,7 @@ export interface ToolRequest {
   forward: (tool: ToolAlias, credential: string | null, signal: AbortSignal) => Promise<unknown>;
 }
 
-const TOOL_TIMEOUT_MS = 30_000;
+const TOOL_TIMEOUT_MS = GUARDRAIL_PARAMS.tool_timeout_ms;
 
 export async function handleTool(headers: IncomingHttpHeaders, req: ToolRequest): Promise<Done> {
   const ctx = newCtx('tool_call', `${req.kind}://${req.alias}.${req.action}`, headers);
@@ -56,8 +56,8 @@ async function run(ctx: Ctx, headers: IncomingHttpHeaders, req: ToolRequest): Pr
   // in this session. The deterministic part is the attempt itself; the signal is the taint. A
   // high-impact action first waits for any verdict still being computed for this session.
   if (impact === 'privileged' || impact === 'critical') {
-    const settled = await settle(sessionKey(ctx), 5_000);
-    if (!settled) ctx.reasons.push('a DET-INJ verdict for this session was still pending after 5 s');
+    const settled = await settle(sessionKey(ctx), GUARDRAIL_PARAMS.hijack_verdict_wait_ms);
+    if (!settled) ctx.reasons.push(`a DET-INJ verdict for this session was still pending after ${GUARDRAIL_PARAMS.hijack_verdict_wait_ms / 1000} s`);
   }
   const t = await taintOf(sessionKey(ctx));
   if (t?.band === 'high' && (impact === 'privileged' || impact === 'critical')) {

@@ -1,5 +1,5 @@
 import {
-  newId, scopeKey, signJws,
+  GUARDRAIL_PARAMS, newId, scopeKey, signJws,
   type CertificateBody, type DetectorConfig, type EnforcementLevel, type PolicyBundle, type ScopeState, type Tier,
 } from '@signet/core';
 import { compilePolicy, policyHash } from './compile';
@@ -13,11 +13,11 @@ import { reloadSettings, tenant } from './tenant';
 import { listTools } from './tools';
 import { correlation, enqueue } from './outbox';
 
-const BUNDLE_TTL_MS = 24 * 3_600_000; // BP 3: gateways enforce on the last bundle until it expires
+const BUNDLE_TTL_MS = GUARDRAIL_PARAMS.bundle_ttl_hours * 3_600_000; // BP 3: gateways enforce on the last bundle until it expires
 
 // Ladder parameters (Rulebook: response ladder parameters).
-const STEP_UP_MIN: Record<Tier, number> = { T1: 60, T2: 60, T3: 30, T4: 30 };
-const THROTTLE: Record<Tier, { factor: number; minutes: number }> = { T1: { factor: 0.25, minutes: 60 }, T2: { factor: 0.25, minutes: 60 }, T3: { factor: 0.5, minutes: 30 }, T4: { factor: 0.5, minutes: 30 } };
+export const STEP_UP_MIN: Record<Tier, number> = GUARDRAIL_PARAMS.ladder.step_up_minutes;
+export const THROTTLE: Record<Tier, { factor: number; minutes: number }> = GUARDRAIL_PARAMS.ladder.throttle;
 const RANK: Record<EnforcementLevel, number> = { active: 0, step_up: 1, throttled: 2, quarantined: 3, killed: 4 };
 
 interface StateRow {

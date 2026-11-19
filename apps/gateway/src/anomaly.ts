@@ -1,4 +1,4 @@
-import { ANOM_THRESHOLDS, type DetectorResult, type Tier } from '@signet/core';
+import { ANOM_THRESHOLDS, GUARDRAIL_PARAMS, type DetectorResult, type Tier } from '@signet/core';
 import { pinCheck } from './pins';
 import * as state from './state';
 
@@ -39,12 +39,13 @@ export function anomalyResult(live: LiveAnomaly | null | undefined, tier: Tier =
 
 // Runaway kill (DA 4): a rule (cost or volume above 200% of the seal limit) plus the signal (DET-ANOM
 // High for 10 minutes). A detector score alone never kills.
-export const RUNAWAY_HIGH_MS = 10 * 60_000;
+const RUNAWAY = GUARDRAIL_PARAMS.runaway;
+export const RUNAWAY_HIGH_MS = RUNAWAY.anomaly_high_minutes * 60_000;
 export function runaway(a: AnomalyResult | null, use: { in_minute: number; tokens: number; usd: number }, limits: { rpm: number; tokens_per_day: number; usd_per_day: number }): string | null {
   if (!a || a.status !== 'ok' || a.band !== 'high' || (a.high_for_ms ?? 0) < RUNAWAY_HIGH_MS) return null;
-  if (use.in_minute >= 2 * limits.rpm) return `${use.in_minute} requests this minute, over 200% of the seal limit of ${limits.rpm}`;
-  if (limits.tokens_per_day > 0 && use.tokens >= 2 * limits.tokens_per_day) return `${use.tokens} tokens today, over 200% of the seal limit of ${limits.tokens_per_day}`;
-  if (limits.usd_per_day > 0 && use.usd >= 2 * limits.usd_per_day) return `$${use.usd.toFixed(2)} today, over 200% of the seal limit of $${limits.usd_per_day}`;
+  if (use.in_minute >= RUNAWAY.limit_multiple * limits.rpm) return `${use.in_minute} requests this minute, over ${RUNAWAY.limit_multiple * 100}% of the seal limit of ${limits.rpm}`;
+  if (limits.tokens_per_day > 0 && use.tokens >= RUNAWAY.limit_multiple * limits.tokens_per_day) return `${use.tokens} tokens today, over ${RUNAWAY.limit_multiple * 100}% of the seal limit of ${limits.tokens_per_day}`;
+  if (limits.usd_per_day > 0 && use.usd >= RUNAWAY.limit_multiple * limits.usd_per_day) return `$${use.usd.toFixed(2)} today, over ${RUNAWAY.limit_multiple * 100}% of the seal limit of $${limits.usd_per_day}`;
   return null;
 }
 

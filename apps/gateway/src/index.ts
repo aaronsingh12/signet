@@ -1,8 +1,8 @@
 import express, { type Request, type Response } from 'express';
-import { destinationPolicyFromEnv, httpToolRequest, request, verifyJws, type ToolAlias } from '@signet/core';
+import { GUARDRAIL_PARAMS, destinationPolicyFromEnv, enabledPacks, httpToolRequest, request, verifyJws, type ToolAlias } from '@signet/core';
 import { handleChat } from './chat';
 import { handleServiceNowGuardian } from './servicenow-guardian';
-import { type Done, Halt, hitlDecided, newCtx, preflight } from './ctx';
+import { ENV_NAME, type Done, Halt, hitlDecided, newCtx, preflight } from './ctx';
 import { isolation, modelInfo, startRuntime } from './detectors';
 import { runningHashes } from './pins';
 import { engineName, initEngine } from './engine';
@@ -151,7 +151,7 @@ app.post('/v1/llm/:provider/*', guard(async (req, res) => send(res, await handle
 // --- MCP proxy (Streamable HTTP, JSON responses) ---
 // Tool destinations are checked on every connection (SSRF); responses are capped at 5 MB.
 const DESTINATIONS = destinationPolicyFromEnv();
-const TOOL_MAX_BYTES = 5 * 1024 * 1024;
+const TOOL_MAX_BYTES = GUARDRAIL_PARAMS.tool_response_max_bytes;
 
 async function mcpForward(tool: ToolAlias, credential: string | null, msg: unknown, sessionId: string | undefined, signal: AbortSignal) {
   const headers: Record<string, string> = { 'content-type': 'application/json', accept: 'application/json, text/event-stream' };
@@ -262,7 +262,10 @@ app.get('/healthz', (_req, res) =>
 
 state.setHitlListener(hitlDecided);
 state.setHeartbeatExtra(llmStatus);
-state.setDetectorReport(() => ({ hashes: runningHashes(), runtime: modelInfo, isolation: isolation() }));
+// The heartbeat's detector report also carries the guardrail settings this node actually runs, so the
+// console's Guardrails page shows what the gateways enforce, not the control plane's own environment.
+const dlpPacks = (() => { try { return enabledPacks(); } catch { return null; } })();
+state.setDetectorReport(() => ({ hashes: runningHashes(), runtime: modelInfo, isolation: isolation(), guardrails: { dlp_packs: dlpPacks, policy_engine: engineName, environment: ENV_NAME } }));
 await initEngine();
 startRuntime();
 state

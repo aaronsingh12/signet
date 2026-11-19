@@ -1,24 +1,12 @@
 import { Fragment, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Card, ErrorNote, KV, Mono, PageHeader, Pill } from '../components/ui';
 import { ApiError, api, useApi } from '../lib/api';
 import { useCan, useMe } from '../lib/auth';
 import { ago } from '../lib/format';
 import { DetectorRelease, ReplayRuns } from '../components/DetectorRelease';
 
-const BASELINE = [
-  ['RB-INV-19', 'Agents may call only the cloud LLM; any other provider is out-of-manifest'],
-  ['RB-INV-16', 'Credentials and secrets never reach a model'],
-  ['RB-BL-03', 'Per-request input cap: 32,000 tokens'],
-  ['RB-BL-04', 'Per-request cost cap: USD 5 (hold for approval)'],
-  ['RB-BL-10', 'Responses are scanned for secrets and redacted'],
-  ['RB-BL-12', 'Session taint: privileged actions after injected content need a person'],
-  ['RB-PRIV-03', 'Critical actions need HITL on T1-T3'],
-  ['RB-PRIV-04', 'Privileged actions need HITL on T1/T2 unless waived'],
-  ['RB-PRIV-07', 'L0/L1 agents need HITL for every write'],
-  ['RB-KILL-01', 'Hijack: injection in a tool response, then a privileged action'],
-  ['RB-KILL-02', 'Exfiltration: Restricted data to a destination the seal does not allow'],
-  ['RB-KILL-04', 'Repeat violation: 3 out-of-manifest attempts in 10 minutes'],
-];
+
 
 export function Policies() {
   const can = useCan();
@@ -91,17 +79,8 @@ export function Policies() {
           <div className="border-t border-line px-4 py-2 text-xs text-ink-3">A detector that is off, in shadow or pending leaves Tier 0 in charge, and T1/T2 allows become hold for approval (RB-INV-06). Promotion is human-only and needs 14 days in shadow (RB-MOD-03), a passing benchmark, a result at least as good as the version it replaces, and Security plus AI Assurance sign-off (DA 6). Each version is pinned by hash; a gateway running anything else treats the detector as unavailable.</div>
         </Card>
         <ReplayRuns />
-        <Card title="Tenant baseline and kill rules in force" className="xl:col-span-2" pad={false}>
-          <table className="w-full">
-            <tbody>
-              {BASELINE.map(([id, text]) => (
-                <tr key={id}>
-                  <td className="td w-32 mono font-medium">{id}</td>
-                  <td className="td text-ink-2">{text}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <Card title="Guardrails in force" className="xl:col-span-2">
+          <p className="text-sm text-ink-2">Every rule, data check, detector and automatic stop, with the limits in force now, is listed in one place on the <Link className="text-royal hover:underline" to="/guardrails">Guardrails</Link> page.</p>
         </Card>
       </div>
     </>

@@ -1,4 +1,5 @@
 import type { CompiledPolicy } from './types';
+import { GUARDRAIL_PARAMS } from './guardrail-params';
 
 // Tier 0 policy evaluation (BP 5.2 step 9), shared by the gateway and the lifecycle Test stage.
 // Mirrors policy/signet.rego one for one; policy/conformance.json holds the cases both must pass.
@@ -54,7 +55,7 @@ export function evaluateTs(input: PolicyInput): PolicyResult {
     const waived = isNum(act.value_threshold_usd) && isNum(money) && money <= act.value_threshold_usd;
     if (impact === 'critical' && ['T1', 'T2', 'T3'].includes(p.tier)) approval.push({ rule: 'RB-PRIV-03', group: 'security-approvers' });
     if (impact === 'privileged' && highTier && !waived) approval.push({ rule: 'RB-PRIV-04', group: 'owner-approvers' });
-    if (impact === 'critical' && isNum(money) && money > 10_000) approval.push({ rule: 'RB-PRIV-08', group: 'dual-control' });
+    if (impact === 'critical' && isNum(money) && money > GUARDRAIL_PARAMS.dual_control_usd) approval.push({ rule: 'RB-PRIV-08', group: 'dual-control' });
     if ((p.autonomy_level === 'L0' || p.autonomy_level === 'L1') && impact !== 'read') approval.push({ rule: 'RB-PRIV-07', group: 'owner-approvers' });
     if (ctx.tainted && (impact === 'privileged' || impact === 'critical')) approval.push({ rule: 'RB-BL-12', group: 'security-approvers' });
     const stepUpScope = highTier ? impact !== 'read' : impact === 'privileged' || impact === 'critical';

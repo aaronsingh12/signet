@@ -1,3 +1,4 @@
+import { GUARDRAIL_PARAMS } from '@signet/core';
 import * as state from './state';
 
 // Session taint (RB-BL-12): once a tool response or retrieved document scores Elevated or High on
@@ -7,7 +8,7 @@ import * as state from './state';
 // tainted on every other one (Vercel runs several and restarts them). The local copy is the fallback,
 // and keeps the source text for the ledger.
 
-const TTL_MS = 60 * 60_000;
+const TTL_MS = GUARDRAIL_PARAMS.session_taint_minutes * 60_000;
 const sessions = new Map<string, { band: 'elevated' | 'high'; until: number; source: string }>();
 
 export function taint(sessionId: string, band: 'elevated' | 'high', source: string): Promise<void> {
