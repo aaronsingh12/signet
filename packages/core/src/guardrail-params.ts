@@ -55,7 +55,12 @@ export const GUARDRAIL_PARAMS = {
   renewal_window_days: 30,
 
   // ServiceNow Guardian
-  guardian_max_bytes: 262_144,
+  // ServiceNow sends its AI agent engine's whole working prompt (about 340 KB has been seen). Only the outside-input
+  // fields are judged, so the cap only bounds the pattern scan and the request size (gateway JSON limit: 2 MB).
+  guardian_max_bytes: 1_048_576,
+  // Guardian reviews per minute per agent identity, separate from the agent's own seal rpm: ServiceNow sends one
+  // review per step of every AI feature that uses the guardian, so they must not use up the agent's request budget.
+  guardian_rpm: 600,
 } as const;
 
 /** "5 MB", "64 KB": for messages and the catalogue. */

@@ -526,6 +526,11 @@ export const GUARDRAILS: readonly Guardrail[] = [
     effect: 'block', where: 'gateway', step: 6, source: 'ServiceNow Guardian setup', code: ['apps/gateway/src/servicenow-guardian.ts'],
   },
   {
+    key: 'sn-not-governed', rule_ids: ['SN-GUARD-NOT-GOVERNED'], group: 'servicenow', name: 'Only this agent\'s traffic is judged',
+    what: `A guardian set to "All" receives every AI feature and agent on the ServiceNow instance under one credential. Signet judges only the ServiceNow agents linked to that credential's Signet agent, recognised by the agent name in the request and then by the run's conversation and execution IDs. Reviews for any other agent pass and are logged, so this agent never blocks another team's agent. Guardian reviews have their own limit of ${GUARDRAIL_PARAMS.guardian_rpm} per minute, separate from the agent's own request limit.`,
+    effect: 'record', where: 'gateway', step: 7, source: 'ServiceNow Guardian setup', code: ['apps/gateway/src/servicenow-guardian.ts', 'apps/gateway/src/ctx.ts'],
+  },
+  {
     key: 'sn-secrets', rule_ids: ['SN-GUARD-SECRET', 'SN-GUARD-CREDENTIAL-REQUEST'], group: 'servicenow', name: 'Secrets and credential requests',
     what: 'Content that contains a secret, or asks to reveal passwords, API keys or tokens (including Hindi phrasing), is flagged as a security issue.',
     effect: 'flag', where: 'gateway', step: 8, source: 'ServiceNow Guardian setup', code: ['apps/gateway/src/servicenow-guardian.ts'],

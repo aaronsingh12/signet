@@ -276,17 +276,25 @@ export const setHeartbeatExtra = (fn: () => unknown) => (heartbeatExtra = fn);
 let detectorReport: () => unknown = () => null;
 export const setDetectorReport = (fn: () => unknown) => (detectorReport = fn);
 
-export async function init() {
+// The control plane can start slower than the gateway (a slow first database connection, a cold container). The
+// gateway waits for it instead of exiting, which under `npm run dev` would stop every other service too. It serves
+// nothing until it holds trust keys and a signed bundle, so waiting never lets a request through unchecked.
+async function untilControlPlane(what: string, step: () => Promise<void>): Promise<void> {
   for (let attempt = 1; ; attempt++) {
     try {
-      await refreshTrust();
-      break;
+      await step();
+      if (attempt > 1) console.log(`[gateway] ${NODE_ID} ${what} after ${attempt} attempts`);
+      return;
     } catch (e) {
-      if (attempt >= 40) throw e;
-      await new Promise((r) => setTimeout(r, 500)); // control plane still starting
+      if (attempt === 1 || attempt % 10 === 0) console.warn(`[gateway] ${NODE_ID} waiting for the control plane at ${CONTROL_URL} (${what}): ${(e as Error).message || 'not reachable yet'}`);
+      await new Promise((r) => setTimeout(r, Math.min(5_000, 500 * attempt)));
     }
   }
-  await refreshWithCurrentTrust();
+}
+
+export async function init() {
+  await untilControlPlane('loaded trust keys', refreshTrust);
+  await untilControlPlane('loaded the policy bundle', refreshWithCurrentTrust);
   void subscribe();
   setInterval(() => refreshWithCurrentTrust().catch(() => {}), POLL_MS).unref();
   void heartbeat();

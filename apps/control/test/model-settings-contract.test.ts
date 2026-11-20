@@ -93,6 +93,9 @@ test('provider HTTP contract preserves old routes, encrypts credentials and publ
   assert.equal(adapted.max_completion_tokens, 1024);
   assert.equal(adapted.max_tokens, undefined);
   assert.equal(adapted.temperature, undefined);
+  // Claude 5 models reject non-default sampling values with HTTP 400; Signet never sends them to Claude.
+  const toClaude = JSON.parse(modelRequestBody({ ...claude, model: 'claude-haiku-5-5' }, { model: 'claude-haiku-5-5', max_tokens: 1024, temperature: 0, top_p: 0.9, top_k: 5, messages: [] })) as Record<string, unknown>;
+  assert.deepEqual(toClaude, { model: 'claude-haiku-5-5', max_tokens: 1024, messages: [], stream: false });
 
   const { registerAgent, issueSeal } = await import('../src/registry');
   const { createClient, exchangeClientCredentials } = await import('../src/identity');

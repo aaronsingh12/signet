@@ -8,8 +8,17 @@ export function modelHeaders(connection: ModelConnection, key: string | null): R
     ...(connection.provider === 'claude' && key ? { 'x-api-key': key, 'anthropic-version': '2023-06-01' } : {}) };
 }
 
-/** Keep the chat contract and adapt token controls for OpenAI reasoning models. */
+/**
+ * Keep the chat contract and adapt it per provider. OpenAI reasoning models take max_completion_tokens and no
+ * temperature. Claude 5 models return HTTP 400 for non-default sampling values ("`temperature` is deprecated for
+ * this model"), and newer Anthropic API versions reject temperature, top_p and top_k on every model, so they are
+ * never sent to Claude; Signet's judges still get exactly one label because the prompt allows nothing else.
+ */
 export function modelRequestBody(connection: ModelConnection, body: Record<string, unknown>): string {
+  if (connection.provider === 'claude') {
+    const { temperature: _temperature, top_p: _topP, top_k: _topK, ...rest } = body;
+    return JSON.stringify({ ...rest, stream: false });
+  }
   if (connection.provider !== 'openai') return JSON.stringify({ ...body, stream: false });
   const { max_tokens, temperature, ...rest } = body;
   const reasoning = /^(gpt-5|o[134])/.test(String(body.model));

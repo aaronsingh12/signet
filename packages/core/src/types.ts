@@ -199,6 +199,9 @@ export interface PolicyBundle {
   rollouts: Record<string, Rollout>; // by cert_id (BP 6 Stage 6)
   hitl_wait_seconds: number;
   // The cloud LLM credential in the Secrets Broker (kind llm_provider); null if none is stored.
+  // ServiceNow agents each Signet agent governs, by agent_id: the ServiceNow agent names its Guardian reviews carry.
+  // Reviews for any other agent on the instance pass through and are logged (they are not this agent's traffic).
+  guardian_agents?: Record<string, string[]>;
   llm_credential?: { secret_id: string; version: number } | null; // how long a gateway holds a request for a human decision (BP 5.2 step 10)
 }
 

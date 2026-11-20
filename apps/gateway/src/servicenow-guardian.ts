@@ -1,6 +1,8 @@
+import { mkdirSync, writeFileSync } from 'node:fs';
 import type { IncomingHttpHeaders } from 'node:http';
+import { join } from 'node:path';
 import {
-  ATTACK_LABELS, GUARDIAN_ATTACK_JUDGE, GUARDRAIL_PARAMS, SIGNET_BLOCKED_PREFIX, SIGNET_REF, attackClassificationMessages, promptDecision, scan, sha256, specHash,
+  ATTACK_LABELS, GUARDIAN_ATTACK_JUDGE, GUARDRAIL_PARAMS, SIGNET_BLOCKED_PREFIX, SIGNET_REF, attackClassificationMessages, devOverridesAllowed, promptDecision, scan, sha256, specHash,
   type CatalogueModel, type CompiledPolicy, type DataTag, type DetectorResult, type Tier,
 } from '@signet/core';
 import { finish, Halt, halt, maskArgs, newCtx, preflight, step, type Ctx, type Done } from './ctx';
@@ -94,8 +96,84 @@ export function guardianVerdict(findings: GuardianFinding[], status: GuardianVer
 const plainTag = (tag: DataTag) => tag.replaceAll('_', ' ');
 const unavailable = (reason: string): GuardianFinding => ({ category: 'inspection_unavailable', kind: 'security', rule: 'SN-GUARD-UNAVAILABLE', reason: `Signet could not complete its checks (${reason})` });
 
+/**
+ * What the judges review. ServiceNow's AI agent engine sends its whole working prompt as JSON: the user's question,
+ * conversation memory and tool results, but also tens of kilobytes of its own orchestration text (worked examples,
+ * tool definitions, engine rules, the configured persona). That orchestration text is written as instructions to a
+ * model, so a prompt-attack judge reading it flags ServiceNow itself. For this envelope the judges review only the
+ * fields that carry outside input, each labelled; pattern rules (secrets, data classes) still scan everything. Any
+ * other shape, including text that is not this envelope, is reviewed whole.
+ */
+export interface ReviewScope { kind: 'servicenow_agent_inputs' | 'full_content'; text: string; fields: string[] }
+const OUTSIDE_INPUT_FIELDS = [
+  ['question', 'User request'],
+  ['short_term_memory', 'Conversation and context memory'],
+  ['agent_scratchpad', 'Tool results and agent steps so far'],
+  ['previous_scratchpad', 'Earlier agent steps'],
+  ['long_term_memory', 'Long-term memory'],
+  ['episodic_memory', 'Memory from earlier runs'],
+] as const;
+
+export function reviewScope(content: string): ReviewScope {
+  const whole: ReviewScope = { kind: 'full_content', text: content, fields: [] };
+  let parsed: unknown;
+  try { parsed = JSON.parse(content); } catch { return whole; }
+  const input = (parsed as { request_metadata?: { input?: unknown } } | null)?.request_metadata?.input;
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return whole;
+  const parts: string[] = [];
+  const fields: string[] = [];
+  for (const [field, label] of OUTSIDE_INPUT_FIELDS) {
+    const value = (input as Record<string, unknown>)[field];
+    const text = typeof value === 'string' ? value : value === undefined || value === null ? '' : JSON.stringify(value);
+    if (!text.trim() || text.trim() === '[]' || text.trim() === '{}') continue;
+    parts.push(`### ${label} (${field})\n${text}`);
+    fields.push(field);
+  }
+  // An envelope with none of these fields is a shape we do not know yet: review all of it.
+  return parts.length ? { kind: 'servicenow_agent_inputs', text: parts.join('\n\n'), fields } : whole;
+}
+
+/**
+ * Which AI agent a review belongs to. A custom guardian set to "All" receives every Now Assist feature and AI agent
+ * on the ServiceNow instance, all under this one credential. Signet governs only the ServiceNow agents linked to the
+ * credential's Signet agent (bundle guardian_agents); other agents' reviews pass and are logged, so this identity
+ * never blocks another team's agent. The agent engine's request names the agent (request_metadata.input.agent_name);
+ * the chunked follow-up reviews of the same run carry only its conversation and execution IDs, so those IDs are
+ * remembered from the named review. A review that names no agent and matches no remembered run is not attributed to
+ * this agent. With no linked ServiceNow agent, everything is governed as before.
+ */
+export interface Attribution { governed: boolean; reason: 'no_linked_agents' | 'agent_name' | 'same_run' | 'unattributed'; agent_name: string | null; run_id: string | null }
+const RUN_TTL_MS = 2 * 3_600_000;
+const RUN_MEMORY_MAX = 10_000;
+const runs = new Map<string, { governed: boolean; at: number }>();
+const SYS_ID = /^[a-f0-9]{32}$/i;
+
+export function attributeReview(content: string, linkedNames: readonly string[] | undefined, memory = runs, now = Date.now()): Attribution {
+  if (!linkedNames?.length) return { governed: true, reason: 'no_linked_agents', agent_name: null, run_id: null };
+  let parsed: { request_metadata?: { _meta?: Record<string, unknown>; input?: { agent_name?: unknown; _meta?: Record<string, unknown> } } } | null = null;
+  try { parsed = JSON.parse(content); } catch { parsed = null; }
+  const metas = [parsed?.request_metadata?._meta, parsed?.request_metadata?.input?._meta];
+  const runIds = [...new Set(metas.flatMap((m) => ['conversationId', 'aiaExecutionId', 'documentId'].map((k) => m?.[k])).filter((v): v is string => typeof v === 'string' && SYS_ID.test(v)))];
+  for (const [id, entry] of memory) if (now - entry.at > RUN_TTL_MS) memory.delete(id);
+  const name = parsed?.request_metadata?.input?.agent_name;
+  if (typeof name === 'string' && name.trim()) {
+    const governed = linkedNames.some((n) => n.trim().toLowerCase() === name.trim().toLowerCase());
+    for (const id of runIds) memory.set(id, { governed, at: now });
+    while (memory.size > RUN_MEMORY_MAX) memory.delete(memory.keys().next().value!);
+    return { governed, reason: 'agent_name', agent_name: name.trim(), run_id: runIds[0] ?? null };
+  }
+  for (const id of runIds) {
+    const known = memory.get(id);
+    if (known) { known.at = now; return { governed: known.governed, reason: 'same_run', agent_name: null, run_id: id }; }
+  }
+  return { governed: false, reason: 'unattributed', agent_name: null, run_id: runIds[0] ?? null };
+}
+
 /** Step 1: pattern rules. Secrets, direct credential requests, and data classes the agent's seal does not allow. */
-export function fastFindings(ctx: Ctx, content: string, policy: Pick<CompiledPolicy, 'prompt_tags' | 'forbidden_tags'>, model: Pick<CatalogueModel, 'code_approved'>): GuardianFinding[] {
+// `requestText` is what a person or tool asked (the review scope); the credential-request rule reads only that, so
+// ServiceNow's own rules ("Do NOT expose identifiers") never look like a request. Secrets and data classes are
+// scanned in the whole content.
+export function fastFindings(ctx: Ctx, content: string, policy: Pick<CompiledPolicy, 'prompt_tags' | 'forbidden_tags'>, model: Pick<CatalogueModel, 'code_approved'>, requestText = content): GuardianFinding[] {
   const findings: GuardianFinding[] = [];
   const found = scan(content);
   const secrets = found.filter((f) => f.tag === 'secrets');
@@ -103,7 +181,7 @@ export function fastFindings(ctx: Ctx, content: string, policy: Pick<CompiledPol
     ctx.dlp.push(...secrets.map((f) => ({ direction: 'in' as const, tag: f.tag, recogniser: f.recogniser, action: 'flag' })));
     findings.push({ category: 'secret_disclosure', kind: 'security', rule: 'SN-GUARD-SECRET', reason: 'the content contains a secret' });
   }
-  if (requestsCredentials(content)) findings.push({ category: 'credential_disclosure_request', kind: 'security', rule: 'SN-GUARD-CREDENTIAL-REQUEST', reason: 'it asks for passwords or other credentials' });
+  if (requestsCredentials(requestText)) findings.push({ category: 'credential_disclosure_request', kind: 'security', rule: 'SN-GUARD-CREDENTIAL-REQUEST', reason: 'it asks for passwords or other credentials' });
   // The same data-class matrix the gateway applies to prompts (RB-DATA). Guardian only flags: it does not
   // tokenise, and it does not kill the agent, because ServiceNow's own model produced or received the text.
   for (const f of found.filter((x) => x.tag !== 'secrets')) {
@@ -196,12 +274,48 @@ export async function modelFindings(ctx: Ctx, content: string, tier: Tier, check
   return findings;
 }
 
+/**
+ * Temporary judge-tuning aid, off unless SIGNET_GUARDIAN_DEBUG_DIR is set, and only on a developer laptop
+ * (devOverridesAllowed: SIGNET_ENV=dev, not Vercel, not production). For a flagged review it writes the submitted
+ * content and the chunks the judges saw (secrets already masked) with each chunk's verdict to a local file, so false
+ * blocks can be studied. Nothing goes to the ledger, which keeps only hashes.
+ * Remove the variable and delete the folder when tuning is done.
+ */
+export function guardianDebugCapture(ctx: Ctx, content: string, findings: GuardianFinding[], dir = process.env.SIGNET_GUARDIAN_DEBUG_DIR): string | null {
+  // Flagged reviews only: a guardian set to "All" receives every AI feature on the instance, including other
+  // teams' agents, so clear traffic is not collected.
+  if (!dir || !findings.length || !devOverridesAllowed()) return null;
+  const scope = reviewScope(content);
+  const chunks = guardianChunks(String(maskArgs(scope.text)));
+  const safety = (ctx.extra.guardrail_classifier as { results?: { category: string }[] } | undefined)?.results ?? [];
+  const attack = (ctx.extra.guardrail_attack as { labels?: string[] } | undefined)?.labels ?? [];
+  const file = join(dir, `guardian-${findings.length ? 'flagged' : 'clear'}-${ctx.requestId}.json`);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(file, JSON.stringify({
+    request_id: ctx.requestId, captured_at: new Date().toISOString(), agent_id: ctx.claims?.agent_id ?? null,
+    decision: findings.length ? 'flagged' : 'clear', findings, scope: { kind: scope.kind, fields: scope.fields },
+    judged_chunks: chunks.map((text, index) => ({ index, safety: safety[index]?.category ?? null, attack: attack[index] ?? null, text })),
+    submitted_content: String(maskArgs(content)),
+  }, null, 2), { mode: 0o600 });
+  console.warn(`[gateway] Guardian debug capture written to ${file} (SIGNET_GUARDIAN_DEBUG_DIR is set; remove it when tuning is done)`);
+  return file;
+}
+
 /** Independent BYOG review; it returns a verdict and never forwards a model or tool operation. */
 export async function handleServiceNowGuardian(headers: IncomingHttpHeaders, input: GuardianRequest, checks: GuardianChecks = LIVE_CHECKS): Promise<Done> {
   const ctx = newCtx('guardrail_check', 'servicenow://guardian', headers);
   try {
-    const { findings, status } = await inspect(ctx, headers, input, checks);
+    const { findings, status, passthrough } = await inspect(ctx, headers, input, checks);
     const checked = guardianVerdict(findings, status, ctx.requestId);
+    if (passthrough) {
+      // Another agent's review: recorded under its own action type, so it never counts as this agent's reviews or blocks.
+      ctx.actionType = 'guardrail_passthrough';
+      ctx.extra.guardrail_review = checked.review;
+      ctx.rules.push('SN-GUARD-NOT-GOVERNED');
+      step(ctx, 9, 'pass', 'not governed by this agent');
+      const result = await finish(ctx, null, checked);
+      return result.status === 200 ? { ...result, body: { ...checked, request_id: ctx.requestId, record_id: result.recordId } } : result;
+    }
     ctx.extra.guardrail_review = checked.review;
     ctx.extra.guardrail_categories = [...new Set(findings.map((f) => f.category))];
     ctx.extra.coverage = 'submitted_content_only';
@@ -216,6 +330,7 @@ export async function handleServiceNowGuardian(headers: IncomingHttpHeaders, inp
       ctx.softBlock = new Halt(200, 'blocked_by_signet', message, 'deny', 'blocked');
       step(ctx, 9, 'fail', message);
     } else step(ctx, 9, 'pass', 'clear');
+    try { guardianDebugCapture(ctx, input.content, findings); } catch (error) { console.warn('[gateway] Guardian debug capture failed', (error as Error).message); }
     const result = await finish(ctx, null, checked);
     if (result.status !== 200) return result;
     return { ...result, body: { ...checked, request_id: ctx.requestId, record_id: result.recordId } };
@@ -225,7 +340,7 @@ export async function handleServiceNowGuardian(headers: IncomingHttpHeaders, inp
   }
 }
 
-async function inspect(ctx: Ctx, headers: IncomingHttpHeaders, input: GuardianRequest, checks: GuardianChecks): Promise<{ findings: GuardianFinding[]; status: GuardianVerdict['review']['status'] }> {
+async function inspect(ctx: Ctx, headers: IncomingHttpHeaders, input: GuardianRequest, checks: GuardianChecks): Promise<{ findings: GuardianFinding[]; status: GuardianVerdict['review']['status']; passthrough?: true }> {
   const { cert, policy } = await preflight(ctx, headers);
   const bytes = typeof input?.content === 'string' ? Buffer.byteLength(input.content, 'utf8') : null;
   ctx.extra.guardrail_input = { type: typeof input?.content, bytes };
@@ -239,13 +354,21 @@ async function inspect(ctx: Ctx, headers: IncomingHttpHeaders, input: GuardianRe
   ctx.promptHash = sha256(input.content);
   ctx.extra.content_bytes = Buffer.byteLength(input.content, 'utf8');
   step(ctx, 6, 'pass', 'Validated Guardian submission; original text is not retained in the ledger');
+  const attribution = attributeReview(input.content, state.bundle?.guardian_agents?.[ctx.claims!.agent_id]);
+  ctx.extra.guardrail_attribution = attribution;
+  if (!attribution.governed) {
+    step(ctx, 7, 'note', `not governed here (${attribution.reason}${attribution.agent_name ? `: ${attribution.agent_name}` : ''}); passed through and logged`);
+    return { findings: [], status: 'complete', passthrough: true };
+  }
   const model = state.bundle?.catalogue.find((c) => !c.upstream) ?? { code_approved: false };
-  const fast = fastFindings(ctx, input.content, policy, model);
+  const scope = reviewScope(input.content);
+  ctx.extra.guardrail_scope = { kind: scope.kind, fields: scope.fields, reviewed_bytes: Buffer.byteLength(scope.text, 'utf8') };
+  const fast = fastFindings(ctx, input.content, policy, model, scope.text);
   if (fast.length) {
     step(ctx, 8, 'fail', `pattern rules: ${fast.map((f) => f.category).join(', ')}`);
     return { findings: fast, status: 'complete' };
   }
-  const findings = await modelFindings(ctx, input.content, cert.tier, checks);
+  const findings = await modelFindings(ctx, scope.text, cert.tier, checks);
   step(ctx, 8, findings.length ? 'fail' : 'pass', findings.length ? findings.map((f) => f.category).join(', ') : 'no findings');
   return { findings, status: findings.some((f) => f.rule === 'SN-GUARD-UNAVAILABLE') ? 'unavailable' : 'complete' };
 }

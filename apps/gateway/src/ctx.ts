@@ -34,7 +34,8 @@ export interface Ctx {
   startedAt: number; // wall clock, for trace spans
   trace: TraceContext; // W3C trace context (BP 8.2 trace_id / span_id)
   lastMark: number;
-  actionType: 'llm_call' | 'tool_call' | 'guardrail_check';
+  // guardrail_passthrough: a Guardian review for an AI agent this identity does not govern (passed, logged only).
+  actionType: 'llm_call' | 'tool_call' | 'guardrail_check' | 'guardrail_passthrough';
   steps: Step[];
   rules: string[];
   reasons: string[];
@@ -204,8 +205,12 @@ export async function preflight(ctx: Ctx, headers: IncomingHttpHeaders) {
   step(ctx, 4, 'pass', `valid to ${cert!.valid_to.slice(0, 10)}`);
 
   // 5. Rate, volume and cost limits; a throttle scales them down (ladder level 3).
-  const rpm = cert!.limits.rpm * eff.throttleFactor;
-  const used = await limits.takeRequest(claims.agent_id, rpm, anomalyEnabled() ? { tier: cert!.tier, tool: ctx.actionType === 'tool_call' ? ctx.target : undefined } : undefined);
+  // Guardian reviews have their own per-minute limit and counter: ServiceNow sends one per step of every AI feature
+  // that uses the guardian, so they must never use up (or be stopped by) the agent's own request budget. They are
+  // not agent behaviour, so DET-ANOM does not score them.
+  const guardian = ctx.actionType === 'guardrail_check';
+  const rpm = (guardian ? GUARDRAIL_PARAMS.guardian_rpm : cert!.limits.rpm) * eff.throttleFactor;
+  const used = await limits.takeRequest(guardian ? `${claims.agent_id}:guardian` : claims.agent_id, rpm, !guardian && anomalyEnabled() ? { tier: cert!.tier, tool: ctx.actionType === 'tool_call' ? ctx.target : undefined } : undefined);
   ctx.anom = anomalyResult(used.anomaly, cert!.tier);
   // Runaway (DA 4 kill condition): over 200% of a seal limit while DET-ANOM has been High for 10 minutes.
   const runawayWhy = runaway(ctx.anom, used, cert!.limits);
@@ -310,7 +315,7 @@ export async function finish(ctx: Ctx, err: Halt | null, okBody: unknown): Promi
 // One span per decision with the OpenTelemetry GenAI conventions and Signet's decision; metadata only.
 function exportDecisionSpan(ctx: Ctx, data: { policy_decision: string; policy_rule_ids: string[]; outcome: string; error_code: string | null; data_classes_in: string[]; latency_ms_gateway: number }, refusal: Halt | null, recordId: string) {
   const tool = ctx.actionType === 'tool_call';
-  const guardian = ctx.actionType === 'guardrail_check';
+  const guardian = ctx.actionType === 'guardrail_check' || ctx.actionType === 'guardrail_passthrough';
   exportSpan({
     trace: ctx.trace,
     name: guardian ? 'review servicenow content' : tool ? `execute_tool ${ctx.target}` : `chat ${ctx.target}`,

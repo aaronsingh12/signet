@@ -75,6 +75,14 @@ let killListener: ((agentId: string, reason: string, actor: string) => Promise<v
 export const setKillListener = (fn: typeof killListener) => (killListener = fn);
 export const setRolloutSource = (fn: () => Promise<PolicyBundle['rollouts']>) => (rolloutSource = fn);
 
+/** ServiceNow agent names per governed Signet agent (the name each linked agent was registered with). */
+async function guardianAgents(): Promise<Record<string, string[]>> {
+  const rows = (await db.prepare('SELECT l.agent_id, a.name FROM servicenow_agent_link l JOIN agent a ON a.id = l.agent_id WHERE l.tenant_id = ?').all(tenant.id)) as { agent_id: string; name: string }[];
+  const out: Record<string, string[]> = {};
+  for (const r of rows) if (r.name?.trim()) out[r.agent_id] = [...new Set([...(out[r.agent_id] ?? []), r.name.trim()])];
+  return out;
+}
+
 export async function buildBundle(): Promise<string> {
   await reloadSettings(); // prices or other settings may have been saved by another instance
   const now = Date.now();
@@ -121,6 +129,7 @@ export async function buildBundle(): Promise<string> {
       .map(({ challenger_version, challenger_sha256, ...d }) => ({ ...d, challenger: challenger_version && challenger_sha256 ? { version: challenger_version, sha256: challenger_sha256 } : null })),
     rollouts: await rolloutSource(),
     hitl_wait_seconds: tenant.settings.hitl_wait_seconds,
+    guardian_agents: await guardianAgents(),
     llm_credential: ((await db.prepare("SELECT id AS secret_id, version FROM secret WHERE tenant_id = ? AND kind = 'llm_provider' ORDER BY created_at LIMIT 1").get(tenant.id)) as { secret_id: string; version: number } | undefined) ?? null,
   };
   return signJws(bundle, keys.ca, 'signet-bundle');
