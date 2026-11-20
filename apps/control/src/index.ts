@@ -50,6 +50,7 @@ import * as notify from './notify';
 import * as servicenow from './servicenow';
 import * as platforms from './platforms';
 import { costs } from './costs';
+import { gatewayCosts } from './gateway-costs';
 import { TEMPLATES } from './templates';
 import * as workflow from './workflow';
 import * as tools from './tools';
@@ -339,8 +340,8 @@ api.post('/catalogue', requires('tenant.admin'), route(async (req, res) => {
 // Model prices drive recorded cost, daily cost budgets and the per-request cost ceiling.
 api.put('/catalogue/:model/price', requires('tenant.admin'), route(async (req, res) => {
   const model = String(req.params.model);
-  const price = { in: Number(req.body?.in), out: Number(req.body?.out) };
-  if (![price.in, price.out].every((v) => Number.isFinite(v) && v >= 0 && v <= 1000)) throw invalid('in and out are USD per 1,000 tokens, between 0 and 1000');
+  const price = { in: req.body?.in as number, out: req.body?.out as number };
+  if (![price.in, price.out].every((v) => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1000)) throw invalid('in and out must be numbers in USD per 1,000 tokens, between 0 and 1000');
   if (!(await reloadSettings()).catalogue.some((c) => c.model === model)) throw invalid(`${model} is not in the tenant catalogue`);
   const entry = await setModelPrice(model, price);
   await ledger.append({ kind: 'admin', data: { event: 'catalogue.price_set', model, price_per_1k_usd: entry.price_per_1k_usd, actor: principalOf(res).id } });
@@ -349,6 +350,7 @@ api.put('/catalogue/:model/price', requires('tenant.admin'), route(async (req, r
 }));
 api.get('/stats/command-center', requires('agents.read'), route(async () => (await commandCenter())));
 api.get('/stats/costs', requires('agents.read'), route(async (req) => costs(Number(req.query.days ?? 30))));
+api.get('/stats/gateway-costs', requires('agents.read'), route(async (req) => gatewayCosts(Number(req.query.days ?? 30))));
 api.post('/platforms/:id/usage/sync', requires('connectors.manage'), route(async (req) => platforms.syncUsage(req.params.id!, Number(req.body?.days ?? 30))));
 api.get('/stats/agents', requires('agents.read'), route(async () => (await agentAnalytics())));
 api.get('/gateways', requires('gateways.read'), route(async () => ({ items: (await db.prepare('SELECT * FROM gateway_node ORDER BY id').all()) })));

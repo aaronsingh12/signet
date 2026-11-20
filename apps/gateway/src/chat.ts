@@ -151,6 +151,12 @@ async function run(ctx: Ctx, headers: IncomingHttpHeaders, body: Record<string, 
     ctx.upstreamMs = Math.round(performance.now() - t0);
     ctx.lastMark = performance.now();
   }
+  // The call was made, so it counts towards the budgets whatever happens to the answer next.
+  ctx.tokensIn = resp.usage?.prompt_tokens ?? estTokens;
+  ctx.tokensOut = resp.usage?.completion_tokens ?? 0;
+  ctx.costUsd = (ctx.tokensIn * model!.price_per_1k_usd.in + ctx.tokensOut * model!.price_per_1k_usd.out) / 1000;
+  limits.addUsage(claims.agent_id, ctx.tokensIn + ctx.tokensOut, ctx.costUsd);
+
   if (!String(resp.model ?? '').startsWith(model!.upstream_model)) {
     halt(ctx, 12, 502, 'model_family_drift', `provider answered with ${resp.model}, expected ${model!.upstream_model}`, 'deny', ['RB-BL-02']);
   }
@@ -187,12 +193,6 @@ async function run(ctx: Ctx, headers: IncomingHttpHeaders, body: Record<string, 
       ctx.decision = strictest(ctx.decision, 'step_up');
     }
   }
-
-  // The call was made, so it counts towards the budgets whatever happens to the answer next.
-  ctx.tokensIn = resp.usage?.prompt_tokens ?? estTokens;
-  ctx.tokensOut = resp.usage?.completion_tokens ?? 0;
-  ctx.costUsd = (ctx.tokensIn * model!.price_per_1k_usd.in + ctx.tokensOut * model!.price_per_1k_usd.out) / 1000;
-  limits.addUsage(claims.agent_id, ctx.tokensIn + ctx.tokensOut, ctx.costUsd);
 
   const restore = (s: string) => detokenise(s, claims.agent_id, ctx.sessionId).text;
   // An agent on its own LLM may run tools in its own code: the tool calls its LLM proposes are checked here.

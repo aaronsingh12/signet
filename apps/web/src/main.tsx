@@ -21,6 +21,7 @@ import { Policies } from './pages/Policies';
 import { Registry } from './pages/Registry';
 import { Activity, Moved, Reports, Settings } from './pages/Sections';
 import { Guardrails } from './pages/Guardrails';
+import { GatewayCosts } from './pages/GatewayCosts';
 import { Tenant } from './pages/Tenant';
 import { Tools } from './pages/Tools';
 
@@ -49,6 +50,7 @@ createRoot(document.getElementById('root')!).render(
           <Route path="reports" element={<Reports />} />
           <Route path="settings" element={<Settings />} />
           <Route path="settings/people" element={<Tenant />} />
+          <Route path="settings/gateway-cost" element={<GatewayCosts />} />
           <Route path="settings/apps" element={<Tools />} />
           <Route path="settings/accounts" element={<Plugins />} />
           <Route path="settings/systems" element={<Connectors />} />

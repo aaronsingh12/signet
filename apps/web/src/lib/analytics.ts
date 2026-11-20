@@ -28,7 +28,7 @@ export function agentState(agent: AgentAnalytics): { label: string; tone: string
 }
 
 export function money(value: number): string {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: value > 0 && value < 0.01 ? 4 : 2 }).format(value);
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: value > 0 && value < 0.01 ? 8 : 2 }).format(value);
 }
 
 export function useAgentAnalytics() {

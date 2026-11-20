@@ -17,7 +17,7 @@ export async function costs(days = 30) {
       COUNT(*) FILTER (WHERE jsonb_extract_path_text(l.data::jsonb, 'action_type') IN ('llm_call', 'tool_call') AND jsonb_extract_path_text(l.data::jsonb, 'outcome') = 'blocked') AS blocked,
       COALESCE(SUM((jsonb_extract_path_text(l.data::jsonb, 'tokens_in'))::double precision), 0) AS tokens_in,
       COALESCE(SUM((jsonb_extract_path_text(l.data::jsonb, 'tokens_out'))::double precision), 0) AS tokens_out,
-      COALESCE(SUM((jsonb_extract_path_text(l.data::jsonb, 'cost_usd'))::double precision), 0) AS cost_usd,
+      COALESCE(SUM((jsonb_extract_path_text(l.data::jsonb, 'cost_usd'))::double precision), 0) + COALESCE(SUM((jsonb_extract_path_text(l.data::jsonb, 'safety_usage', 'cost_usd'))::double precision), 0) AS cost_usd,
       COUNT(*) FILTER (WHERE jsonb_extract_path_text(l.data::jsonb, 'action_type') = 'evaluation') AS evaluations,
       AVG((jsonb_extract_path_text(l.data::jsonb, 'scores', 'helpfulness'))::double precision) AS helpfulness,
       AVG((jsonb_extract_path_text(l.data::jsonb, 'scores', 'safety'))::double precision) AS safety,

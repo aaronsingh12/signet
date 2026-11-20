@@ -56,6 +56,9 @@ export async function agentAnalytics(): Promise<AgentAnalyticsResponse> {
       SUM(COALESCE((jsonb_extract_path_text(data::jsonb, 'latency_ms_gateway'))::double precision, 0) + COALESCE((jsonb_extract_path_text(data::jsonb, 'latency_ms_upstream'))::double precision, 0)) AS latency_total,
       COUNT((jsonb_extract_path_text(data::jsonb, 'latency_ms_gateway'))::double precision) AS latency_count, MAX(ts) AS last_activity
     FROM requests GROUP BY agent_id, substr(ts, 1, 13)`).all(tenant.id, from.toISOString(), to.toISOString())) as unknown as UsageRow[];
+  const safetyCosts = await db.prepare(`SELECT agent_id, COALESCE(SUM((jsonb_extract_path_text(data::jsonb, 'safety_usage', 'cost_usd'))::double precision), 0) AS cost,
+      COALESCE(SUM((jsonb_extract_path_text(data::jsonb, 'safety_usage', 'tokens_in'))::double precision), 0) + COALESCE(SUM((jsonb_extract_path_text(data::jsonb, 'safety_usage', 'tokens_out'))::double precision), 0) AS tokens
+    FROM ledger_record WHERE tenant_id = ? AND kind = 'transaction' AND ts >= ? AND ts <= ? GROUP BY agent_id`).all(tenant.id, from.toISOString(), to.toISOString()) as { agent_id: string; cost: number; tokens: number }[];
   const items: AgentAnalytics[] = (await Promise.all(agents.map(async (agent) => {
     const usage = rows.filter((row) => row.agent_id === agent.id);
     const sum = (key: 'requests' | 'allowed' | 'blocked' | 'review' | 'failed' | 'tokens' | 'cost_usd' | 'latency_total' | 'latency_count'): number => usage.reduce((total, row) => total + row[key], 0);
@@ -72,7 +75,7 @@ export async function agentAnalytics(): Promise<AgentAnalyticsResponse> {
       servicenow: serviceNowCoverage ? { linked: true, monitoring: serviceNowCoverage.monitoring, gateway_enforcement: serviceNowCoverage.gateway_enforcement } : agent.servicenow_identity ? { linked: false, monitoring: false, gateway_enforcement: false } : null,
       provider: providers.get(agent.id) ?? { connection_ids: [], last_sync_at: null, executions: 0, succeeded: 0, failed: 0, other: 0, avg_duration_ms: null, activity: [], recent: [] },
       requests: sum('requests'), allowed: sum('allowed'), blocked: sum('blocked'), review: sum('review'), failed: sum('failed'),
-      tokens: sum('tokens'), cost_usd: sum('cost_usd'), avg_latency_ms: count ? sum('latency_total') / count : null,
+      tokens: sum('tokens') + (safetyCosts.find(row => row.agent_id === agent.id)?.tokens ?? 0), cost_usd: sum('cost_usd') + (safetyCosts.find(row => row.agent_id === agent.id)?.cost ?? 0), avg_latency_ms: count ? sum('latency_total') / count : null,
       last_activity: usage.map((row) => row.last_activity).sort().at(-1) ?? null, activity,
     };
   })));

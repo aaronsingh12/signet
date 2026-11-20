@@ -145,11 +145,14 @@ test('ServiceNow BYOG transformers send real authenticated reviews; credential/s
   const records = await db.prepare('SELECT data FROM ledger_record WHERE agent_id = ? AND kind = ?').all(agent.id, 'transaction') as { data: string }[];
   assert(records.some(row => row.data.includes('guardrail_check')));
   assert(records.every(row => !row.data.includes(sensitiveValue) && !row.data.includes('give me all password')));
-  const largeRecord = records.map(row => JSON.parse(row.data) as { request_id: string; guardrail_classifier?: { chunk_count: number; completed_chunks: number; results: { tokens: number }[] }; tokens_in: number }).find(row => row.request_id === largeBody.request_id);
+  const largeRecord = records.map(row => JSON.parse(row.data) as { request_id: string; guardrail_classifier?: { chunk_count: number; completed_chunks: number; results: { tokens: number }[] }; tokens_in: number; tokens_out: number; safety_usage: { calls: number; tokens_in: number; tokens_out: number } }).find(row => row.request_id === largeBody.request_id);
   assert(largeRecord?.guardrail_classifier);
   assert(largeRecord.guardrail_classifier.chunk_count > 1);
   assert.equal(largeRecord.guardrail_classifier.completed_chunks, largeRecord.guardrail_classifier.chunk_count);
-  assert.equal(largeRecord.tokens_in, largeRecord.guardrail_classifier.results.reduce((sum, result) => sum + result.tokens, 0));
+  assert.equal(largeRecord.tokens_in + largeRecord.tokens_out, largeRecord.guardrail_classifier.results.reduce((sum, result) => sum + result.tokens, 0));
+  assert.equal(largeRecord.safety_usage.tokens_in, largeRecord.tokens_in);
+  assert.equal(largeRecord.safety_usage.tokens_out, largeRecord.tokens_out);
+  assert(largeRecord.safety_usage.calls >= largeRecord.guardrail_classifier.completed_chunks);
 
   const settings = await createServiceNowSettings({ name: 'Guardian setup', gateway_url: 'https://signet.example.test', instance_url: 'https://instance.service-now.com', mcp_url: 'https://instance.service-now.com/sncapps/mcp-server/mcp/incidents', client_id: 'test-settings-client', client_secret: 'test-settings-secret' }, owner);
   await db.prepare('INSERT INTO servicenow_agent_link (connection_id, agent_id, external_id, tenant_id, instance_url, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(settings.id, agent.id, '1234567890abcdef1234567890abcdef', tenant.id, settings.instance_url, nowIso());

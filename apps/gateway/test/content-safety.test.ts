@@ -7,9 +7,9 @@ import * as state from '../src/state';
 
 // DET-SAFE follows the Decision Architecture: off is not run, shadow never blocks, active blocks (would_block
 // in a shadow deployment), and a failed check falls back to the rules with T1/T2 held (DA 2, RB-INV-06).
-const unsafe = async (): Promise<SafetyVerdict> => ({ category: 'weapons', model: 'm', tokens: 1 });
-const safe = async (): Promise<SafetyVerdict> => ({ category: 'allow', model: 'm', tokens: 1 });
-const down = async (): Promise<SafetyVerdict> => { throw new SafetyUnavailable('timed out'); };
+const unsafe = async (): Promise<SafetyVerdict> => ({ category: 'weapons', model: 'm', tokens: 1, usage: [] });
+const safe = async (): Promise<SafetyVerdict> => ({ category: 'allow', model: 'm', tokens: 1, usage: [] });
+const down = async (): Promise<SafetyVerdict> => { throw new SafetyUnavailable('timed out', []); };
 const mode = (m: 'off' | 'shadow' | 'active') => state.detectors.set('DET-SAFE', { id: 'DET-SAFE', version: 'v1', mode: m } as never);
 const ctx = (shadowRollout = false) => Object.assign(newCtx('llm_call', 'm', {}), shadowRollout ? { shadow: true, rollout: 'shadow' } : {});
 

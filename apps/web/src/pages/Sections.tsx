@@ -55,6 +55,7 @@ export function Reports() {
 }
 
 const SETTINGS = [
+  { to: '/settings/gateway-cost', title: 'Gateway cost', text: 'Per-agent usage, budgets and model input/output token prices', perm: 'agents.read' },
   { to: '/settings/people', title: 'People & roles', text: 'Who can add, approve and audit', perm: 'tenant.read' },
   { to: '/settings/apps', title: 'Connected apps & keys', text: 'Apps agents can use and their stored credentials', perm: 'agents.read' },
   { to: '/settings/accounts', title: 'Connected accounts', text: 'Vercel account sign-in and service integrations', perm: 'connectors.manage' },
@@ -69,6 +70,6 @@ export function Settings() {
   const can = useCan();
   return <>
     <PageHeader title="Settings" subtitle="You rarely need these. Everything is grouped by what you're trying to do." />
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{SETTINGS.filter((s) => can(s.perm) || can('tenant.admin')).map((s) => <Link key={s.to} to={s.to} className="card settings-tile"><h2>{s.title}</h2><p>{s.text}</p></Link>)}</div>
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{SETTINGS.filter((s) => can(s.perm) || can('tenant.admin')).map((s) => <Link key={s.to} to={s.to} data-testid={`settings-${s.to.split('/').at(-1)}`} className="card settings-tile"><h2>{s.title}</h2><p>{s.text}</p></Link>)}</div>
   </>;
 }

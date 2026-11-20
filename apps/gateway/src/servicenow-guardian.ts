@@ -4,6 +4,7 @@ import { finish, Halt, halt, maskArgs, newCtx, preflight, step, type Ctx, type D
 import { reviewContent, SafetyUnavailable, type SafetyVerdict } from './content-safety';
 import { pinCheck } from './pins';
 import { guardianChunks, GUARDIAN_CHUNK_BYTES, GUARDIAN_OVERLAP_BYTES } from './guardian-content';
+import { recordSafetyUsage } from './safety-usage';
 
 interface GuardianRequest { content: string }
 interface Flag { flagged: boolean; categories: string[] }
@@ -99,7 +100,13 @@ async function inspect(ctx: Ctx, headers: IncomingHttpHeaders, input: GuardianRe
       for (const result of results) {
         if (result.status === 'fulfilled') {
           reviews.push(result.value);
-          ctx.tokensIn += result.value.tokens;
+          recordSafetyUsage(ctx, result.value.usage);
+          ctx.tokensIn += result.value.usage.reduce((sum, usage) => sum + (usage.tokens_in ?? 0), 0);
+          ctx.tokensOut += result.value.usage.reduce((sum, usage) => sum + (usage.tokens_out ?? 0), 0);
+        } else if (result.reason instanceof SafetyUnavailable) {
+          recordSafetyUsage(ctx, result.reason.usage);
+          ctx.tokensIn += result.reason.usage.reduce((sum, usage) => sum + (usage.tokens_in ?? 0), 0);
+          ctx.tokensOut += result.reason.usage.reduce((sum, usage) => sum + (usage.tokens_out ?? 0), 0);
         }
       }
       ctx.extra.guardrail_classifier = {

@@ -78,6 +78,7 @@ const ops: Record<string, Record<string, Op>> = {
   '/catalogue/{model}/price': { put: { summary: 'Set a catalogue model price in USD per 1,000 tokens (in, out)', permission: 'tenant.admin' } },
   '/stats/command-center': { get: { summary: 'Command Center figures', permission: 'agents.read' } },
   '/stats/agents': { get: { summary: 'Per-agent status, hourly activity, outcomes, usage and costs over the last 24 hours', permission: 'agents.read' } },
+  '/stats/gateway-costs': { get: { summary: 'All-agent recorded gateway usage, approved budgets and current model prices (days: 1-90)', permission: 'agents.read' } },
   '/gateways': { get: { summary: 'Gateway nodes and their last heartbeat', permission: 'gateways.read' } },
   '/live': { get: { summary: 'Server-sent events: decisions as they happen', permission: 'ledger.read' } },
   '/agents': {
