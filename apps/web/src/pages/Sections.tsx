@@ -55,6 +55,7 @@ export function Reports() {
 }
 
 const SETTINGS = [
+  { to: '/settings/models', title: 'Models', text: 'Configure Ollama Local, Ollama API, OpenAI API or Claude API', perm: 'tenant.admin' },
   { to: '/settings/gateway-cost', title: 'Gateway cost', text: 'Per-agent usage, budgets and model input/output token prices', perm: 'agents.read' },
   { to: '/settings/people', title: 'People & roles', text: 'Who can add, approve and audit', perm: 'tenant.read' },
   { to: '/settings/apps', title: 'Connected apps & keys', text: 'Apps agents can use and their stored credentials', perm: 'agents.read' },

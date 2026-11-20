@@ -1,4 +1,4 @@
-import { destinationPolicyFromEnv, env, request, type CatalogueModel, type HttpResponse } from '@signet/core';
+import { destinationPolicyFromEnv, env, modelRequest, modelRequestBody, ModelRequestError, request, type CatalogueModel, type HttpResponse, type ModelConnection } from '@signet/core';
 import * as state from './state';
 
 // The LLM adapter. Everything provider-specific lives here, behind this interface. Default target:
@@ -7,6 +7,13 @@ import * as state from './state';
 
 const BASE_URL = env('SIGNET_LLM_BASE_URL', 'http://localhost:11434/v1').replace(/\/$/, '');
 const TIMEOUT_MS = Number(env('SIGNET_LLM_TIMEOUT_MS', '120000'));
+
+function defaultConnection(): ModelConnection {
+  return state.bundle?.model_connection ?? { provider: /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/)/.test(BASE_URL) ? 'ollama_local' : 'ollama_api',
+    base_url: BASE_URL, model: env('SIGNET_LLM_MODEL', 'gpt-oss:120b-cloud'), secret_id: null };
+}
+
+export function defaultModel(): string { return defaultConnection().model; }
 
 // The provider is down or overloaded: RB-PROV-05 outage behaviour, never a strike.
 export class UpstreamUnavailable extends Error {}
@@ -33,12 +40,13 @@ export interface ChatResponse {
   [k: string]: unknown;
 }
 
-const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/.test(BASE_URL);
 
 // Credential injection (BP 5.2 step 11): the key comes from the Secrets Broker (kind llm_provider).
 // SIGNET_LLM_API_KEY is a dev fallback only and is reported as such. A local Ollama needs none: it
 // signs in to ollama.com itself for :cloud models.
-async function credential(): Promise<{ value: string | null; source: 'broker' | 'env' | 'none' }> {
+async function credential(connection: ModelConnection): Promise<{ value: string | null; source: 'broker' | 'env' | 'none' }> {
+  if (connection.secret_id) return { value: await state.secret(connection.secret_id), source: 'broker' };
+  if (state.bundle?.model_connection_saved) return { value: null, source: 'none' };
   const ref = state.bundle?.llm_credential;
   if (ref) return { value: await state.secret(ref.secret_id), source: 'broker' };
   if (process.env.SIGNET_LLM_API_KEY) return { value: process.env.SIGNET_LLM_API_KEY, source: 'env' };
@@ -46,7 +54,9 @@ async function credential(): Promise<{ value: string | null; source: 'broker' | 
 }
 
 export function credentialAttached() {
-  return Boolean(state.bundle?.llm_credential) || Boolean(process.env.SIGNET_LLM_API_KEY) || isLocal;
+  const connection = defaultConnection();
+  if (state.bundle?.model_connection_saved) return Boolean(connection.secret_id) || connection.provider === 'ollama_local';
+  return Boolean(state.bundle?.llm_credential) || Boolean(process.env.SIGNET_LLM_API_KEY) || connection.provider === 'ollama_local';
 }
 
 // An agent's own LLM gets only its own key: the default LLM's credential never leaves for another host.
@@ -57,19 +67,25 @@ async function upstreamCredential(upstream: NonNullable<CatalogueModel['upstream
 const DESTINATIONS = destinationPolicyFromEnv();
 
 export async function chatCompletion(body: Record<string, unknown>, signal: AbortSignal, upstream?: CatalogueModel['upstream']): Promise<ChatResponse> {
+  const connection: ModelConnection = upstream ? { provider: upstream.provider ?? 'ollama_api', base_url: upstream.base_url, model: String(body.model), secret_id: upstream.secret_id } : defaultConnection();
   const headers: Record<string, string> = { 'content-type': 'application/json' };
   let cred: Awaited<ReturnType<typeof credential>>;
   try {
-    cred = upstream ? await upstreamCredential(upstream) : await credential();
+    cred = upstream ? await upstreamCredential(upstream) : await credential(connection);
   } catch (e) {
     throw new UpstreamUnavailable(`cloud LLM credential unavailable from the Secrets Broker: ${(e as Error).message}`);
   }
   if (cred.value) headers.authorization = `Bearer ${cred.value}`;
   let r: HttpResponse;
   try {
-    r = await request(`${upstream?.base_url ?? BASE_URL}/chat/completions`, { method: 'POST', headers, body: JSON.stringify({ ...body, stream: false }), signal, timeoutMs: TIMEOUT_MS, ...(upstream ? { destination: DESTINATIONS } : {}) });
+    if (!upstream || upstream.provider) {
+      r = await modelRequest(connection, cred.value, '/chat/completions', modelRequestBody(connection, body), signal, TIMEOUT_MS);
+    } else {
+      r = await request(`${upstream.base_url}/chat/completions`, { method: 'POST', headers, body: JSON.stringify({ ...body, stream: false }), signal, timeoutMs: TIMEOUT_MS, destination: DESTINATIONS });
+    }
   } catch (e) {
     if (signal.aborted) throw e;
+    if (e instanceof ModelRequestError && e.status !== 429 && e.status < 500) throw new UpstreamRejected(e.status, e.message);
     throw new UpstreamUnavailable(`cloud LLM unreachable: ${(e as Error).message}`);
   }
   if (r.status === 429 || r.status >= 500) throw new UpstreamUnavailable(`cloud LLM returned ${r.status}`);
@@ -85,12 +101,14 @@ let status: LlmStatus = { state: 'not_checked', checked_at: null, detail: 'not c
 export const llmStatus = () => status;
 
 export async function probe(): Promise<LlmStatus> {
+  const connection = defaultConnection();
+  const base = connection.base_url;
   const models = (state.bundle?.catalogue ?? []).filter((c) => !c.upstream).map((c) => c.upstream_model ?? c.model); // the name the gateway sends upstream
   let cred: Awaited<ReturnType<typeof credential>> = { value: null, source: 'none' };
   const at = new Date().toISOString();
   try {
-    cred = await credential();
-    const r = await request(`${BASE_URL}/models`, { headers: cred.value ? { authorization: `Bearer ${cred.value}` } : {}, timeoutMs: 10_000 });
+    cred = await credential(connection);
+    const r = await modelRequest(connection, cred.value, '/models', null, AbortSignal.timeout(30_000), 10_000);
     if (r.status === 401 || r.status === 403) status = { state: 'unauthorized', checked_at: at, detail: `provider refused the credential (${r.status})`, credential: cred.source, base_url: BASE_URL };
     else if (!r.ok) status = { state: 'unreachable', checked_at: at, detail: `provider answered ${r.status}`, credential: cred.source, base_url: BASE_URL };
     else {
@@ -101,7 +119,8 @@ export async function probe(): Promise<LlmStatus> {
         : { state: 'ok', checked_at: at, detail: `provider lists ${models.join(', ')}`, credential: cred.source, base_url: BASE_URL };
     }
   } catch (e) {
-    status = { state: 'unreachable', checked_at: at, detail: (e as Error).message, credential: cred.source, base_url: BASE_URL };
+    status = { state: e instanceof ModelRequestError && [401, 403].includes(e.status) ? 'unauthorized' : 'unreachable', checked_at: at, detail: (e as Error).message, credential: cred.source, base_url: base };
   }
+  status = { ...status, base_url: base };
   return status;
 }

@@ -1,9 +1,9 @@
-import { SAFETY_CATEGORIES, SAFETY_POLICY, env, type DetectorResult, type Tier } from '@signet/core';
+import { SAFETY_CATEGORIES, safetyClassificationMessages, type DetectorResult, type Tier } from '@signet/core';
 import { pinCheck } from './pins';
 import { safetyChallenger } from './challenger';
 import { type Ctx, halt, wouldBlock } from './ctx';
 import * as state from './state';
-import { chatCompletion, UpstreamRejected, UpstreamUnavailable } from './provider';
+import { chatCompletion, defaultModel, UpstreamRejected, UpstreamUnavailable } from './provider';
 import { recordSafetyUsage, safetyModelUsage, type SafetyModelUsage } from './safety-usage';
 
 const CATEGORIES = SAFETY_CATEGORIES;
@@ -13,20 +13,15 @@ export class SafetyUnavailable extends Error {
   constructor(message: string, readonly usage: SafetyModelUsage[]) { super(message); }
 }
 
-const POLICY = SAFETY_POLICY; // shared with the control plane, which pins its hash (DA 3)
-
 /** Fail closed when the independent cloud safety review cannot return a valid verdict. */
 export async function reviewContent(conversation: string): Promise<SafetyVerdict> {
-  const model = env('SIGNET_LLM_MODEL', 'gpt-oss:120b-cloud');
+  const model = defaultModel();
   const usage: SafetyModelUsage[] = [];
   let lastError: Error = new SafetyUnavailable('Safety review did not run', []);
   for (let attempt = 1; attempt <= 3; attempt++) {
     const signal = AbortSignal.timeout(15_000);
     try {
-      const response = await chatCompletion({ model, temperature: 0, max_tokens: 1024, messages: [
-        { role: 'system', content: POLICY },
-        { role: 'user', content: conversation },
-      ] }, signal, undefined);
+      const response = await chatCompletion({ model, temperature: 0, max_tokens: 1024, messages: safetyClassificationMessages(conversation) }, signal, undefined);
       usage.push(safetyModelUsage(model, response.usage, state.bundle?.catalogue ?? []));
       const content = response && Array.isArray(response.choices) ? response.choices[0]?.message?.content : null;
       const label = typeof content === 'string' ? content.trim() : null;

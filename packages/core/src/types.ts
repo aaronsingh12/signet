@@ -1,3 +1,5 @@
+import type { ModelConnection } from './model-settings';
+
 export type Tier = 'T1' | 'T2' | 'T3' | 'T4';
 export type Autonomy = 'L0' | 'L1' | 'L2' | 'L3' | 'L4';
 export type Impact = 'read' | 'write' | 'privileged' | 'critical';
@@ -18,8 +20,9 @@ export interface CatalogueModel {
   region: string; // 'unverified' until the provider terms record is checked (RB-PROV-03)
   code_approved: boolean;
   price_per_1k_usd: { in: number; out: number };
+  provider_managed?: boolean;
   // An agent's own LLM. Absent means the tenant's default cloud LLM. The key stays in the Secrets Broker.
-  upstream?: { base_url: string; secret_id: string | null };
+  upstream?: { base_url: string; secret_id: string | null; provider?: ModelConnection['provider'] };
 }
 
 export interface ModelGrant {
@@ -189,6 +192,8 @@ export interface PolicyBundle {
   revoked_jti: string[];
   erased_agent_hashes?: string[];
   catalogue: CatalogueModel[];
+  model_connection?: ModelConnection;
+  model_connection_saved?: boolean;
   tools: ToolAlias[];
   detectors: DetectorConfig[];
   rollouts: Record<string, Rollout>; // by cert_id (BP 6 Stage 6)

@@ -1,4 +1,4 @@
-import { BENCHMARK_SETS, GRANITE_SAFE, PII_ENTITIES, SAFETY_CATEGORIES, SAFETY_POLICY, beats, meetsTargets, metrics, newId, runAnomBenchmark, setHash, type BenchDetector, type Metrics } from '@signet/core';
+import { BENCHMARK_SETS, GRANITE_SAFE, PII_ENTITIES, SAFETY_CATEGORIES, safetyClassificationMessages, beats, meetsTargets, metrics, newId, runAnomBenchmark, setHash, type BenchDetector, type Metrics } from '@signet/core';
 import { db, nowIso } from './db';
 import { PolicyError, forbidden, invalid, notFound } from './errors';
 import * as grounding from './grounding';
@@ -35,7 +35,7 @@ export async function record(x: { detector: string; version: string; sha256: str
 
 // --- runners for detectors the control plane can run itself -------------------------------------------
 async function predictSafe(text: string): Promise<boolean | null> {
-  const r = await askTenantModel([{ role: 'system', content: SAFETY_POLICY }, { role: 'user', content: text }], 1024);
+  const r = await askTenantModel(safetyClassificationMessages(text), 1024);
   const label = r?.text.trim();
   const cat = SAFETY_CATEGORIES.find((c) => c === label);
   return cat ? cat !== 'allow' : null;
