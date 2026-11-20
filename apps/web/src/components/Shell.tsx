@@ -6,6 +6,7 @@ import { signOut, useMe } from '../lib/auth';
 import { Logo } from './Logo';
 import { Modal } from './ui';
 import { ThemeToggle } from './ThemeToggle';
+import { SignetAssistant } from './SignetAssistant';
 
 const links = [
   { to: '/', label: 'Home', icon: Home },
@@ -48,6 +49,7 @@ export function Shell() {
         <button className="icon-button mobile-menu" data-testid="navigation-toggle" aria-label="Open navigation" aria-expanded={mobileOpen} onClick={() => setMobileOpen(!mobileOpen)}>{mobileOpen ? <X size={20} /> : <Menu size={20} />}</button>
         <main id="main-content" className="app-main"><Outlet /></main>
       </div>
+      <SignetAssistant />
       {helpOpen && <Modal title="Your AI, explained simply" onClose={() => setHelpOpen(false)}><div className="space-y-5 text-sm text-ink-2"><p>Signet checks what each AI agent is allowed to do and keeps a record of its requests.</p><div><strong className="text-ink">Governed</strong><p>The agent has an active seal and its requests go through safety checks.</p></div><div><strong className="text-ink">Shadow mode</strong><p>Signet records what it would stop, without stopping normal requests, so you can see the effect first.</p></div><div><strong className="text-ink">Blocked request</strong><p>Signet refused one action. The agent itself keeps running.</p></div><div><strong className="text-ink">Quarantined or killed</strong><p>A quarantined agent needs a review to restart. A killed agent needs a new approval to return.</p></div><div><strong className="text-ink">Usage and cost</strong><p>Costs are estimates from configured model prices, not an invoice.</p></div><button className="btn-primary" onClick={() => setHelpOpen(false)}>Got it</button></div></Modal>}
     </div>
   );

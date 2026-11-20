@@ -409,6 +409,12 @@ async function readMappedRecords(row: Row, operation: 'discover' | 'executions',
     const data = await call(row, operation, externalId, null, actor, pagination ? { offset: String(offset), limit: '100' } : {});
     const items = pointer(data, mapping.items);
     if (!Array.isArray(items) || items.length + records.length + errors.length > 1000) throw invalid('Mapped list must contain at most 1000 records across all pages');
+    if (operation === 'executions' && new URL(config.base_url).hostname.endsWith('.service-now.com') && new URL(config.endpoints.executions!.path, config.base_url).pathname === '/api/now/table/sn_aia_execution_plan') {
+      for (const item of items) {
+        const execution = object(item, 'ServiceNow execution');
+        if (typeof execution.agent !== 'string' || execution.agent.toLowerCase() !== externalId?.toLowerCase()) throw invalid(`ServiceNow execution sync for agent ${externalId} returned a missing or different agent reference; include agent in sysparm_fields, set sysparm_display_value=false and sysparm_exclude_reference_link=true, and filter sysparm_query with agent={agent_id}`);
+      }
+    }
     const baseIndex = records.length + errors.length;
     for (const [index, item] of items.entries()) {
       try { records.push(...adaptRecords({ rows: [item] }, { ...mapping, items: '/rows' })); }

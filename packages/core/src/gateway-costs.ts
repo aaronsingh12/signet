@@ -1,6 +1,22 @@
 export interface GatewayModelPrice {
   model: string;
   price_per_1k_usd: { in: number; out: number };
+  price_source?: 'manual';
+}
+
+export type ModelPriceQuote =
+  | { available: true; input_per_million: number; output_per_million: number; source_url: string; fetched_at: string }
+  | { available: false; reason: string };
+
+/** Validate the public pricing suggestion independently of persisted contract rates. */
+export function parseModelPriceQuote(value: ModelPriceQuote): ModelPriceQuote {
+  if (!value || typeof value.available !== 'boolean') throw new TypeError('Model price quote requires an availability status');
+  if (!value.available) {
+    if (typeof value.reason !== 'string' || !value.reason) throw new TypeError('Unavailable model pricing requires a reason');
+    return { available: false, reason: value.reason };
+  }
+  if (![value.input_per_million, value.output_per_million].every(price => typeof price === 'number' && Number.isFinite(price) && price >= 0 && price <= 1_000_000) || value.source_url !== 'https://models.dev' || !Number.isFinite(Date.parse(value.fetched_at))) throw new TypeError('Model price quote requires valid USD rates, source and fetch date');
+  return { available: true, input_per_million: value.input_per_million, output_per_million: value.output_per_million, source_url: value.source_url, fetched_at: value.fetched_at };
 }
 
 export interface GatewayModelUsage {
@@ -47,6 +63,7 @@ export function parseGatewayCosts(value: GatewayCostsReport): GatewayCostsReport
   if (!value || value.currency !== 'USD' || !Number.isSafeInteger(value.days) || value.days < 1 || value.days > 90 || !Number.isFinite(Date.parse(value.from)) || !Number.isFinite(Date.parse(value.to)) || !Array.isArray(value.models) || !Array.isArray(value.agents)) throw new TypeError('Gateway costs require a 1-90 day USD report with dates, models and agents');
   for (const entry of value.models) {
     if (!entry || typeof entry.model !== 'string' || !entry.model || !entry.price_per_1k_usd) throw new TypeError('Gateway model pricing requires a model and input/output prices');
+    if (entry.price_source !== undefined && entry.price_source !== 'manual') throw new TypeError('Gateway model price source must be manual when present');
     for (const direction of ['in', 'out'] as const) if (typeof entry.price_per_1k_usd[direction] !== 'number' || !Number.isFinite(entry.price_per_1k_usd[direction]) || entry.price_per_1k_usd[direction] < 0) throw new TypeError('Gateway model prices must be finite nonnegative numbers');
   }
   for (const agent of value.agents) {

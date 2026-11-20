@@ -9,3 +9,10 @@ apps/web/dist
 .env
 .env.*
 .git
+*.db
+*.db-*
+*.sqlite*
+*.bson
+*.dump
+dump
+**/dev-secrets.json

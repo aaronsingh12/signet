@@ -11,8 +11,9 @@ if (existsSync(resolve(root, '.env'))) process.loadEnvFile(resolve(root, '.env')
 const uri = process.env.MONGODB_URL;
 if (!uri) throw new Error('MONGODB_URL is required in the repository root .env');
 const address = new URL(uri);
-if (address.protocol !== 'mongodb:' || address.hostname !== '127.0.0.1' || address.port !== '27017' || address.pathname !== '/signet' || address.searchParams.get('replicaSet') !== 'signet-local') {
-  throw new Error('Local MongoDB requires MONGODB_URL=mongodb://127.0.0.1:27017/signet?replicaSet=signet-local');
+const database = process.env.MONGODB_DATABASE ?? address.pathname.slice(1);
+if (address.protocol !== 'mongodb:' || address.hostname !== '127.0.0.1' || address.port !== '27017' || !/^[a-z][a-z0-9_]{0,62}$/.test(database) || address.searchParams.get('replicaSet') !== 'signet-local') {
+  throw new Error('Local MongoDB requires MONGODB_URL=mongodb://127.0.0.1:27017/<database>?replicaSet=signet-local and a lowercase database name of at most 63 characters; use a separate database for each developer');
 }
 
 async function serverListening(): Promise<boolean> {
@@ -65,6 +66,6 @@ try {
 const client = new MongoClient(uri, { serverSelectionTimeoutMS: 3000 });
 try {
   await connectLocal(client);
-  await client.db('signet').command({ ping: 1 });
-  console.info('Local MongoDB replica set ready', { host: '127.0.0.1', port: 27017, database: 'signet', replicaSet: 'signet-local' });
+  await client.db(database).command({ ping: 1 });
+  console.info('Local MongoDB replica set ready', { host: '127.0.0.1', port: 27017, database, replicaSet: 'signet-local' });
 } finally { await client.close(); }

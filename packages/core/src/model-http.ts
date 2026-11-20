@@ -8,8 +8,12 @@ export function modelHeaders(connection: ModelConnection, key: string | null): R
     ...(connection.provider === 'claude' && key ? { 'x-api-key': key, 'anthropic-version': '2023-06-01' } : {}) };
 }
 
-/** Keep the chat contract and adapt token controls for OpenAI reasoning models. */
+/** Adapt provider token and sampling controls before sending the chat contract. */
 export function modelRequestBody(connection: ModelConnection, body: Record<string, unknown>): string {
+  if (connection.provider === 'claude') {
+    const { temperature, top_p, top_k, ...rest } = body;
+    return JSON.stringify({ ...rest, stream: false });
+  }
   if (connection.provider !== 'openai') return JSON.stringify({ ...body, stream: false });
   const { max_tokens, temperature, ...rest } = body;
   const reasoning = /^(gpt-5|o[134])/.test(String(body.model));

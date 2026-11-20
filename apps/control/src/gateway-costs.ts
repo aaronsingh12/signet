@@ -84,5 +84,5 @@ export async function gatewayCosts(days: number): Promise<GatewayCostsReport> {
       ],
     };
   });
-  return parseGatewayCosts({ days, from, to, currency: 'USD', models: settings.catalogue.map(model => ({ model: model.model, price_per_1k_usd: { ...model.price_per_1k_usd } })), agents: items });
+  return parseGatewayCosts({ days, from, to, currency: 'USD', models: settings.catalogue.map(model => ({ model: model.model, price_per_1k_usd: { ...model.price_per_1k_usd }, ...(model.price_source ? { price_source: model.price_source } : {}) })), agents: items });
 }
