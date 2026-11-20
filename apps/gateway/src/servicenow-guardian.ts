@@ -77,15 +77,16 @@ export const blockedMessage = (findings: GuardianFinding[]): string =>
   `${SIGNET_BLOCKED_PREFIX}${[...new Set(findings.map((f) => f.reason))].join('; ')}`.slice(0, CATEGORY_MAX);
 
 /**
- * Builds the verdict ServiceNow's response transformer expects. A flagged verdict also carries the blocked
- * message and the Signet reference in the first flagged list; ServiceNow keeps both in its Guardian metrics.
+ * Builds the verdict ServiceNow's response transformer expects. ServiceNow reads each field for a different
+ * check: Prompt Injection acts on `security`, Offensiveness on `safety`. A Signet block must hold whichever check
+ * asked (an answer reviewed only by Offensiveness can still leak a secret), so a block flags both fields with the
+ * same categories, the blocked message and the Signet reference; ServiceNow keeps them in its Guardian metrics.
+ * `kind` stays on each finding for the ledger and the Guardrails page.
  */
 export function guardianVerdict(findings: GuardianFinding[], status: GuardianVerdict['review']['status'], requestId: string): GuardianVerdict {
-  const security = [...new Set(findings.filter((f) => f.kind === 'security').map((f) => f.category))];
-  const safety = [...new Set(findings.filter((f) => f.kind === 'safety').map((f) => f.category))];
-  if (findings.length) (security.length ? security : safety).push(blockedMessage(findings), `${SIGNET_REF}${requestId}`);
+  const categories = findings.length ? [...new Set(findings.map((f) => f.category)), blockedMessage(findings), `${SIGNET_REF}${requestId}`] : [];
   return {
-    security: { flagged: security.length > 0, categories: security }, safety: { flagged: safety.length > 0, categories: safety },
+    security: { flagged: categories.length > 0, categories: [...categories] }, safety: { flagged: categories.length > 0, categories: [...categories] },
     review: { status, decision: findings.length ? 'flagged' : 'clear', enforcement: 'servicenow_guardian', scope: 'submitted_content' },
   };
 }

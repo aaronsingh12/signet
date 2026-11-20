@@ -542,7 +542,7 @@ export const GUARDRAILS: readonly Guardrail[] = [
   },
   {
     key: 'sn-safety', rule_ids: ['SN-GUARD-SAFETY'], group: 'servicenow', name: 'Unsafe content', detector: 'DET-SAFE',
-    what: 'DET-SAFE reviews the content. Fraud and cyber abuse are flagged as security issues; the other unsafe categories as safety issues.',
+    what: 'DET-SAFE reviews the content for harmful material such as weapons, fraud, cyber abuse and self-harm. Any Signet block is flagged in both verdict fields, so ServiceNow blocks it whether its Prompt Injection or its Offensiveness check asked.',
     effect: 'flag', where: 'gateway', step: 8, source: 'ServiceNow Guardian setup', code: ['apps/gateway/src/servicenow-guardian.ts'],
   },
   {

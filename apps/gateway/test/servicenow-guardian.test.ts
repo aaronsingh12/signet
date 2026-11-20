@@ -29,16 +29,20 @@ test('pattern rules: secrets, credential requests and the seal data rules, witho
   assert.deepEqual(fastFindings(c, 'charge card 4111 1111 1111 1111 now', policy, model).map((f) => [f.category, f.rule]), [['restricted_data:payment_card', 'SN-GUARD-DATA']]);
 });
 
-test('verdict: clear passes; a block carries the message and the Signet reference for ServiceNow', () => {
+test('verdict: clear passes; a block flags both fields with the message and the Signet reference', () => {
   const clear = guardianVerdict([], 'complete', 'req_X');
   assert.deepEqual(clear, { security: { flagged: false, categories: [] }, safety: { flagged: false, categories: [] }, review: { status: 'complete', decision: 'clear', enforcement: 'servicenow_guardian', scope: 'submitted_content' } });
   const injection = { category: 'prompt_injection', kind: 'security' as const, rule: 'SN-GUARD-ATTACK', reason: 'prompt injection detected' };
   const flagged = guardianVerdict([injection], 'complete', 'req_X');
-  assert.deepEqual(flagged.security.categories, ['prompt_injection', 'This request was blocked by Signet: prompt injection detected', 'signet_ref:req_X']);
+  const expected = { flagged: true, categories: ['prompt_injection', 'This request was blocked by Signet: prompt injection detected', 'signet_ref:req_X'] };
+  // Prompt Injection reads `security`, Offensiveness reads `safety`: either check must block a Signet block.
+  assert.deepEqual(flagged.security, expected);
+  assert.deepEqual(flagged.safety, expected);
   assert.equal(flagged.review.decision, 'flagged');
-  const unsafe = guardianVerdict([{ category: 'weapons', kind: 'safety', rule: 'SN-GUARD-SAFETY', reason: 'unsafe content (weapons)' }], 'complete', 'req_Y');
-  assert.deepEqual(unsafe.safety.categories, ['weapons', 'This request was blocked by Signet: unsafe content (weapons)', 'signet_ref:req_Y']);
-  assert.equal(unsafe.security.flagged, false);
+  const secretInAnswer = guardianVerdict([{ category: 'secret_disclosure', kind: 'security', rule: 'SN-GUARD-SECRET', reason: 'the content contains a secret' }], 'complete', 'req_Y');
+  assert.equal(secretInAnswer.safety.flagged, true, 'an answer checked only by Offensiveness still blocks a leaked secret');
+  const both = guardianVerdict([injection, { category: 'weapons', kind: 'safety', rule: 'SN-GUARD-SAFETY', reason: 'unsafe content (weapons)' }], 'complete', 'req_Z');
+  assert.deepEqual(both.safety.categories, ['prompt_injection', 'weapons', 'This request was blocked by Signet: prompt injection detected; unsafe content (weapons)', 'signet_ref:req_Z']);
   const many = Array.from({ length: 30 }, (_, i) => ({ ...injection, reason: `reason number ${i} with some length` }));
   assert.ok(blockedMessage(many).length <= 200, 'ServiceNow and the block sync accept categories up to 200 characters');
 });

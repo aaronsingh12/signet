@@ -33,6 +33,13 @@ test('a ServiceNow block links to the Signet review whose verdict it carried out
   ];
   const categories = nativeGuardianCategories('300000', error, metrics)!;
   assert.deepEqual(signetReference(categories), { categories: ['prompt_injection'], signet_request_id: ref });
+  // Signet flags both fields; with Prompt Injection and Offensiveness both set to BLOCK it is still one Signet review.
+  const both = [
+    { name: 'Prompt Injection Setting', value: 'BLOCK' }, { name: 'Prompt Injection', value: 'true' },
+    { name: 'Offensiveness Setting', value: 'BLOCK' }, { name: 'Offensiveness', value: 'true' },
+    { name: 'Raw Response', value: JSON.stringify({ security: { flagged: true, categories: ['secret_disclosure', message, `signet_ref:${ref}`] }, safety: { flagged: true, categories: ['secret_disclosure', message, `signet_ref:${ref}`] } }) },
+  ];
+  assert.deepEqual(signetReference(nativeGuardianCategories('300000', error, both)!), { categories: ['secret_disclosure'], signet_request_id: ref });
   // A block on a verdict without a Signet reference was ServiceNow's own decision.
   assert.deepEqual(signetReference(['offensive']), { categories: ['offensive'], signet_request_id: null });
   assert.throws(() => signetReference(['signet_ref:not-a-request-id']), /malformed/);
