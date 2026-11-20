@@ -12,7 +12,7 @@ import { ago, date, daysLeft, dlpSummary, time } from '../lib/format';
 import { ConnectionPill, ConnectionTab } from './Connection';
 import { LifecycleTab } from './Lifecycle';
 
-type Ladder = 'step_up' | 'throttle' | 'quarantine' | 'kill' | 'release';
+export type Ladder = 'step_up' | 'throttle' | 'quarantine' | 'kill' | 'release';
 
 export function Agent360() {
   const { id } = useParams();
@@ -294,7 +294,7 @@ function AgentLedger({ agentId }: { agentId: string }) {
   );
 }
 
-function LadderModal({ agent, instances, action, onClose, onDone }: { agent: any; instances: any[]; action: Ladder; onClose: () => void; onDone: () => void }) {
+export function LadderModal({ agent, instances, action, onClose, onDone }: { agent: { id: string; handle: string }; instances: { id: string; version: string }[]; action: Ladder; onClose: () => void; onDone: () => void }) {
   const [reason, setReason] = useState('');
   const [scope, setScope] = useState<'agent' | 'version' | 'instance'>('agent');
   const [instance, setInstance] = useState(instances[0]?.id ?? '');

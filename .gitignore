@@ -15,3 +15,14 @@ __pycache__/
 .pytest_cache/
 .vercel
 .env.*
+# Local database snapshots and credentials must never travel with shared code.
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.sqlite-*
+*.bson
+*.dump
+dump/
+dev-secrets.json
+*.tsbuildinfo

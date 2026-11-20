@@ -46,7 +46,7 @@ export function EditServiceNowSetup({ connectionId, onSaved, onCancel }: SetupPr
 }
 
 function ServiceNowSettingsForm({ settings, saveSettings, onSaved, onCancel }: SetupProps & { settings: SavedSettings | null; saveSettings: (draft: SettingsDraft) => Promise<string> }) {
-  const [draft, setDraft] = useState({ name: settings?.name ?? '', gateway_url: settings?.gateway_url ?? '', instance_url: settings?.instance_url ?? '',
+  const [draft, setDraft] = useState({ name: settings?.name ?? '', gateway_url: window.location.protocol === 'https:' ? window.location.origin : settings?.gateway_url ?? '', instance_url: settings?.instance_url ?? '',
     mcp_url: settings?.mcp_url ?? '', client_id: settings?.client_id ?? '', client_secret: '' });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<Error | null>(null);

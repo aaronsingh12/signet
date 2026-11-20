@@ -66,7 +66,7 @@ export function GatewayCosts() {
         {!agents.some(agent => agent.models.length > 0) && <p className="text-sm text-ink-3">No model usage with detailed accounting recorded for this selection. Historical Guardian records may lack input/output splits.</p>}
       </Card>
       <Card title="Model token prices" className="mt-5">
-        <p className="text-sm text-ink-2">Enter your contracted input and output prices in USD per 1 million tokens. Prices apply to all agents using that model and affect new request costs and cost limits. Historical ledger costs stay unchanged.</p>
+        <p className="text-sm text-ink-2">Public prices are fetched automatically where available. Use them or enter your contracted input and output prices in USD per 1 million tokens, then save. Saved manual rates are preserved. Prices apply to all agents using that model and affect new request costs and cost limits. Historical ledger costs stay unchanged.</p>
         {!can('tenant.admin') && <p className="mt-2 text-sm text-ink-3">A workspace administrator can update prices.</p>}
         {current.models.map(model => <ModelPriceEditor key={model.model} model={model} canEdit={can('tenant.admin')} onSaved={async () => { setData(await fetchCosts(days)); setError(null); }} />)}
         {!current.models.length && <Empty>No models are registered. Connect a model from an agent’s Gateway setup first.</Empty>}

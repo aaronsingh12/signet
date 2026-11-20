@@ -103,7 +103,7 @@ export async function saveModelSettings(input: ModelSettingsDraft, actor: Princi
     const retained = settings.catalogue.filter(entry => entry.model !== next.model).map(entry =>
       entry.model === previous.model && !entry.upstream ? { ...entry, provider_managed: true, upstream: { base_url: previous.base_url, secret_id: previousSecret, provider: previous.provider } } : entry);
     const entry: CatalogueModel = { model: next.model, upstream_model: upstreamModel, family: next.provider, region: existing?.region ?? 'unverified',
-      code_approved: existing?.code_approved ?? false, price_per_1k_usd: existing?.price_per_1k_usd ?? { in: 0, out: 0 }, provider_managed: true };
+      code_approved: existing?.code_approved ?? false, price_per_1k_usd: existing?.price_per_1k_usd ?? { in: 0, out: 0 }, ...(existing?.price_source ? { price_source: existing.price_source } : {}), provider_managed: true };
     const updated = { ...settings, catalogue: [entry, ...retained], model_connection: next };
     await db.prepare('UPDATE tenant SET settings = ? WHERE id = ?').run(JSON.stringify(updated), tenant.id);
     await ledger.append({ kind: 'admin', data: { event: 'model.settings_saved', provider: next.provider, base_url: next.base_url, model: next.model, key_stored: Boolean(secretId), actor: actor.id } });

@@ -84,6 +84,7 @@ export async function setModelPrice(model: string, price: { in: number; out: num
   const entry = tenant.settings.catalogue.find((c) => c.model === model);
   if (!entry) return Promise.reject(new Error(`unknown model ${model}`));
   entry.price_per_1k_usd = { in: price.in, out: price.out };
+  entry.price_source = 'manual';
   (await db.prepare('UPDATE tenant SET settings = ? WHERE id = ?').run(JSON.stringify(tenant.settings), tenant.id));
   return entry;
 }

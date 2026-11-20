@@ -27,12 +27,12 @@ export async function connectionAddresses(): Promise<ConnectionAddresses> {
   if (saved) return { ...saved, control_url_source: 'database', gateway_url_source: 'database' };
   const nodes = await db.prepare('SELECT id, url, last_seen FROM gateway_node ORDER BY id').all() as { id: string; url: string; last_seen: string }[];
   const live = nodes.find((node) => Date.now() - Date.parse(node.last_seen) < 30_000);
-  const gateway = process.env.SIGNET_GATEWAY_PUBLIC_URL ?? process.env.SIGNET_GATEWAY_URL ?? live?.url ?? null;
+  const gateway = process.env.SIGNET_GATEWAY_PUBLIC_URL ?? process.env.SIGNET_PUBLIC_URL ?? process.env.SIGNET_GATEWAY_URL ?? live?.url ?? null;
   return {
-    control_url: (process.env.SIGNET_CONTROL_PUBLIC_URL ?? `http://localhost:${process.env.SIGNET_CONTROL_PORT ?? '4100'}`).replace(/\/+$/, ''),
+    control_url: (process.env.SIGNET_CONTROL_PUBLIC_URL ?? process.env.SIGNET_PUBLIC_URL ?? `http://localhost:${process.env.SIGNET_CONTROL_PORT ?? '4100'}`).replace(/\/+$/, ''),
     gateway_url: gateway?.replace(/\/+$/, '') ?? null,
-    control_url_source: process.env.SIGNET_CONTROL_PUBLIC_URL ? 'deployment configuration' : 'local development address',
-    gateway_url_source: process.env.SIGNET_GATEWAY_PUBLIC_URL || process.env.SIGNET_GATEWAY_URL ? 'deployment configuration' : live ? `gateway node ${live.id} (local address)` : 'not configured',
+    control_url_source: process.env.SIGNET_CONTROL_PUBLIC_URL || process.env.SIGNET_PUBLIC_URL ? 'deployment configuration' : 'local development address',
+    gateway_url_source: process.env.SIGNET_GATEWAY_PUBLIC_URL || process.env.SIGNET_PUBLIC_URL || process.env.SIGNET_GATEWAY_URL ? 'deployment configuration' : live ? `gateway node ${live.id} (local address)` : 'not configured',
   };
 }
 
