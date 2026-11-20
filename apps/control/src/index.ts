@@ -63,6 +63,7 @@ import { connectionAddresses, saveConnectionAddresses } from './connection-setti
 import { scanHistory } from './scan-history';
 import { SCAN_SOURCES } from '../../../packages/core/src/scan-history';
 import { testModelConnection } from './model-connection';
+import { guardrails } from './guardrails';
 
 const INTERNAL_TOKEN = devSecret('SIGNET_INTERNAL_TOKEN');
 const PORT = Number(process.env.PORT ?? env('SIGNET_CONTROL_PORT', '4100'));
@@ -643,6 +644,7 @@ api.post('/detectors/:id/challenger/promote', requires('detectors.manage'), rout
 api.post('/detectors/:id/challenger/stop', requires('detectors.manage'), route(async (req, res) => (await detectors.stopChallenger(req.params.id!, principalOf(res), String(req.body?.reason ?? '')))));
 api.post('/detectors/:id/approvals', requires('agents.read'), route(async (req, res) => (await benchmarks.approve(req.params.id!, principalOf(res), req.body ?? {}))));
 api.get('/detectors', requires('agents.read'), route(async () => ({ items: (await detectors.list()) })));
+api.get('/guardrails', requires('agents.read'), route(async () => (await guardrails())));
 api.post('/detectors/:id/mode', requires('detectors.manage'), route(async (req, res) => (await detectors.setMode(req.params.id!, req.body?.mode, principalOf(res), { reason: String(req.body?.reason ?? ''), dev_override: req.body?.dev_override === true }))));
 
 // Ledger and evidence

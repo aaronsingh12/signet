@@ -1,3 +1,4 @@
+import { GUARDRAIL_PARAMS } from '@signet/core';
 import * as state from './state';
 import type { LiveAnomaly } from './anomaly';
 
@@ -73,14 +74,14 @@ export async function recordOutOfManifest(agentId: string): Promise<number> {
 
 function recordLocalOutOfManifest(agentId: string): number {
   const now = Date.now();
-  const hits = (outOfManifest.get(agentId) ?? []).filter((t) => now - t < 10 * 60_000);
+  const hits = (outOfManifest.get(agentId) ?? []).filter((t) => now - t < GUARDRAIL_PARAMS.out_of_manifest.window_minutes * 60_000);
   hits.push(now);
   outOfManifest.set(agentId, hits);
   return hits.length;
 }
 
 // Unauthenticated refusals recorded per client address per minute (flood guard; per node is enough).
-const ANONYMOUS_RECORDED_PER_MINUTE = 20;
+const ANONYMOUS_RECORDED_PER_MINUTE = GUARDRAIL_PARAMS.unsigned_recorded_per_minute;
 const anonymous = new Map<string, number[]>();
 export function takeAnonymousFailure(address: string): boolean {
   const now = Date.now();

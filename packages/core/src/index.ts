@@ -22,4 +22,7 @@ export * from './anomaly';
 export * from './detector-specs';
 export * from './benchmark';
 export * from './benchmark-sets';
+export * from './guardrail-params';
+export * from './guardrails';
+export * from './rulebook';
 export { SERVICENOW_GUARDIAN_REQUEST, SERVICENOW_GUARDIAN_RESPONSE } from './servicenow-guardian';

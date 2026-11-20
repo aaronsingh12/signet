@@ -22,6 +22,8 @@ export function Moved({ to }: { to: string }) {
 export function Activity() {
   const [params, setParams] = useSearchParams();
   const tab = params.get('tab') ?? (params.get('record') || params.get('agent') ? 'history' : 'live');
+  // Guardrails was briefly a tab here; it is now its own page.
+  if (tab === 'guardrails') return <Navigate to="/guardrails" replace />;
   return <>
     <Tabs active={tab} onChange={(id) => setParams({ tab: id })} tabs={[{ id: 'live', label: 'Live' }, { id: 'history', label: 'History' }]} />
     {tab === 'live' ? <LiveTraffic /> : <Ledger />}

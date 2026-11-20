@@ -1,10 +1,10 @@
-import { sha256, type Tier } from '@signet/core';
+import { GUARDRAIL_PARAMS, sha256, type Tier } from '@signet/core';
 import * as state from './state';
 
 // DET-GROUND sampling (DA 3 Tier 2, DA 5: "groundedness on a 1% sample of sessions, higher for T1").
 // The choice is a hash of the request ID, so it is reproducible. Only answers that had sources (tool
 // results or system context) can be judged. Text sent is what the model saw: tokenised by DLP.
-const RATE: Record<Tier, number> = { T1: 0.05, T2: 0.02, T3: 0.01, T4: 0.01 };
+const RATE: Record<Tier, number> = GUARDRAIL_PARAMS.grounding_sample_rates;
 
 export function sampleRate(tier: Tier): number {
   const o = Number(process.env.SIGNET_GROUND_SAMPLE_RATE);

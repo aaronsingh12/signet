@@ -1,7 +1,7 @@
 import { hostname } from 'node:os';
 import type { KeyObject } from 'node:crypto';
 import {
-  canonicalize, devSecret, env, fromJwk, request, scopeKey, sha256, verifyJws,
+  GUARDRAIL_PARAMS, canonicalize, devSecret, env, fromJwk, request, scopeKey, sha256, verifyJws,
   type CertificateBody, type CompiledPolicy, type DetectorConfig, type PolicyBundle, type PublicJwk, type Rollout, type ScopeState, type ToolAlias,
 } from '@signet/core';
 import { eraseAgentVault } from './vault';
@@ -17,7 +17,7 @@ export const CONTROL_URL = env('SIGNET_CONTROL_URL', 'http://localhost:4100').re
 const INTERNAL_TOKEN = devSecret('SIGNET_INTERNAL_TOKEN');
 export const PORT = Number(process.env.PORT ?? env('SIGNET_GATEWAY_PORT', '8100'));
 export const NODE_ID = env('SIGNET_NODE_ID', `gw-${hostname().toLowerCase()}-${PORT}`);
-const POLL_MS = 5_000; // BP 5.4 fallback poll
+const POLL_MS = GUARDRAIL_PARAMS.bundle_poll_seconds * 1000; // BP 5.4 fallback poll
 const SECRET_TTL_MS = 60_000;
 
 let caKeys: Map<string, KeyObject> = new Map();

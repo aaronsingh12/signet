@@ -1,5 +1,5 @@
 import type { IncomingHttpHeaders } from 'node:http';
-import { canonicalize, combine, combineWithDetectorOutageAudit, sha256, strictest, type Outcome } from '@signet/core';
+import { GUARDRAIL_PARAMS, canonicalize, combine, combineWithDetectorOutageAudit, sha256, strictest, type Outcome } from '@signet/core';
 import { type Ctx, type Done, Halt, decisionInputs, finish, halt, humanApproval, ladder, maskArgs, newCtx, preflight, recordOutOfManifest, sessionKey, step, wouldBlock } from './ctx';
 import { detectInjection, detectJailbreak, notDeployed } from './detectors';
 import { evaluate } from './engine';
@@ -18,7 +18,7 @@ import { maybeSample } from './grounding';
 
 // Model calls to an approved LLM (BP 5.2 steps 6-13 for llm_call).
 
-const OUTAGE_RETRY_AFTER_S = 30;
+const OUTAGE_RETRY_AFTER_S = GUARDRAIL_PARAMS.outage.retry_after_seconds;
 type Msg = { role: string; content?: unknown };
 
 export async function handleChat(headers: IncomingHttpHeaders, body: Record<string, unknown> | undefined, foreignProvider?: string): Promise<Done> {

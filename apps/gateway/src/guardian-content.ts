@@ -1,5 +1,7 @@
+import { GUARDRAIL_PARAMS } from '@signet/core';
+
 /** Bounded Guardian review input, below the gateway's existing 2 MiB JSON transport limit. */
-export const GUARDIAN_MAX_BYTES = 262144;
+export const GUARDIAN_MAX_BYTES = GUARDRAIL_PARAMS.guardian_max_bytes;
 export const GUARDIAN_CHUNK_BYTES = 32768;
 export const GUARDIAN_OVERLAP_BYTES = 2048;
 

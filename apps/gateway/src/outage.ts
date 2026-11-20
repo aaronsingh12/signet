@@ -1,3 +1,4 @@
+import { GUARDRAIL_PARAMS } from '@signet/core';
 import * as state from './state';
 
 // Cloud LLM outage declaration (RB-PROV-04, E42). An outage is declared when, in the current
@@ -5,7 +6,8 @@ import * as state from './state';
 // agents). While declared, upstream errors never count against an agent (RB-PROV-05). Each gateway node
 // decides for its own traffic and reports start and end to the ledger.
 
-const BUCKET_MS = 5 * 60_000;
+const OUTAGE = GUARDRAIL_PARAMS.outage;
+const BUCKET_MS = OUTAGE.bucket_minutes * 60_000;
 let bucketStart = Date.now();
 const perAgent = new Map<string, { ok: number; err: number }>();
 export const eraseAgentOutage = (agentId: string): void => { perAgent.delete(agentId); };
@@ -20,7 +22,7 @@ function roll() {
 }
 
 function report(s: 'declared' | 'ended') {
-  const stats = { agents: perAgent.size, failing: [...perAgent.values()].filter((v) => v.err / (v.ok + v.err) > 0.2).length };
+  const stats = { agents: perAgent.size, failing: [...perAgent.values()].filter((v) => v.err / (v.ok + v.err) > OUTAGE.agent_error_share).length };
   state.internal('/internal/outage', { method: 'POST', body: JSON.stringify({ node_id: state.NODE_ID, state: s, stats }) }).catch(() => {});
   console.log(`[gateway] cloud LLM outage ${s} (${stats.failing}/${stats.agents} agents failing)`);
 }
@@ -32,8 +34,8 @@ export function record(agentId: string, ok: boolean) {
   else v.err++;
   perAgent.set(agentId, v);
   if (!declared && !ok) {
-    const failing = [...perAgent.values()].filter((x) => x.err / (x.ok + x.err) > 0.2).length;
-    if (failing >= 3 && failing / perAgent.size >= 0.3) {
+    const failing = [...perAgent.values()].filter((x) => x.err / (x.ok + x.err) > OUTAGE.agent_error_share).length;
+    if (failing >= OUTAGE.min_failing_agents && failing / perAgent.size >= OUTAGE.failing_agent_share) {
       declared = true;
       report('declared');
     }

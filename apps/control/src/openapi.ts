@@ -113,6 +113,7 @@ const ops: Record<string, Record<string, Op>> = {
   '/discovery/logs': { post: { summary: 'Analyse a network or SaaS audit log export for traffic to AI providers', permission: 'discovery.write' } },
   '/discovered-assets/{id}/resolve': { post: { summary: 'Mark a finding migrated, blocked or dismissed', permission: 'discovery.write' } },
   '/replay': { post: { summary: 'Replay a recorded decision (record_id): re-band detector scores, check version hashes against released pins, re-run the combiner; written to the ledger', permission: 'ledger.read' } },
+  '/guardrails': { get: { summary: 'Every guardrail Signet enforces (rule IDs, pipeline step, effect, source) with the detector modes and limits in force now', permission: 'agents.read' } },
   '/replay/runs': { get: { summary: 'Daily replay samples (SGC-SELF-007)', permission: 'ledger.read' } },
   '/replay/sample': { post: { summary: 'Replay a random sample of the last 24 hours now (size, default 100)', permission: 'detectors.manage' } },
   '/detectors/{id}/release': { get: { summary: 'Release gate for promoting the detector (benchmark, champion, approvals) and its benchmark history', permission: 'agents.read' } },

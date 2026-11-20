@@ -1,9 +1,9 @@
 import type { IncomingHttpHeaders } from 'node:http';
-import { scan, sha256 } from '@signet/core';
+import { GUARDRAIL_PARAMS, scan, sha256 } from '@signet/core';
 import { finish, Halt, halt, maskArgs, newCtx, preflight, step, type Ctx, type Done } from './ctx';
 import { reviewContent, SafetyUnavailable, type SafetyVerdict } from './content-safety';
 import { pinCheck } from './pins';
-import { guardianChunks, GUARDIAN_MAX_BYTES, GUARDIAN_CHUNK_BYTES, GUARDIAN_OVERLAP_BYTES } from './guardian-content';
+import { guardianChunks, GUARDIAN_CHUNK_BYTES, GUARDIAN_OVERLAP_BYTES } from './guardian-content';
 
 interface GuardianRequest { content: string }
 interface Flag { flagged: boolean; categories: string[] }
@@ -60,10 +60,10 @@ async function inspect(ctx: Ctx, headers: IncomingHttpHeaders, input: GuardianRe
   await preflight(ctx, headers);
   const bytes = typeof input?.content === 'string' ? Buffer.byteLength(input.content, 'utf8') : null;
   ctx.extra.guardrail_input = { type: typeof input?.content, bytes };
-  if (typeof input?.content !== 'string' || !input.content.trim() || (bytes !== null && bytes > GUARDIAN_MAX_BYTES)) {
+  if (typeof input?.content !== 'string' || !input.content.trim() || (bytes !== null && bytes > GUARDRAIL_PARAMS.guardian_max_bytes)) {
     const detail = typeof input?.content !== 'string' ? 'Expected a JSON object with a content string; check the ServiceNow request transformer and Content-Type'
       : !input.content.trim() ? 'Guardian content is empty; check the ServiceNow request transformer'
-      : `Guardian content is ${bytes} UTF-8 bytes; maximum is ${GUARDIAN_MAX_BYTES}. Submit smaller Guardian inputs; accepted content is reviewed in overlapping chunks and is never truncated`;
+      : `Guardian content is ${bytes} UTF-8 bytes; maximum is ${GUARDRAIL_PARAMS.guardian_max_bytes}. Submit smaller Guardian inputs; accepted content is reviewed in overlapping chunks and is never truncated`;
     ctx.extra.guardrail_input_error = detail;
     halt(ctx, 6, 400, 'invalid_guardian_content', detail, 'deny', ['SN-GUARD-INPUT']);
   }

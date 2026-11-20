@@ -1,4 +1,4 @@
-import { newId } from '@signet/core';
+import { GUARDRAIL_PARAMS, newId } from '@signet/core';
 import * as approvals from './approvals';
 import { db, nowIso } from './db';
 import * as enforcement from './enforcement';
@@ -24,7 +24,7 @@ export interface HitlInput {
   caller_user_id: string | null;
 }
 
-const SESSION_GRANT_HOURS = 8;
+const SESSION_GRANT_HOURS = GUARDRAIL_PARAMS.session_grant_hours;
 
 export async function open(input: HitlInput) {
   if (!input.agent_id || !input.action_key) throw invalid('agent_id and action_key are required');

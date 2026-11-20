@@ -1,4 +1,4 @@
-import { DEV_OVERRIDE_DISABLED, MODEL_DETECTORS, devOverridesAllowed, knownPin, specHash, type DetectorMode } from '@signet/core';
+import { DEV_OVERRIDE_DISABLED, GUARDRAIL_PARAMS, MODEL_DETECTORS, devOverridesAllowed, knownPin, specHash, type DetectorMode } from '@signet/core';
 import { GROUND_SPEC } from './grounding';
 import * as benchmarks from './benchmarks';
 import { db, nowIso, tx } from './db';
@@ -12,7 +12,7 @@ import type { Principal } from './rbac';
 // are small open models run in the gateway (core MODEL_DETECTORS); a replacement for an active version
 // runs beside it as a challenger (DA 6 champion/challenger).
 
-const SHADOW_DAYS = 14;
+const SHADOW_DAYS = GUARDRAIL_PARAMS.detector_shadow_days;
 const modelNotes = (id: 'DET-INJ' | 'DET-JB') => `${MODEL_DETECTORS[id].repo} (${MODEL_DETECTORS[id].licence}): ${MODEL_DETECTORS[id].notes}`;
 
 const SEED = [
