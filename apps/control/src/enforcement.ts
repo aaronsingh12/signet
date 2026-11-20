@@ -12,6 +12,7 @@ import type { Principal } from './rbac';
 import { reloadSettings, tenant } from './tenant';
 import { listTools } from './tools';
 import { correlation, enqueue } from './outbox';
+import { runtimeModelConnection } from './model-settings';
 
 const BUNDLE_TTL_MS = GUARDRAIL_PARAMS.bundle_ttl_hours * 3_600_000; // BP 3: gateways enforce on the last bundle until it expires
 
@@ -113,6 +114,8 @@ export async function buildBundle(): Promise<string> {
     revoked_jti: ((await db.prepare('SELECT jti FROM revoked_jti WHERE exp > ?').all(Math.floor(now / 1000))) as { jti: string }[]).map((r) => r.jti),
     erased_agent_hashes: ((await db.prepare("SELECT DISTINCT jsonb_extract_path_text(data::jsonb, 'subject_hash') AS hash FROM ledger_record WHERE tenant_id = ? AND jsonb_extract_path_text(data::jsonb, 'event') = 'record.erased'").all(tenant.id)) as { hash: string }[]).map((row) => row.hash),
     catalogue: tenant.settings.catalogue,
+    model_connection: await runtimeModelConnection(),
+    model_connection_saved: Boolean(tenant.settings.model_connection),
     tools: (await listTools()),
     detectors: ((await db.prepare('SELECT id, version, mode, model_sha256 AS sha256, challenger_version, challenger_sha256 FROM detector').all()) as { id: string; version: string; mode: DetectorConfig['mode']; sha256: string | null; challenger_version: string | null; challenger_sha256: string | null }[])
       .map(({ challenger_version, challenger_sha256, ...d }) => ({ ...d, challenger: challenger_version && challenger_sha256 ? { version: challenger_version, sha256: challenger_sha256 } : null })),

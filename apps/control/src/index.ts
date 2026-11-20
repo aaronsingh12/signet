@@ -66,6 +66,7 @@ import { scanHistory } from './scan-history';
 import { SCAN_SOURCES } from '../../../packages/core/src/scan-history';
 import { testModelConnection } from './model-connection';
 import { guardrails } from './guardrails';
+import { listModelOptions, modelSettings, saveModelSettings } from './model-settings';
 
 const INTERNAL_TOKEN = devSecret('SIGNET_INTERNAL_TOKEN');
 const PORT = Number(process.env.PORT ?? env('SIGNET_CONTROL_PORT', '4100'));
@@ -332,6 +333,13 @@ api.get('/plugins/vercel/connect', requires('tenant.admin'), route((_req, res) =
 api.get('/plugins/vercel/callback', requires('tenant.admin'), route(async (req, res) => (await plugins.completeVercelConnection(req, res, principalOf(res)))));
 api.post('/plugins/vercel/disconnect', requires('tenant.admin'), route(async (_req, res) => (await plugins.disconnectVercel(principalOf(res)))));
 api.get('/catalogue', requires('agents.read'), route(async () => ({ catalogue: (await reloadSettings()).catalogue })));
+api.get('/model-settings', requires('tenant.admin'), route(async () => modelSettings()));
+api.post('/model-settings/models', requires('tenant.admin'), route(async req => listModelOptions(req.body)));
+api.put('/model-settings', requires('tenant.admin'), route(async (req, res) => {
+  const settings = await saveModelSettings(req.body, principalOf(res));
+  hub.publish('bundle', { reason: 'model.settings_saved' });
+  return settings;
+}));
 api.post('/catalogue/:model/test', requires('identity.bootstrap'), route(async (req, res) => testModelConnection(req.params.model!, principalOf(res).id)));
 api.post('/connections/:id/agent', requires('connectors.manage'), route(async (req, res) => {
   if (typeof req.body?.agent_id !== 'string') throw invalid('agent_id is required');

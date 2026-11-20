@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { ErrorNote } from './ui';
 import { api, useApi } from '../lib/api';
+import { ServiceNowFieldGuide } from './ServiceNowGuide';
 
 interface SavedSettings {
   id: string;
@@ -65,8 +66,9 @@ function ServiceNowSettingsForm({ settings, saveSettings, onSaved, onCancel }: S
       setSaving(false);
     }
   };
-  return <form data-testid="servicenow-setup-form" onSubmit={event => void save(event)} className="space-y-4">
+  return <form data-testid="servicenow-setup-form" onSubmit={event => void save(event)} className="sn-guided-form space-y-4">
     <p className="text-sm text-ink-2">Save your ServiceNow connection, then authorize access to discover its MCP tools. Agent activity monitoring requires an execution-data tool.</p>
+    <ServiceNowFieldGuide />
     <div><label className="label" htmlFor="servicenow-connection-name">Connection name</label>
       <input id="servicenow-connection-name" data-testid="servicenow-connection-name" className="input" required maxLength={120} pattern=".*\S.*" value={draft.name} onChange={event => setDraft({ ...draft, name: event.target.value })} placeholder="e.g. Incident management" /></div>
     <div>
@@ -88,7 +90,7 @@ function ServiceNowSettingsForm({ settings, saveSettings, onSaved, onCancel }: S
       {settings?.has_client_secret && <p className="mt-1 text-xs text-ink-3">A secret is saved. Leave this blank to keep it, or enter a replacement.</p>}</div>
     <ErrorNote error={error} />
     <div className="flex flex-wrap gap-2">
-      <button type="submit" data-testid="servicenow-save-settings" className="btn-primary" disabled={saving}>{saving ? 'Saving and connecting…' : 'Save and connect'}</button>
+      <button id="servicenow-save-settings" type="submit" data-testid="servicenow-save-settings" className="btn-primary" disabled={saving}>{saving ? 'Saving and connecting…' : 'Save and connect'}</button>
       <Link data-testid="servicenow-all-connections" className="btn-ghost" to="/settings/systems" onClick={onCancel}>All connections</Link>
       <button type="button" className="btn-ghost" onClick={onCancel} disabled={saving}>Cancel</button>
     </div>

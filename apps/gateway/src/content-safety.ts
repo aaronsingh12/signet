@@ -1,9 +1,9 @@
-import { SAFETY_CATEGORIES, SAFETY_POLICY, env, type DetectorResult, type Tier } from '@signet/core';
+import { SAFETY_CATEGORIES, safetyClassificationMessages, type DetectorResult, type Tier } from '@signet/core';
 import { pinCheck } from './pins';
 import { safetyChallenger } from './challenger';
 import { type Ctx, halt, wouldBlock } from './ctx';
 import * as state from './state';
-import { chatCompletion, UpstreamRejected, UpstreamUnavailable } from './provider';
+import { chatCompletion, defaultModel, UpstreamRejected, UpstreamUnavailable } from './provider';
 import { recordSafetyUsage, safetyModelUsage, type SafetyModelUsage } from './safety-usage';
 
 const CATEGORIES = SAFETY_CATEGORIES;
@@ -13,25 +13,22 @@ export class SafetyUnavailable extends Error {
   constructor(message: string, readonly usage: SafetyModelUsage[]) { super(message); }
 }
 
-const POLICY = SAFETY_POLICY; // shared with the control plane, which pins its hash (DA 3)
-
 export interface Classified<L extends string> { label: L; model: string; tokens: number; usage: SafetyModelUsage[] }
+type ClassifierMessages = (text: string) => { role: 'system' | 'user'; content: string }[];
 
 /**
- * Asks the cloud LLM for exactly one label from `labels` under `policy`. Fails closed: a timeout, an
- * unreachable provider or any answer that is not one of the labels is SafetyUnavailable after 3 attempts.
+ * Asks the tenant's default model for exactly one label from `labels`, with `messages` quoting the text as data
+ * (the policy is the system message; core pins its hash, DA 3). Fails closed: a timeout, an unreachable provider
+ * or any answer that is not one of the labels is SafetyUnavailable after 3 attempts.
  */
-export async function classifyWith<L extends string>(policy: string, labels: readonly L[], conversation: string, name = 'Safety classifier'): Promise<Classified<L>> {
-  const model = env('SIGNET_LLM_MODEL', 'gpt-oss:120b-cloud');
+export async function classifyWith<L extends string>(messages: ClassifierMessages, labels: readonly L[], conversation: string, name = 'Safety classifier'): Promise<Classified<L>> {
+  const model = defaultModel();
   const usage: SafetyModelUsage[] = [];
   let lastError: Error = new SafetyUnavailable(`${name} did not run`, []);
   for (let attempt = 1; attempt <= 3; attempt++) {
     const signal = AbortSignal.timeout(15_000);
     try {
-      const response = await chatCompletion({ model, temperature: 0, max_tokens: 1024, messages: [
-        { role: 'system', content: policy },
-        { role: 'user', content: conversation },
-      ] }, signal, undefined);
+      const response = await chatCompletion({ model, temperature: 0, max_tokens: 1024, messages: messages(conversation) }, signal, undefined);
       usage.push(safetyModelUsage(model, response.usage, state.bundle?.catalogue ?? []));
       const content = response && Array.isArray(response.choices) ? response.choices[0]?.message?.content : null;
       const text = typeof content === 'string' ? content.trim() : null;
@@ -50,7 +47,7 @@ export async function classifyWith<L extends string>(policy: string, labels: rea
 
 /** Fail closed when the independent cloud safety review cannot return a valid verdict. */
 export async function reviewContent(conversation: string): Promise<SafetyVerdict> {
-  const { label, ...rest } = await classifyWith(POLICY, CATEGORIES, conversation, 'Safety classifier');
+  const { label, ...rest } = await classifyWith(safetyClassificationMessages, CATEGORIES, conversation, 'Safety classifier');
   return { category: label, ...rest };
 }
 

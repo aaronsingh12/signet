@@ -75,6 +75,8 @@ const ops: Record<string, Record<string, Op>> = {
   '/identity/diagnostics': { post: { summary: 'SDK or sidecar report of the agent runtime (provider variable names, egress check); workload token', public: true } },
   '/identity/token/refresh': { post: { summary: 'Swap a valid workload token for a fresh one', public: true } },
   '/catalogue': { get: { summary: "The tenant's cloud LLM catalogue (Rulebook D-17)", permission: 'agents.read' } },
+  '/model-settings': { get: { summary: 'Read model provider settings without API keys', permission: 'tenant.admin' }, put: { summary: 'Verify and save the active model provider with an encrypted API key', permission: 'tenant.admin' } },
+  '/model-settings/models': { post: { summary: 'List models available to the supplied provider connection', permission: 'tenant.admin' } },
   '/catalogue/{model}/price': { put: { summary: 'Set a catalogue model price in USD per 1,000 tokens (in, out)', permission: 'tenant.admin' } },
   '/stats/command-center': { get: { summary: 'Command Center figures', permission: 'agents.read' } },
   '/stats/agents': { get: { summary: 'Per-agent status, hourly activity, outcomes, usage and costs over the last 24 hours', permission: 'agents.read' } },

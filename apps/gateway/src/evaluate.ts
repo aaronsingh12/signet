@@ -1,7 +1,7 @@
 import { sha256 } from '@signet/core';
 import { maskArgs, type Ctx } from './ctx';
 import { appendRecord } from './ledgerclient';
-import { chatCompletion, type ChatResponse } from './provider';
+import { chatCompletion, defaultModel, type ChatResponse } from './provider';
 import * as state from './state';
 
 // Quality checks (Phase C4): a sample of answered model calls is scored by the tenant's own cloud LLM
@@ -28,7 +28,7 @@ export function maybeEvaluate(ctx: Ctx, request: Record<string, unknown>, respon
 }
 
 async function score(ctx: Ctx, request: Record<string, unknown>, response: ChatResponse) {
-  const model = state.bundle?.catalogue[0]?.model;
+  const model = defaultModel();
   const answer = String(response.choices?.[0]?.message?.content ?? '');
   if (!model || !answer.trim()) return;
   const question = maskArgs(lastUser((request.messages ?? []) as { role: string; content?: unknown }[]).slice(0, 4000)) as string;

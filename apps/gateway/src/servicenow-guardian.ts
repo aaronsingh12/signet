@@ -1,6 +1,6 @@
 import type { IncomingHttpHeaders } from 'node:http';
 import {
-  ATTACK_LABELS, ATTACK_POLICY, GUARDIAN_ATTACK_JUDGE, GUARDRAIL_PARAMS, SIGNET_BLOCKED_PREFIX, SIGNET_REF, promptDecision, scan, sha256, specHash,
+  ATTACK_LABELS, GUARDIAN_ATTACK_JUDGE, GUARDRAIL_PARAMS, SIGNET_BLOCKED_PREFIX, SIGNET_REF, attackClassificationMessages, promptDecision, scan, sha256, specHash,
   type CatalogueModel, type CompiledPolicy, type DataTag, type DetectorResult, type Tier,
 } from '@signet/core';
 import { finish, Halt, halt, maskArgs, newCtx, preflight, step, type Ctx, type Done } from './ctx';
@@ -41,7 +41,7 @@ export interface GuardianChecks {
 
 const LIVE_CHECKS: GuardianChecks = {
   safety: reviewContent,
-  attack: (chunk) => classifyWith(ATTACK_POLICY, ATTACK_LABELS, chunk, 'Prompt-attack classifier'),
+  attack: (chunk) => classifyWith(attackClassificationMessages, ATTACK_LABELS, chunk, 'Prompt-attack classifier'),
   injection: (text, tier) => detectInjection(text, tier, 'prompt'),
   jailbreak: detectJailbreak,
 };

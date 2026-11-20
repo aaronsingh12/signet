@@ -1,8 +1,9 @@
-import { env, newId, type CatalogueModel } from '@signet/core';
+import { env, newId, type CatalogueModel, type ModelConnection } from '@signet/core';
 import { db, nowIso } from './db';
 import { DEFAULT_GROUP_ROLES, type Role } from './rbac';
 
 export interface TenantSettings {
+  model_connection?: ModelConnection;
   residency: string[];
   catalogue: CatalogueModel[];
   group_roles: Record<string, Role>;

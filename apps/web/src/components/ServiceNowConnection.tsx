@@ -5,6 +5,7 @@ import { EditServiceNowSetup, ServiceNowSetup } from './ServiceNowSetup';
 import { ConnectionIcon } from './ConnectionIcon';
 import { UnlinkedServiceNowAgentCards } from './PlatformAgentCards';
 import { ServiceNowAgents } from './ServiceNowAgents';
+import { ServiceNowGuide } from './ServiceNowGuide';
 import { api, useApi } from '../lib/api';
 import { useCan } from '../lib/auth';
 
@@ -34,6 +35,7 @@ export function ServiceNowConnection() {
   return <div className="space-y-4">
     <Card>
       <h2 className="text-base font-semibold">ServiceNow connections and AI agents</h2>
+      <div className="mt-2"><ServiceNowGuide /></div>
       {canManage ? <button type="button" data-testid="servicenow-add-connection" className="btn-primary mt-3" onClick={() => setAdding(true)}>Add ServiceNow AI Agents</button>
         : <p className="mt-2 text-sm text-ink-3">A Tenant Admin can manage these connections.</p>}
       {loading && <p role="status">Loading connections…</p>}
