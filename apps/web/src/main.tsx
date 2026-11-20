@@ -24,6 +24,7 @@ import { Guardrails } from './pages/Guardrails';
 import { GatewayCosts } from './pages/GatewayCosts';
 import { Tenant } from './pages/Tenant';
 import { Tools } from './pages/Tools';
+import { SetupGuide } from './pages/SetupGuide';
 
 const authed = (element: JSX.Element) => <AuthProvider>{element}</AuthProvider>;
 
@@ -54,6 +55,7 @@ createRoot(document.getElementById('root')!).render(
           <Route path="settings/apps" element={<Tools />} />
           <Route path="settings/accounts" element={<Plugins />} />
           <Route path="settings/systems" element={<Connectors />} />
+          <Route path="settings/setup-guide" element={<SetupGuide />} />
           <Route path="settings/rules" element={<Policies />} />
           <Route path="settings/agent-defaults" element={<AgentSettings />} />
           <Route path="settings/discovery" element={<Discovery />} />

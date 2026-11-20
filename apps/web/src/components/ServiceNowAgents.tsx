@@ -7,6 +7,7 @@ import { Card, ErrorNote, Modal } from './ui';
 import { ExternalConnectionEditor, ExternalConnections } from './ExternalConnections';
 import { ServiceNowGateway } from './ServiceNowGateway';
 import { ServiceNowGuardian } from './ServiceNowGuardian';
+import { ServiceNowGuide } from './ServiceNowGuide';
 
 interface LinkedAgent {
   agent_id: string; external_id: string; connection_id: string; name: string; handle: string;
@@ -24,6 +25,7 @@ export function ServiceNowAgents({ connectionId }: { connectionId: string }) {
   }, [reload]);
   return <div className="mt-5 border-t border-line pt-4">
     <h3 className="text-sm font-semibold">Linked ServiceNow AI agents</h3>
+    <div className="mt-2"><ServiceNowGuide /></div>
     <p className="mt-1 text-xs text-ink-3">Link an existing agent to the registry, configure activity sync, then complete approval and gateway setup.</p>
     {can('agents.write') && <button type="button" data-testid={`servicenow-link-agent-${connectionId}`} className="btn-primary mt-3" onClick={() => setAdding(true)}>Link existing ServiceNow agent</button>}
     <ErrorNote error={error} />

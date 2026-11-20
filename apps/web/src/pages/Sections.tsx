@@ -60,6 +60,7 @@ const SETTINGS = [
   { to: '/settings/apps', title: 'Connected apps & keys', text: 'Apps agents can use and their stored credentials', perm: 'agents.read' },
   { to: '/settings/accounts', title: 'Connected accounts', text: 'Vercel account sign-in and service integrations', perm: 'connectors.manage' },
   { to: '/settings/systems', title: 'Company systems', text: 'ServiceNow and connected AI platforms', perm: 'compliance.read' },
+  { to: '/settings/setup-guide', title: 'Setup Guide', text: 'Turn ServiceNow setup guidance on or off', perm: 'compliance.read' },
   { to: '/settings/rules', title: 'Safety rules', text: 'Detectors, company-wide defaults and limits', perm: 'agents.read' },
   { to: '/settings/agent-defaults', title: 'Agent list', text: 'Manage and permanently remove agents', perm: 'agents.read' },
   { to: '/settings/discovery', title: 'Finding hidden AI', text: 'Key sweeps, log uploads and unmanaged AI use', perm: 'discovery.read' },
