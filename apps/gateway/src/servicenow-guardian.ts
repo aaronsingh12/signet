@@ -104,7 +104,7 @@ const unavailable = (reason: string): GuardianFinding => ({ category: 'inspectio
  * fields that carry outside input, each labelled; pattern rules (secrets, data classes) still scan everything. Any
  * other shape, including text that is not this envelope, is reviewed whole.
  */
-export interface ReviewScope { kind: 'servicenow_agent_inputs' | 'full_content'; text: string; fields: string[] }
+export interface ReviewScope { kind: 'servicenow_reviewed_field' | 'servicenow_agent_inputs' | 'full_content'; text: string; fields: string[] }
 const OUTSIDE_INPUT_FIELDS = [
   ['question', 'User request'],
   ['short_term_memory', 'Conversation and context memory'],
@@ -118,8 +118,17 @@ export function reviewScope(content: string): ReviewScope {
   const whole: ReviewScope = { kind: 'full_content', text: content, fields: [] };
   let parsed: unknown;
   try { parsed = JSON.parse(content); } catch { return whole; }
-  const input = (parsed as { request_metadata?: { input?: unknown } } | null)?.request_metadata?.input;
+  const metadata = (parsed as { request_metadata?: { input?: unknown; chunkedAttributeName?: unknown } } | null)?.request_metadata;
+  const input = metadata?.input;
   if (!input || typeof input !== 'object' || Array.isArray(input)) return whole;
+  // ServiceNow names the field it is asking about (for example guardianChunkInput, a slice of the conversation and
+  // the agent's reply). The rest of such a request is its own metadata, including full copies of the engine prompt
+  // (originalPayload, aia_framework_request), so only the named field is judged.
+  const reviewed = metadata.chunkedAttributeName;
+  if (typeof reviewed === 'string') {
+    const value = (input as Record<string, unknown>)[reviewed];
+    if (typeof value === 'string' && value.trim()) return { kind: 'servicenow_reviewed_field', text: value, fields: [reviewed] };
+  }
   const parts: string[] = [];
   const fields: string[] = [];
   for (const [field, label] of OUTSIDE_INPUT_FIELDS) {
