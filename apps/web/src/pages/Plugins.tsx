@@ -2,6 +2,7 @@ import { ExternalLink, Plug, Rocket } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Card, PageHeader } from '../components/ui';
 import { ServiceNowConnection } from '../components/ServiceNowConnection';
+import { CopilotConnection } from '../components/CopilotConnection';
 import { ExternalConnections } from '../components/ExternalConnections';
 
 export function Plugins() {
@@ -10,6 +11,7 @@ export function Plugins() {
       <PageHeader title="Connections" subtitle="Connect your deployment platforms and services to bring AI agents into Signet." />
       <div className="space-y-4">
         <ServiceNowConnection />
+        <CopilotConnection />
         <ExternalConnections agentId={null} />
         <Card>
           <div className="flex items-start gap-3">

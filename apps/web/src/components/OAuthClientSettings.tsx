@@ -28,8 +28,8 @@ export function OAuthClientSettings({ clientId, controlUrl }: { clientId: string
     <ErrorNote error={error ?? saveError} />
     <form className="mt-3 space-y-3" onSubmit={event => void submit(event)}>
       <label className="label" htmlFor="setup-oauth-redirect">External platform callback URL</label>
-      <input id="setup-oauth-redirect" data-testid="setup-oauth-redirect" className="input" type="url" required maxLength={2048} disabled={loading || busy || !data || Boolean(error)} value={redirect ?? data?.redirect_uri ?? ''} onChange={event => { setRedirect(event.target.value); setSaved(false); }} placeholder="https://your-instance.service-now.com/oauth_redirect.do" />
-      <p className="text-xs text-ink-3">Use the ServiceNow outbound provider callback, not Signet's ServiceNow inbound callback. Saving invalidates this client's pending authorizations and refresh tokens.</p>
+      <input id="setup-oauth-redirect" data-testid="setup-oauth-redirect" className="input" type="url" required maxLength={2048} disabled={loading || busy || !data || Boolean(error)} value={redirect ?? data?.redirect_uri ?? ''} onChange={event => { setRedirect(event.target.value); setSaved(false); }} placeholder="https://platform.example.com/oauth/callback" />
+      <p className="text-xs text-ink-3">Paste the exact callback (redirect) URL the agent's platform shows for its OAuth connection. Copilot Studio: the https://global.consent.azure-apim.net/redirect/… URL shown after adding the MCP server. ServiceNow: the outbound provider callback (…/oauth_redirect.do), not Signet's ServiceNow inbound callback. Saving invalidates this client's pending authorizations and refresh tokens.</p>
       <button type="submit" data-testid="setup-oauth-save-redirect" className="btn-primary" disabled={loading || busy || !data || Boolean(error)}>{busy ? 'Saving…' : 'Save callback URL'}</button>
       {saved && <p role="status" className="text-sm text-ok">Callback saved. Start authorization from your external platform.</p>}
     </form>

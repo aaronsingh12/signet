@@ -9,6 +9,7 @@ import { ConnectionIntake, type IntakeConnection } from '../components/Connectio
 import type { ConnectionMethod } from '@signet/core/types';
 import { ErrorNote, Modal, TierChip } from '../components/ui';
 import { ServiceNowSetup } from '../components/ServiceNowSetup';
+import { CopilotSetup } from '../components/CopilotConnection';
 import { ApiError, api, useApi } from '../lib/api';
 import { useCan, useMe } from '../lib/auth';
 import { Plugins } from './Plugins';
@@ -106,6 +107,7 @@ export function AddAgentFlow() {
   const useTemplate = (t: TemplateOption) => set({ template: t.id, autonomy: t.autonomy, users: t.users_affected, decisions: t.decisions_about_individuals, data: t.data_touched, plannedTools: t.suggested_actions.map((a) => `${a.name} (${a.impact})`).join(', ') });
   const [step, setStep] = useState(0);
   const [addingServiceNow, setAddingServiceNow] = useState(false);
+  const [addingCopilot, setAddingCopilot] = useState(false);
   const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
@@ -293,11 +295,15 @@ export function AddAgentFlow() {
           </div>
           {step === 0 && can('tenant.admin') && <div className="flow-why">
             <button type="button" data-testid="add-servicenow-ai-agents" className="btn-primary w-full" onClick={() => setAddingServiceNow(true)}>Add ServiceNow AI Agents</button>
+            <button type="button" data-testid="add-copilot-agents" className="btn-primary mt-3 w-full" onClick={() => setAddingCopilot(true)}>Add Copilot Studio Agents</button>
             <Link data-testid="servicenow-connections-list" className="btn-ghost mt-3 w-full justify-center" to="/settings/systems">All connections</Link>
           </div>}
         </aside>
       </div>
       {addingLlm && <AgentLlmPanel onClose={() => setAddingLlm(false)} onSaved={(model) => { set({ model }); setAddingLlm(false); void reloadCatalogue(); }} />}
+      {addingCopilot && <Modal title="Add Copilot Studio Agents" onClose={() => setAddingCopilot(false)}>
+        <CopilotSetup onSaved={() => { setAddingCopilot(false); nav('/settings/accounts'); }} onCancel={() => setAddingCopilot(false)} />
+      </Modal>}
       {addingServiceNow && <Modal title="Add ServiceNow AI Agents" onClose={() => setAddingServiceNow(false)}>
         <ServiceNowSetup onSaved={() => {}} onCancel={() => setAddingServiceNow(false)} />
       </Modal>}
