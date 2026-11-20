@@ -28,6 +28,7 @@ import { serviceNowGuardianSetup } from './servicenow-guardian';
 import { discoverServiceNowTools } from './servicenow-mcp-discovery';
 import { serviceNowSettings, createServiceNowSettings, updateServiceNowSettings, removeServiceNowConnection } from './servicenow-mcp-settings';
 import { linkServiceNowAgent, linkedServiceNowAgents, serviceNowLinksForAgent, availableServiceNowAgents } from './servicenow-agents';
+import * as copilot from './copilot-agents';
 import { prepareServiceNowGateway, serviceNowGatewayRoute } from './servicenow-gateway';
 import { openapi } from './openapi';
 import { principalOf, requires, singleOperatorMode } from './rbac';
@@ -307,6 +308,26 @@ api.post('/plugins/servicenow/connections/:id/discover', requires('tenant.admin'
   return { tools: await discoverServiceNowTools(req.params.id!) };
 }));
 api.get('/plugins/servicenow/callback', requires('tenant.admin'), route(async (req, res) => serviceNowMcp.completeServiceNowConnection(req, res, principalOf(res))));
+// Microsoft Copilot Studio agents: a Dataverse environment connection, its agents, and linking them.
+api.get('/plugins/copilot', requires('tenant.admin'), route(async (_req, res) => {
+  res.setHeader('cache-control', 'no-store');
+  return { items: await copilot.listCopilotConnections() };
+}));
+api.post('/plugins/copilot/connections', requires('tenant.admin'), route(async (req, res) => {
+  res.setHeader('cache-control', 'no-store');
+  return [201, { connection: await copilot.createCopilotConnection(req.body ?? {}, principalOf(res)) }];
+}));
+api.delete('/plugins/copilot/connections/:id', requires('tenant.admin'), route(async (req, res) => copilot.removeCopilotConnection(req.params.id!, principalOf(res))));
+api.post('/plugins/copilot/connections/:id/test', requires('tenant.admin'), route(async (req, res) => ({ connection: await copilot.testCopilotConnection(req.params.id!, principalOf(res)) })));
+api.get('/plugins/copilot/connections/:id/agents', requires('tenant.admin'), route(async req => ({ items: await copilot.linkedCopilotAgents(req.params.id!) })));
+api.get('/plugins/copilot/connections/:id/agents/available', requires('tenant.admin'), route(async (req, res) => {
+  res.setHeader('cache-control', 'no-store');
+  return { items: await copilot.availableCopilotAgents(req.params.id!) };
+}));
+api.post('/plugins/copilot/connections/:id/agents', requires('tenant.admin'), route(async (req, res) => {
+  res.setHeader('cache-control', 'no-store');
+  return [201, await copilot.linkCopilotAgent(req.params.id!, req.body ?? {}, principalOf(res))];
+}));
 api.get('/plugins/vercel/connect', requires('tenant.admin'), route((_req, res) => plugins.startVercelConnection(res, principalOf(res))));
 api.get('/plugins/vercel/callback', requires('tenant.admin'), route(async (req, res) => (await plugins.completeVercelConnection(req, res, principalOf(res)))));
 api.post('/plugins/vercel/disconnect', requires('tenant.admin'), route(async (_req, res) => (await plugins.disconnectVercel(principalOf(res)))));

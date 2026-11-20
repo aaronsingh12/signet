@@ -445,6 +445,33 @@ async function dataverse<T>(s: CopilotSecret, path: string): Promise<T> {
   return call<T>('Copilot Studio', new URL(`${env.origin}/api/data/v9.2${path}`), { headers: { authorization: `Bearer ${t.access_token}`, accept: 'application/json', 'OData-Version': '4.0' } });
 }
 
+export interface CopilotBot { id: string; name: string; active: boolean; schema_name: string | null }
+
+const COPILOT_BOT_FIELDS = '$select=botid,name,statecode,schemaname';
+const copilotBotOf = (b: { botid: string; name: string; statecode?: number; schemaname?: string }): CopilotBot =>
+  ({ id: b.botid.toLowerCase(), name: b.name, active: b.statecode === 0, schema_name: b.schemaname ?? null });
+
+/** Lists the agents (Dataverse "bot" rows) the app registration can read in this environment. */
+export async function copilotBots(secret: string): Promise<CopilotBot[]> {
+  const bots = await dataverse<{ value?: { botid: string; name: string; statecode?: number; schemaname?: string }[] }>(copilotSecret(secret), `/bots?${COPILOT_BOT_FIELDS}`);
+  return (bots.value ?? []).map(copilotBotOf);
+}
+
+/** Reads one agent by its bot ID; null when the environment has no such agent. */
+export async function copilotBot(secret: string, botId: string): Promise<CopilotBot | null> {
+  try {
+    return copilotBotOf(await dataverse<{ botid: string; name: string; statecode?: number; schemaname?: string }>(copilotSecret(secret), `/bots(${botId})?${COPILOT_BOT_FIELDS}`));
+  } catch (error) {
+    if (error instanceof PolicyError && error.rule === 'PLATFORM_API' && / failed \(404\)/.test(error.message)) return null;
+    throw error;
+  }
+}
+
+/** The environment origin is not secret; it identifies which Dataverse environment an agent lives in. */
+export function copilotEnvironment(secret: string): string {
+  return new URL(copilotSecret(secret).environment_url).origin;
+}
+
 const copilotDriver: Driver = {
   async validate(secret) {
     const s = copilotSecret(secret);
@@ -452,9 +479,7 @@ const copilotDriver: Driver = {
     return `Dataverse environment ${new URL(s.environment_url).host} (org ${who.OrganizationId ?? 'unknown'})`;
   },
   async workloads(secret) {
-    const s = copilotSecret(secret);
-    const bots = await dataverse<{ value?: { botid: string; name: string; statecode?: number; schemaname?: string }[] }>(s, '/bots?$select=botid,name,statecode,schemaname');
-    return (bots.value ?? []).map((b) => ({ id: `copilot:${b.botid}`, name: b.name, kind: 'copilot_agent', framework: b.statecode === 0 ? 'active' : 'inactive', url: null, region: null, env_names: [], platform_ai: 'Microsoft Copilot Studio agent', linkable: false }));
+    return (await copilotBots(secret)).map((b) => ({ id: `copilot:${b.id}`, name: b.name, kind: 'copilot_agent', framework: b.active ? 'active' : 'inactive', url: null, region: null, env_names: [], platform_ai: 'Microsoft Copilot Studio agent', linkable: false }));
   },
 };
 
