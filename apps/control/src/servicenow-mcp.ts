@@ -11,6 +11,7 @@ import { putSecret, rotateSecret } from './secrets';
 import { type ServiceNowTool } from './servicenow-mcp-discovery';
 import { tenant } from './tenant';
 import { linkedServiceNowAgents } from './servicenow-agents';
+import { serviceNowAccessToken } from './servicenow-gateway';
 
 interface PendingAuthorization {
   connection_id: string | null;
@@ -82,11 +83,24 @@ export interface ServiceNowConnectionView {
 }
 
 export async function serviceNowConnection(id: string): Promise<ServiceNowConnectionView> {
-  const row = await db.prepare('SELECT expires_at, tools_json, discovered_at FROM servicenow_mcp_account WHERE tenant_id = ? AND id = ?').get(tenant.id, id) as { expires_at: number | null; tools_json: string | null; discovered_at: string | null } | undefined;
+  const row = await db.prepare('SELECT token_secret_id, expires_at, tools_json, discovered_at FROM servicenow_mcp_account WHERE tenant_id = ? AND id = ?').get(tenant.id, id) as { token_secret_id: string | null; expires_at: number | null; tools_json: string | null; discovered_at: string | null } | undefined;
   const settings = await serviceNowSettings(id);
   if (!row || !settings) throw new PolicyError('SERVICENOW_CONFIG', 'ServiceNow connection was not found in this tenant', 404);
-  return { id, name: settings.name, configured: true, authorized: Boolean(row.expires_at && row.expires_at > Date.now()), callback_url: settings.callback_url,
-    mcp_url: settings.mcp_url, expires_at: row.expires_at, monitoring: (await linkedServiceNowAgents(id)).some(agent => agent.monitoring),
+  let expiresAt = row.expires_at;
+  if (row.token_secret_id && row.expires_at && row.expires_at <= Date.now() + 90000) {
+    try {
+      await serviceNowAccessToken(id);
+      const renewed = await db.prepare('SELECT expires_at FROM servicenow_mcp_account WHERE tenant_id = ? AND id = ?').get(tenant.id, id) as { expires_at: number };
+      expiresAt = renewed.expires_at;
+    } catch (error) {
+      if (!(error instanceof PolicyError) || ![400, 401, 403].includes(Number(error.extra.upstream_status))) throw error;
+      console.warn('ServiceNow refresh token rejected; reauthorization required', { connection_id: id, upstream_status: error.extra.upstream_status });
+      await db.prepare('UPDATE servicenow_mcp_account SET expires_at = 0 WHERE tenant_id = ? AND id = ?').run(tenant.id, id);
+      expiresAt = 0;
+    }
+  }
+  return { id, name: settings.name, configured: true, authorized: Boolean(expiresAt && expiresAt > Date.now()), callback_url: settings.callback_url,
+    mcp_url: settings.mcp_url, expires_at: expiresAt, monitoring: (await linkedServiceNowAgents(id)).some(agent => agent.monitoring),
     tools: row.tools_json ? JSON.parse(row.tools_json) as ServiceNowTool[] : [], discovered_at: row.discovered_at };
 }
 

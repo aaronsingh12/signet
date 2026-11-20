@@ -9,6 +9,7 @@ Native chat prompt/response blocking ke liye separate [ServiceNow Guardian setup
 - [Part C - Pehle try kiya manual connection path](#part-c---pehle-try-kiya-manual-connection-path)
 - [Part D - Faced errors aur resolutions](#part-d---faced-errors-aur-resolutions)
 - [Part E - Final verification checklist](#part-e---final-verification-checklist)
+- [Chat guardrails - basic se complete separate guide](servicenow-guardian-setup.md)
 
 ## Current result
 
@@ -21,10 +22,13 @@ Native chat prompt/response blocking ke liye separate [ServiceNow Guardian setup
 | Direct OAuth MCP registration | `Navin` record Authenticate hua; warning hati aur Re-authenticate button aaya |
 | Agent mein tools | Incident summarization tool aur input definition load hue |
 | ServiceNow real test | `INC0010012` summarization Completed; result mein `success: True` |
-| Signet execution evidence | Same call ka final Activity screenshot abhi supplied nahi; verification baaki |
+| Signet execution evidence | Linked copy par Gateway enforcement verified aur MCP governed badge; gateway request counts observed; har individual test ko Activity se correlate karo |
+| Upstream token renewal | Test Nav par live automatic refresh successful; Authorized status, extended expiry aur two tools preserved |
+| Native Guardian reviews | 4 reviews, 1 flagged, 0 unavailable ka screenshot; setup aur errors separate Guardian guide mein |
+| Native response blocking | Same-request Signet flagged verdict aur ServiceNow block action ka correlated proof pending |
 | Execution-history monitoring | Separate source ka successful sync verify nahi hua |
 
-**ServiceNow tool test successful hai. Full gateway coverage ka final proof correct agent/action/route ki Signet Activity entry hai.**
+**MCP tool test successful aur routed traffic verified hai. Har native prompt/response ke liye full coverage assume nahi karni; Guardian ka verification alag hai.**
 
 # Part A - Basics aur preparation
 
@@ -179,6 +183,8 @@ MCP endpoint ko AI agent ke naam se invent mat karo.
 | Look up incident records | `look_up_incident_records` |
 
 Technical names approval mein use honge. Discovery execution-history monitoring nahi hai.
+
+Access token expire/near-expire hone par connection status aur tool discovery saved refresh token se automatically renewal karte hain. Normal access-token expiry par dobara onboarding/consent nahi chahiye. ServiceNow refresh grant reject kare tab existing card mein Reauthorize karo. Renewal/reconsent tools, linked agent aur saved onboarding preserve karte hain; detailed error handling neeche Error 16 mein hai.
 
 ## Step 4. Editable agent select karo
 
@@ -650,6 +656,25 @@ Earlier project notes mein PostgreSQL-era `ECONNRESET` ke baad control/local ser
 
 **Current distinction:** repository ab MongoDB use karti hai. Ye historical outage diagnosis hai; current 404/future outage ko bina logs same database issue mat bolo. Current process, database/network aur tunnel logs inspect karo.
 
+## Error 16. Test Nav baar-baar Reauthorization required dikhata tha
+
+**Cause:** card status sirf short-lived access-token expiry check karta tha. Gateway path mein refresh logic tha, lekin status aur tool discovery us renewal flow ko use nahi karte the. Upstream access lifespan 1800 seconds hone par expired card dikh sakta tha; refresh token ka lifespan alag tha.
+
+**Current behavior:** status check near-expiry/expired access token ko saved refresh token se renew karta hai. Discovery bhi same renewal flow use karti hai. Test Nav par live check mein Authorized true, expiry extended aur two discovered tools preserved mile.
+
+**Daily steps:**
+
+1. Updated control code load karne ke liye control server restart karo, phir Signet page refresh karo.
+2. Automatic renewal successful ho to Authorized dikhega; agent ko remove/recreate nahi karna.
+3. ServiceNow refresh grant ko HTTP 400/401/403 se reject kare to existing connection par Reauthorize karo; credentials/client configuration ya refresh-token validity verify karo.
+4. Network/service failure ko reauthorization success ya consent rejection mat samjho; actual error fix karo.
+5. Reauthorize same connection par karo. Existing linked agent, approval, gateway route, discovered tools aur monitoring configuration dobara create karne ki zaroorat nahi.
+6. Purane bug se tools list pehle clear ho chuki ho to ek baar Discover tools; ye full onboarding nahi hai.
+
+**Earlier related defect:** successful OAuth callback discovered tools clear karta tha; current callback sirf token credential/expiry update karta hai. Repeated reauthorization preservation integration test mein covered hai.
+
+**Scope:** ye Test Nav ka Signet -> ServiceNow upstream OAuth flow hai. ServiceNow mein saved Guardian Credential/Client Credentials token aur Navin Authorization Code MCP token alag flows hain; unke expiry warnings ka diagnosis unke own token result se karo. Auto-refresh unlimited token validity ki guarantee nahi: revoked/expired refresh grant ko fresh consent chahiye.
+
 # Part E - Final verification checklist
 
 - [ ] Current public origin saved callback, Hosted Signet, Authorization/Token aur MCP URLs mein aligned hai.
@@ -664,5 +689,7 @@ Earlier project notes mein PostgreSQL-era `ECONNRESET` ke baad control/local ser
 - [ ] Real incident test expected tool aur result deta hai.
 - [ ] Same call correct agent/action/route se Signet Activity mein verified hai.
 - [ ] Execution-history monitoring required ho to separate source/sync verified hai.
+- [ ] Normal upstream access-token expiry automatic refresh se handle ho rahi hai; same agent setup preserved hai.
+- [ ] Native prompt/response protection required ho to separate [Chat guardrails guide](servicenow-guardian-setup.md) complete aur live block evidence correlated hai.
 
 Implementation validation mein typecheck/build aur real isolated-MongoDB HTTP integration tests login/consent, callback binding, PKCE, code expiry/replay, refresh rotation, revocation aur existing connection flows cover karte hain. Ye live Signet evidence ka replacement nahi. Is documentation update ne application configuration change ya connection test rerun nahi kiya.

@@ -52,7 +52,6 @@ test('ServiceNow agent linking reuses identities, maps read-only monitoring, rep
   const discoveredAt = new Date().toISOString();
   await db.prepare('UPDATE servicenow_mcp_account SET expires_at = ?, discovered_at = ? WHERE id = ?')
     .run(Date.now() - 1000, discoveredAt, settings.id);
-  assert.equal((await serviceNowConnection(settings.id)).authorized, false);
   const preserved = await db.prepare('SELECT tools_json, discovered_at FROM servicenow_mcp_account WHERE id = ?').get(settings.id);
   const agentBefore = await db.prepare('SELECT * FROM agent WHERE id = ?').get(linked.agent_id);
   const sourceBefore = await db.prepare('SELECT * FROM external_connection WHERE id = ?').get(source.id);

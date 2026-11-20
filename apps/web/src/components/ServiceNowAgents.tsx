@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
+import type { ExternalConnectionView } from '@signet/core/types';
 import { api, useApi } from '../lib/api';
 import { useCan } from '../lib/auth';
 import { Card, ErrorNote, Modal } from './ui';
@@ -94,8 +95,28 @@ function LinkedServiceNowAgent({ agent, onChanged }: { agent: LinkedAgent; onCha
     {showGuardian && <ServiceNowGuardian agentId={agent.agent_id} />}
     {configuring && <Modal title="Configure ServiceNow activity monitoring" width="max-w-5xl" onClose={() => setConfiguring(false)}>
       <p className="mb-4 text-sm text-ink-2">Enter the documented read-only activity API and credentials. Use GET endpoints and scope the executions request with {'{agent_id}'} or this agent's exact sys_id. Configure its response mapping; leave discovery and remote actions disabled. Activity import does not intercept internal calls or grant gateway approval.</p>
-      <ExternalConnectionEditor agentId={agent.agent_id} method="rest" existing={null} onSaved={() => { setConfiguring(false); setShowSources(true); onChanged(); }} onCancel={() => setConfiguring(false)} />
+      <ServiceNowActivityEditor agentId={agent.agent_id} onSaved={() => { setConfiguring(false); setShowSources(true); onChanged(); }} onCancel={() => setConfiguring(false)} />
     </Modal>}
+  </div>;
+}
+
+/** Reopens saved activity sources, including failed authentication setups, instead of creating duplicates. */
+function ServiceNowActivityEditor({ agentId, onSaved, onCancel }: { agentId: string; onSaved: () => void; onCancel: () => void }) {
+  const { data, error, loading, reload } = useApi<{ items: ExternalConnectionView[] }>('/connections');
+  const [selectedId, setSelectedId] = useState('');
+  if (error) return <div><ErrorNote error={error} /><button type="button" className="btn-ghost" data-testid="servicenow-monitoring-retry" onClick={() => void reload()}>Reload saved activity sources</button></div>;
+  if (!data || loading) return <p role="status">Loading saved activity settings...</p>;
+  const connections = data.items.filter(connection => connection.config.method === 'rest' && connection.state !== 'revoked' && (connection.agent_id === agentId || connection.mapped_agent_ids.includes(agentId)));
+  const selected = connections.length === 1 ? connections[0]! : connections.find(connection => connection.id === selectedId) ?? null;
+  return <div className="space-y-3">
+    {connections.length > 1 && <label className="label" htmlFor="servicenow-monitoring-source">Saved activity source
+      <select id="servicenow-monitoring-source" data-testid="servicenow-monitoring-source" className="input" value={selectedId} onChange={event => setSelectedId(event.target.value)}>
+        <option value="">Select the activity source to edit</option>
+        {connections.map(connection => <option key={connection.id} value={connection.id}>{connection.config.name} · {connection.config.base_url} · {connection.id}</option>)}
+      </select>
+    </label>}
+    {selected && <p className="text-sm text-ink-3">Saved activity settings loaded. Leave the secret blank to retain the encrypted credential.</p>}
+    {(selected || connections.length === 0) && <ExternalConnectionEditor key={selected?.id ?? 'new-servicenow-source'} agentId={agentId} method="rest" existing={selected} onSaved={onSaved} onCancel={onCancel} />}
   </div>;
 }
 

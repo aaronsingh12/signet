@@ -61,6 +61,7 @@ import * as counters from './counters';
 import * as quickConnect from './quick-connect';
 import { connectionAddresses, saveConnectionAddresses } from './connection-settings';
 import { scanHistory } from './scan-history';
+import { SCAN_SOURCES } from '../../../packages/core/src/scan-history';
 import { testModelConnection } from './model-connection';
 
 const INTERNAL_TOKEN = devSecret('SIGNET_INTERNAL_TOKEN');
@@ -383,7 +384,9 @@ api.delete('/agents/:id', requires('agents.delete'), route(async (req, res) => {
   return (await removeAgent(req.params.id!, req.body.confirm_handle, principalOf(res)));
 }));
 api.get('/agents/:id/scans', requires('ledger.read'), route(async (req) => {
-  const out = await scanHistory(req.params.id!, Number(cursor.decode(req.query.cursor)) || null, limitOf(req.query.limit, 100, 25));
+  const source = SCAN_SOURCES.find(value => value === req.query.source) ?? null;
+  if (req.query.source !== undefined && source === null) throw invalid('Scan source must be gateway_model, gateway_tool, servicenow_guardian or servicenow_native');
+  const out = await scanHistory(req.params.id!, Number(cursor.decode(req.query.cursor)) || null, limitOf(req.query.limit, 100, 25), source);
   return { items: out.items, next_cursor: out.next_cursor === null ? null : cursor.encode(out.next_cursor) };
 }));
 api.get('/agents/:id', requires('agents.read'), route(async (req) => {

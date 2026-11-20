@@ -17,7 +17,8 @@ import * as secrets from './secrets';
 import { tenant } from './tenant';
 import * as workflow from './workflow';
 import { compilePolicy } from './compile';
-import { normalizeExecution } from './external-normalize';
+import { normalizeExecution, normalizeServiceNowExecutionDates } from './external-normalize';
+import { syncNativeGuardianBlocks, type GuardianTableReader } from './servicenow-guardian-events';
 import { headerName, requestBody, requestQuery, requestVariables, validateResponse } from './external-options';
 
 /** Tenant-scoped REST services, encrypted credentials and governance-gated actions.
@@ -225,10 +226,14 @@ async function call(row: Row, op: ExternalOperation, externalId: string | null, 
   }
 }
 
-async function send(row: Row, op: ExternalOperation, externalId: string | null, body: Json | null, actor: Principal, query: Record<string, string>): Promise<Json> {
-  if (row.state !== 'enabled') throw invalid('Connection is disabled or revoked');
+async function consumeRequestBudget(row: Row): Promise<void> {
   const budget = await db.prepare('INSERT INTO external_connection_budget (connection_id, window_at, requests) VALUES (?, ?, 1) ON CONFLICT(connection_id) DO UPDATE SET requests = CASE WHEN external_connection_budget.window_at < ? THEN 1 ELSE external_connection_budget.requests + 1 END, window_at = CASE WHEN external_connection_budget.window_at < ? THEN excluded.window_at ELSE external_connection_budget.window_at END RETURNING requests').get(row.id, Date.now(), Date.now() - 60_000, Date.now() - 60_000) as { requests: number };
   if (budget.requests > 60) throw new PolicyError('RATE_LIMIT', 'Connection exceeded 60 operations per minute; wait before retrying', 429);
+}
+
+async function send(row: Row, op: ExternalOperation, externalId: string | null, body: Json | null, actor: Principal, query: Record<string, string>): Promise<Json> {
+  if (row.state !== 'enabled') throw invalid('Connection is disabled or revoked');
+  await consumeRequestBudget(row);
   const stored = await storedOf(row);
   const c = stored.config;
   const endpoint = c.endpoints[op];
@@ -488,13 +493,32 @@ export async function sync(id: string, actor: Principal): Promise<ExternalConnec
         }
         if (config.endpoints.executions) {
           if (!config.executions_mapping) throw invalid('Configure the documented execution response mapping before sync');
+          const serviceNow = await db.prepare(`SELECT l.external_id, l.agent_id, l.instance_url FROM servicenow_agent_link l
+            JOIN external_agent_mapping m ON m.agent_id = l.agent_id AND m.external_id = l.external_id
+            WHERE l.tenant_id = ? AND m.connection_id = ? AND m.external_id = ? LIMIT 1`).get(tenant.id, id, mapped.external_id) as { external_id: string; agent_id: string; instance_url: string } | undefined;
+          const tableApi = serviceNow && config.endpoints.executions.path.startsWith('/api/now/table/');
+          if (tableApi && ![null, 'false'].includes(new URL(config.endpoints.executions.path, config.base_url).searchParams.get('sysparm_display_value'))) throw invalid('ServiceNow Table API execution sync requires sysparm_display_value=false so date-times use UTC database values');
           const result = await readMappedRecords(row, 'executions', mapped.external_id, config.executions_mapping, actor);
+          const records = tableApi ? result.records.map(normalizeServiceNowExecutionDates) : result.records;
           await tx(async () => {
-            for (const record of result.records) {
+            for (const record of records) {
               if (Date.now() - startedAt > 240000) throw new PolicyError('SYNC_TIMEOUT', 'Execution persistence exceeded the sync budget', 504);
               await db.prepare('INSERT INTO external_observation (connection_id, external_agent_id, external_id, kind, metadata, observed_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(connection_id, external_agent_id, kind, external_id) DO UPDATE SET metadata = excluded.metadata, observed_at = excluded.observed_at').run(id, mapped.external_id, record.id, 'execution', JSON.stringify(normalizeExecution(record)), nowIso());
             }
           });
+          if (serviceNow && tableApi && config.endpoints.logs && new URL(config.endpoints.logs.path, config.base_url).pathname === '/api/now/table/sys_generative_ai_metric') {
+            if (new URL(config.base_url).origin !== new URL(serviceNow.instance_url).origin || config.private_connector) throw invalid('Native Guardian sync requires a direct read-only connection to the linked ServiceNow instance');
+            const read: GuardianTableReader = async (table, query, fields) => {
+              if (Date.now() - startedAt > 240000) throw new PolicyError('SYNC_TIMEOUT', 'Native Guardian sync exceeded the four-minute budget; narrow execution history before retrying', 504);
+              await consumeRequestBudget(row);
+              const stored = await storedOf(row);
+              const url = new URL(`/api/now/table/${table}`, config.base_url);
+              url.search = new URLSearchParams({ sysparm_query: query, sysparm_fields: fields, sysparm_limit: '1001', sysparm_display_value: 'false', sysparm_exclude_reference_link: 'true' }).toString();
+              return readJson({ url, method: 'GET', headers: { accept: 'application/json', ...await authHeaders(row, stored, actor) }, body: null, timeout: config.timeout_ms, tlsMinVersion: config.tls_min_version });
+            };
+            await syncNativeGuardianBlocks({ connection_id: id, external_agent_id: mapped.external_id, agent_id: serviceNow.agent_id, instance_url: serviceNow.instance_url }, records.map(record => record.id), read);
+            await audit(id, 'guardian_synchronized', actor.id);
+          }
         }
       }
       const health = { ...JSON.parse((await rowOf(id)).health) as ConnectionHealth, reachable: true, authentication: (JSON.parse((await rowOf(id)).health) as ConnectionHealth).authentication, monitoring: config.monitoring_enabled !== false, last_sync_at: nowIso(), last_success_at: nowIso(), last_error: null } satisfies ConnectionHealth;

@@ -22,12 +22,14 @@ export function Sparkline({ values, color, label }: { values: number[]; color: s
 
 export function AgentCard({ agent }: { agent: AgentAnalytics }) {
   const color = agent.color;
+  const blocked = agent.blocked + agent.guardian.native_blocked;
   return <article className="agent-card" style={{ '--agent-color': color } as CSSProperties} data-testid={`agent-card-${agent.id}`}>
     <div className="agent-card-top"><AgentSymbol handle={agent.handle} color={color} /><AgentStatus agent={agent} /></div>
     <h3><Link to={`/agents/${agent.id}`}>{agent.name}</Link></h3>
     <p className="agent-purpose" title={agent.purpose}>{agent.purpose}</p>
     {agent.servicenow?.linked && <p className="mb-3 text-xs text-ink-3">MCP coverage applies to routed tools. Native chat needs a configured ServiceNow Guardian provider.</p>}
-    <div className="agent-stats"><div><span>{agent.provider.connection_ids.length ? 'Provider executions' : 'Gateway requests'}</span><strong>{num(agent.provider.connection_ids.length ? agent.provider.executions : agent.requests)}</strong></div><div><span>Gateway blocked</span><strong className={agent.blocked ? 'text-bad' : ''}>{num(agent.blocked)}</strong></div><div><span>Gateway cost</span><strong>{money(agent.cost_usd)}</strong></div></div>
+    <div className="agent-stats"><div><span>{agent.provider.connection_ids.length ? 'Provider executions' : 'Gateway requests'}</span><strong>{num(agent.provider.connection_ids.length ? agent.provider.executions : agent.requests)}</strong></div><div data-testid={`agent-blocked-events-${agent.id}`}><span>Blocked events</span><strong className={blocked ? 'text-bad' : ''}>{num(blocked)}</strong></div><div><span>Gateway cost</span><strong>{money(agent.cost_usd)}</strong></div></div>
+    <p className="mt-2 text-xs text-ink-3" data-testid={`agent-blocked-breakdown-${agent.id}`}>{num(agent.blocked)} gateway · {num(agent.guardian.native_blocked)} confirmed ServiceNow / last 24h</p>
     <div className="agent-mini-chart"><Sparkline values={agent.provider.connection_ids.length ? agent.provider.activity.map((bucket) => bucket.executions) : agent.activity.map((bucket) => bucket.requests)} color={color} label={`${agent.name}: ${agent.provider.connection_ids.length ? agent.provider.executions : agent.requests} ${agent.provider.connection_ids.length ? 'provider executions' : 'Gateway requests'} in the last 24 hours`} /></div>
     <div className="agent-card-footer"><span>{agent.provider.connection_ids.length ? agent.provider.last_sync_at ? `Provider synced ${ago(agent.provider.last_sync_at)}` : 'Provider sync pending' : agent.last_activity ? `Last request ${ago(agent.last_activity)}` : 'No activity in the last 24h'}</span><Link to={`/agents/${agent.id}`} aria-label={`View ${agent.name} details`}>View agent <ArrowRight size={12} /></Link></div>
   </article>;
@@ -54,14 +56,14 @@ export function ActivityChart({ agents }: { agents: AgentAnalytics[] }) {
       {tickIndexes.map((index) => <text key={index} x={x(index)} y="197" textAnchor={index === 0 ? 'start' : index === 24 ? 'end' : 'middle'} className="chart-ticks">{new Date(hours[index].hour).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</text>)}
       {total === 0 && <text x="340" y="98" textAnchor="middle" fill="#73858e" fontSize="12">No activity in the last 24 hours</text>}
     </svg>
-    <details className="chart-note"><summary className="cursor-pointer">View chart data</summary><div className="overflow-x-auto"><table className="mt-2 w-full"><thead><tr><th className="th">Agent</th><th className="th">Requests</th><th className="th">Blocked</th><th className="th">Review</th><th className="th">Failed</th></tr></thead><tbody>{agents.map((agent) => <tr key={agent.id}><td className="td">{agent.name}</td><td className="td">{agent.requests}</td><td className="td">{agent.blocked}</td><td className="td">{agent.review}</td><td className="td">{agent.failed}</td></tr>)}</tbody></table></div></details>
+    <details className="chart-note"><summary className="cursor-pointer">View chart data</summary><div className="overflow-x-auto"><table className="mt-2 w-full"><thead><tr><th className="th">Agent</th><th className="th">Gateway requests</th><th className="th">Gateway blocked</th><th className="th">Confirmed ServiceNow blocks</th><th className="th">Review</th><th className="th">Failed</th></tr></thead><tbody>{agents.map((agent) => <tr key={agent.id}><td className="td">{agent.name}</td><td className="td">{agent.requests}</td><td className="td">{agent.blocked}</td><td className="td">{agent.guardian.native_blocked}</td><td className="td">{agent.review}</td><td className="td">{agent.failed}</td></tr>)}</tbody></table></div></details>
   </>;
 }
 
 export function OutcomeChart({ agents }: { agents: AgentAnalytics[] }) {
   const categories = [
     { key: 'allowed', label: 'Completed', color: '#17877d' },
-    { key: 'blocked', label: 'Blocked', color: '#ce6c68' },
+    { key: 'blocked', label: 'Gateway blocked', color: '#ce6c68' },
     { key: 'review', label: 'Needs review', color: '#d6a24f' },
     { key: 'failed', label: 'Service errors', color: '#a4afba' },
   ] as const;
@@ -71,7 +73,7 @@ export function OutcomeChart({ agents }: { agents: AgentAnalytics[] }) {
     const start = values.slice(0, index).reduce((sum, item) => sum + item.value, 0);
     return `${category.color} ${total ? start / total * 100 : 0}% ${total ? (start + category.value) / total * 100 : 0}%`;
   });
-  return <div className="donut-layout"><div className="donut" role="img" aria-label={total ? values.map((category) => `${category.value} ${category.label.toLowerCase()}`).join(', ') : 'No requests in the last 24 hours'} style={{ background: total ? `conic-gradient(${stops.join(',')})` : '#edf1f3' }}><div className="donut-center"><strong>{num(total)}</strong><span>Total requests</span></div></div><div className="donut-key">{values.map((category) => <div key={category.key}><i className="legend-dot" style={{ background: category.color }} /><span>{category.label}</span><strong>{num(category.value)}</strong></div>)}</div></div>;
+  return <div className="donut-layout"><div className="donut" role="img" aria-label={total ? values.map((category) => `${category.value} ${category.label.toLowerCase()}`).join(', ') : 'No requests in the last 24 hours'} style={{ background: total ? `conic-gradient(${stops.join(',')})` : '#edf1f3' }}><div className="donut-center"><strong>{num(total)}</strong><span>Gateway requests</span></div></div><div className="donut-key">{values.map((category) => <div key={category.key}><i className="legend-dot" style={{ background: category.color }} /><span>{category.label}</span><strong>{num(category.value)}</strong></div>)}<p className="mt-3 text-xs text-ink-3" data-testid="outcomes-native-blocks">{num(agents.reduce((sum, agent) => sum + agent.guardian.native_blocked, 0))} confirmed ServiceNow blocks / last 24h. Counted separately from gateway request outcomes.</p></div></div>;
 }
 
 export function UsageComparison({ agents }: { agents: AgentAnalytics[] }) {
@@ -82,13 +84,26 @@ export function UsageComparison({ agents }: { agents: AgentAnalytics[] }) {
 export function AgentMetrics({ agents }: { agents: AgentAnalytics[] }) {
   const requests = agents.reduce((sum, agent) => sum + agent.requests, 0);
   const blocked = agents.reduce((sum, agent) => sum + agent.blocked, 0);
+  const nativeBlocked = agents.reduce((sum, agent) => sum + agent.guardian.native_blocked, 0);
   const governed = agents.filter((agent) => agentState(agent).tone === 'ok').length;
   const cost = agents.reduce((sum, agent) => sum + agent.cost_usd, 0);
   const metrics = [
     { label: 'Governed agents', value: `${governed}`, description: `${agents.length} registered · active approvals`, icon: ShieldCheck, color: '#17877d' },
     { label: 'Gateway requests', value: num(requests), description: 'Requests routed through Signet / last 24h', icon: Activity, color: '#8170d4' },
-    { label: 'Blocked requests', value: num(blocked), description: requests ? `${(blocked / requests * 100).toFixed(1)}% of requests stopped by safety checks` : 'No Gateway requests recorded yet', icon: ShieldX, color: '#c68a32' },
+    { label: 'Blocked events', value: num(blocked + nativeBlocked), description: `${num(blocked)} gateway · ${num(nativeBlocked)} confirmed ServiceNow / last 24h`, icon: ShieldX, color: '#c68a32' },
     { label: 'Gateway cost', value: money(cost), description: 'Recorded usage · last 24 hours · USD', icon: Bot, color: '#4b8ecb' },
   ];
-  return <div className="metric-grid">{metrics.map(({ label, value, description, icon: Icon, color }) => <div className="metric-card" style={{ '--metric-color': color } as CSSProperties} key={label}><div className="metric-top"><span>{label}</span><span className="metric-icon" style={{ color, background: `${color}12` }}><Icon size={17} strokeWidth={1.7} /></span></div><div className="metric-number">{value}</div><div className="metric-description">{description}</div></div>)}</div>;
+  return <div className="metric-grid">{metrics.map(({ label, value, description, icon: Icon, color }) => <div className="metric-card" data-testid={`metric-${label.toLowerCase().replaceAll(' ', '-')}`} style={{ '--metric-color': color } as CSSProperties} key={label}><div className="metric-top"><span>{label}</span><span className="metric-icon" style={{ color, background: `${color}12` }}><Icon size={17} strokeWidth={1.7} /></span></div><div className="metric-number">{value}</div><div className="metric-description">{description}</div></div>)}</div>;
+}
+
+export function ServiceNowTracking({ agent }: { agent: AgentAnalytics }) {
+  if (!agent.servicenow?.linked && !agent.guardian.reviews && !agent.guardian.failed) return null;
+  return <section className="mt-4 rounded-lg border border-line p-4 text-sm" data-testid={`guardian-summary-${agent.id}`} aria-label={`${agent.name} ServiceNow tracking`}>
+      <h3 className="font-semibold">{agent.name} · ServiceNow tracking</h3>
+      <p className="mt-2 font-medium" data-testid={`servicenow-blocked-${agent.id}`}>Confirmed ServiceNow blocks: {num(agent.guardian.native_blocked)} in the last 24 hours.</p>
+      <p className="mt-2">Last 24 hours: {num(agent.guardian.reviews)} Guardian reviews · {num(agent.guardian.flagged)} flagged for ServiceNow action · {num(agent.guardian.unavailable)} unavailable · {num(agent.guardian.failed)} failed requests.</p>
+      <p className="mt-2">MCP enforcement: {agent.servicenow?.gateway_enforcement ? 'verified for routed tools' : 'not verified'}. Execution monitoring: {agent.servicenow?.monitoring ? 'activity synchronized' : 'not configured or not verified'}.</p>
+      <p className="mt-2 text-ink-3">{agent.guardian.last_review_at ? `Last Guardian review: ${new Date(agent.guardian.last_review_at).toLocaleString()}. ` : 'No Guardian reviews in this period. '}Flagged verdicts request ServiceNow action; native blocking and per-agent attribution require correlated ServiceNow evidence. Shared credentials identify the submitting workload.</p>
+      <Link className="mt-2 inline-block text-royal" to={`/agents/${agent.id}?tab=connection`}>View Guardian review evidence and setup</Link>
+    </section>;
 }

@@ -38,7 +38,7 @@ export function CommandCenter() {
       <div className="agent-grid">{agents.map((agent) => <AgentCard key={agent.id} agent={agent} />)}</div>
       <details className="mt-7"><summary className="cursor-pointer text-sm font-medium text-ink-2">Charts, usage and cost</summary>
         <ProviderActivity agents={agents} onRefresh={reload} />
-        <div className="chart-layout"><section className="chart-card"><div className="chart-heading"><div><h2>Activity</h2><p>Requests per hour, last 24 hours, in your local time</p></div></div><ActivityChart agents={agents} /></section><section className="chart-card"><div className="chart-heading"><div><h2>Outcomes</h2><p>Requests checked by Signet</p></div></div><OutcomeChart agents={agents} /></section></div>
+        <div className="chart-layout"><section className="chart-card"><div className="chart-heading"><div><h2>Gateway activity</h2><p>Requests per hour, last 24 hours, in your local time</p></div></div><ActivityChart agents={agents} /></section><section className="chart-card"><div className="chart-heading"><div><h2>Gateway outcomes</h2><p>Routed model and tool calls; confirmed native blocks are counted separately.</p></div></div><OutcomeChart agents={agents} /></section></div>
         <section className="chart-card mt-5"><div className="chart-heading"><div><h2>Requests by agent</h2></div></div><UsageComparison agents={agents} /></section>
         <CostQuality />
       </details>

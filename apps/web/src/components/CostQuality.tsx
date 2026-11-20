@@ -17,7 +17,7 @@ export function CostQuality() {
     <Card title="Cost, activity and quality · last 30 days" className="mt-4" pad={false}>
       {data.agents.length ? (
         <table className="w-full">
-          <thead><tr>{['Agent', 'Model calls', 'Tool calls', 'Blocked', 'Tokens in / out', 'Cost (USD)', 'Quality (helpful · safe · on-policy)', 'Flagged'].map((h) => <th key={h} className="th">{h}</th>)}</tr></thead>
+          <thead><tr>{['Agent', 'Model calls', 'Tool calls', 'Gateway blocked', 'Tokens in / out', 'Cost (USD)', 'Quality (helpful · safe · on-policy)', 'Flagged'].map((h) => <th key={h} className="th">{h}</th>)}</tr></thead>
           <tbody>
             {data.agents.map((a) => (
               <tr key={a.id}>

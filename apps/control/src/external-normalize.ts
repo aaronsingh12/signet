@@ -1,6 +1,29 @@
 import { invalid } from './errors';
 import type { ImportedRecord, Json } from './external-contract';
 
+/** ServiceNow Table API database date-times are UTC even when their wire format omits a zone. */
+export function normalizeServiceNowExecutionDates(record: ImportedRecord): ImportedRecord {
+  const metadata = { ...record.metadata };
+  for (const key of ['started_at', 'completed_at']) {
+    const value = metadata[key];
+    if (value === undefined) continue;
+    if (typeof value !== 'string') throw invalid(`ServiceNow execution ${key} must be a date-time string`);
+    metadata[key] = serviceNowDate(value);
+  }
+  return { ...record, timestamp: record.timestamp === null ? null : serviceNowDate(record.timestamp), metadata };
+}
+
+function serviceNowDate(value: string): string {
+  const databaseDate = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value);
+  const input = databaseDate ? value.replace(' ', 'T') + 'Z' : value;
+  if (!databaseDate && !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(input)) throw invalid('ServiceNow execution date-time must use UTC database format YYYY-MM-DD HH:mm:ss or ISO 8601 with an explicit timezone');
+  const parsed = Date.parse(input);
+  if (!Number.isFinite(parsed)) throw invalid('ServiceNow execution date-time is invalid');
+  const normalized = new Date(parsed).toISOString();
+  if (databaseDate && normalized.slice(0, 19) !== input.slice(0, 19)) throw invalid('ServiceNow execution date-time contains an invalid calendar date or time');
+  return normalized;
+}
+
 /** Missing provider measurements remain null; no token, cost, timing or quality values are fabricated. */
 export function normalizeExecution(record: ImportedRecord): Json {
   const metadata = record.metadata ?? {};

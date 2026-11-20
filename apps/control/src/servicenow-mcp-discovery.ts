@@ -3,7 +3,7 @@ import { setTimeout } from 'node:timers/promises';
 import { db, nowIso } from './db';
 import { object, type Json } from './external-contract';
 import { PolicyError } from './errors';
-import { revealPlatformCredential } from './secrets';
+import { serviceNowAccessToken } from './servicenow-gateway';
 import { tenant } from './tenant';
 
 export interface ServiceNowTool { name: string; title: string; description: string }
@@ -43,13 +43,12 @@ function rpcResult(response: HttpResponse, id: number): Record<string, Json> {
 
 /** Discovers tool metadata only; never calls a business tool or enables agent monitoring. */
 export async function discoverServiceNowTools(id: string): Promise<ServiceNowTool[]> {
-  const row = await db.prepare('SELECT mcp_url, token_secret_id AS secret_id, expires_at FROM servicenow_mcp_account WHERE tenant_id = ? AND id = ?').get(tenant.id, id) as { mcp_url: string; secret_id: string | null; expires_at: number | null } | undefined;
-  if (!row || !row.secret_id || !row.expires_at || row.expires_at <= Date.now()) throw new PolicyError('SERVICENOW_AUTH', 'ServiceNow authorization is missing or expired; reconnect before discovering tools', 409);
+  const row = await db.prepare('SELECT mcp_url FROM servicenow_mcp_account WHERE tenant_id = ? AND id = ?').get(tenant.id, id) as { mcp_url: string } | undefined;
+  if (!row) throw new PolicyError('SERVICENOW_CONFIG', 'ServiceNow connection was not found in this tenant', 404);
   const url = new URL(row.mcp_url);
   if (url.protocol !== 'https:' || !url.hostname.endsWith('.service-now.com') || url.port || url.username || url.password) throw new PolicyError('SERVICENOW_CONFIG', 'Saved MCP endpoint must be an HTTPS ServiceNow instance URL', 503);
-  const credential = object(JSON.parse(await revealPlatformCredential(row.secret_id)) as Json, 'Stored ServiceNow credential');
-  if (typeof credential.access_token !== 'string' || !credential.access_token) throw new PolicyError('SERVICENOW_AUTH', 'Stored ServiceNow access token is invalid; reconnect', 409);
-  const headers: Record<string, string> = { authorization: `Bearer ${credential.access_token}`, 'content-type': 'application/json', accept: 'application/json, text/event-stream' };
+  const token = await serviceNowAccessToken(id);
+  const headers: Record<string, string> = { authorization: `Bearer ${token}`, 'content-type': 'application/json', accept: 'application/json, text/event-stream' };
   const initialized = await readRpc(url.href, headers, { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'signet', version: '0.1.0' } } });
   const initialization = rpcResult(initialized, 1);
   if (typeof initialization.protocolVersion !== 'string') throw new PolicyError('SERVICENOW_MCP', 'ServiceNow MCP initialize response omitted protocolVersion', 502);

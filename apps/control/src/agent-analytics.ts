@@ -4,6 +4,7 @@ import { agentLevel } from './enforcement';
 import { tenant } from './tenant';
 import { providerAnalytics } from './provider-analytics';
 import { serviceNowAgentCoverage } from './servicenow-agents';
+import { nativeGuardianBlocks } from './servicenow-guardian-events';
 
 interface AgentRow {
   id: string; name: string; handle: string; purpose: string; owner: string; tier: string; status: string;
@@ -26,6 +27,15 @@ export async function agentAnalytics(): Promise<AgentAnalyticsResponse> {
   firstHour.setUTCMinutes(0, 0, 0);
   const hours: string[] = Array.from({ length: 25 }, (_, index) => new Date(firstHour.getTime() + index * 3_600_000).toISOString().slice(0, 13));
   const providers = await providerAnalytics(from.toISOString(), to.toISOString(), hours);
+  const guardians = await db.prepare(`SELECT agent_id,
+      COUNT(*) FILTER (WHERE jsonb_extract_path_text(data::jsonb, 'guardrail_review', 'decision') IS NOT NULL) AS reviews,
+      COUNT(*) FILTER (WHERE jsonb_extract_path_text(data::jsonb, 'guardrail_review', 'decision') = 'flagged') AS flagged,
+      COUNT(*) FILTER (WHERE jsonb_extract_path_text(data::jsonb, 'guardrail_review', 'status') = 'unavailable') AS unavailable,
+      COUNT(*) FILTER (WHERE jsonb_extract_path_text(data::jsonb, 'error_code') IS NOT NULL) AS failed,
+      MAX(CASE WHEN jsonb_extract_path_text(data::jsonb, 'guardrail_review', 'decision') IS NOT NULL THEN ts END) AS last_review_at
+    FROM ledger_record WHERE tenant_id = ? AND kind = 'transaction' AND ts >= ? AND ts <= ?
+      AND jsonb_extract_path_text(data::jsonb, 'action_type') = 'guardrail_check'
+    GROUP BY agent_id`).all(tenant.id, from.toISOString(), to.toISOString()) as (AgentAnalytics['guardian'] & { agent_id: string })[];
   const agents = (await db.prepare(`SELECT a.id, a.name, a.handle, a.purpose, a.owner, a.tier, a.status, c.valid_to,
       COALESCE(a.vendor = 'ServiceNow' AND jsonb_extract_path_text(a.vendor_details::jsonb, 'external_agent_id') IS NOT NULL, false) AS servicenow_identity,
       (jsonb_extract_path_text(c.body::jsonb, 'limits', 'usd_per_day'))::double precision AS daily_budget_usd
@@ -55,8 +65,10 @@ export async function agentAnalytics(): Promise<AgentAnalyticsResponse> {
     });
     const count = sum('latency_count');
     const serviceNowCoverage = serviceNowIds.has(agent.id) ? await serviceNowAgentCoverage(agent.id) : null;
+    const nativeBlocks = serviceNowIds.has(agent.id) ? await nativeGuardianBlocks(agent.id) : [];
     return {
       ...agent, enforcement: (await agentLevel(agent.id)),
+      guardian: { ...(guardians.find(row => row.agent_id === agent.id) ?? { reviews: 0, flagged: 0, unavailable: 0, failed: 0, last_review_at: null }), native_blocked: nativeBlocks.length },
       servicenow: serviceNowCoverage ? { linked: true, monitoring: serviceNowCoverage.monitoring, gateway_enforcement: serviceNowCoverage.gateway_enforcement } : agent.servicenow_identity ? { linked: false, monitoring: false, gateway_enforcement: false } : null,
       provider: providers.get(agent.id) ?? { connection_ids: [], last_sync_at: null, executions: 0, succeeded: 0, failed: 0, other: 0, avg_duration_ms: null, activity: [], recent: [] },
       requests: sum('requests'), allowed: sum('allowed'), blocked: sum('blocked'), review: sum('review'), failed: sum('failed'),

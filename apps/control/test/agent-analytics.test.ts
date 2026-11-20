@@ -31,10 +31,21 @@ test('dashboard aggregates real ledger records per agent without counting detect
   for (const decision of decisions) (await append({ kind: 'transaction', agent_id: agents[0]!.id, data: { action_type: 'llm_call', tokens_in: 10, tokens_out: 5, cost_usd: 0.01, latency_ms_gateway: 10, latency_ms_upstream: 90, ...decision } }));
   (await append({ kind: 'transaction', agent_id: agents[0]!.id, data: { action_type: 'detector_score', policy_decision: 'taint' } }));
   (await append({ kind: 'transaction', agent_id: agents[1]!.id, data: { action_type: 'tool_call', policy_decision: 'allow', outcome: 'success' } }));
+  for (const review of [
+    { guardrail_review: { decision: 'clear', status: 'complete' } },
+    { guardrail_review: { decision: 'flagged', status: 'complete' } },
+    { guardrail_review: { decision: 'flagged', status: 'unavailable' } },
+    { error_code: 'invalid_guardian_content' },
+  ]) await append({ kind: 'transaction', agent_id: agents[0]!.id, data: { action_type: 'guardrail_check', ...review } });
   const snapshot = parseAgentAnalytics((await agentAnalytics()));
   assert.equal(snapshot.agents.length, 4);
   const appointment = snapshot.agents.find((agent) => agent.id === agents[0]!.id)!;
   assert.equal(appointment.requests, 4);
+  assert.equal(appointment.guardian.reviews, 3);
+  assert.equal(appointment.guardian.flagged, 2);
+  assert.equal(appointment.guardian.unavailable, 1);
+  assert.equal(appointment.guardian.failed, 1);
+  assert(appointment.guardian.last_review_at);
   assert.equal(appointment.allowed, 1);
   assert.equal(appointment.blocked, 1);
   assert.equal(appointment.review, 1);
@@ -51,6 +62,7 @@ test('dashboard aggregates real ledger records per agent without counting detect
   const lab = snapshot.agents.find((agent) => agent.id === agents[2]!.id)!;
   assert.equal(lab.requests, 0);
   assert.equal(lab.last_activity, null);
+  assert.deepEqual(lab.guardian, { reviews: 0, flagged: 0, unavailable: 0, failed: 0, last_review_at: null, native_blocked: 0 });
   assert(lab.activity.every((bucket) => bucket.requests === 0));
   assert.throws(() => parseAgentAnalytics({ ...snapshot, agents: [{ ...appointment, requests: -1 }] }), /nonnegative/);
   const { create } = await import('../src/external-connections');

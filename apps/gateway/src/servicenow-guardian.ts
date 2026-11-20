@@ -1,8 +1,9 @@
 import type { IncomingHttpHeaders } from 'node:http';
 import { scan, sha256 } from '@signet/core';
 import { finish, Halt, halt, maskArgs, newCtx, preflight, step, type Ctx, type Done } from './ctx';
-import { reviewContent, SafetyUnavailable } from './content-safety';
+import { reviewContent, SafetyUnavailable, type SafetyVerdict } from './content-safety';
 import { pinCheck } from './pins';
+import { guardianChunks, GUARDIAN_MAX_BYTES, GUARDIAN_CHUNK_BYTES, GUARDIAN_OVERLAP_BYTES } from './guardian-content';
 
 interface GuardianRequest { content: string }
 interface Flag { flagged: boolean; categories: string[] }
@@ -59,10 +60,10 @@ async function inspect(ctx: Ctx, headers: IncomingHttpHeaders, input: GuardianRe
   await preflight(ctx, headers);
   const bytes = typeof input?.content === 'string' ? Buffer.byteLength(input.content, 'utf8') : null;
   ctx.extra.guardrail_input = { type: typeof input?.content, bytes };
-  if (typeof input?.content !== 'string' || !input.content.trim() || (bytes !== null && bytes > 65536)) {
+  if (typeof input?.content !== 'string' || !input.content.trim() || (bytes !== null && bytes > GUARDIAN_MAX_BYTES)) {
     const detail = typeof input?.content !== 'string' ? 'Expected a JSON object with a content string; check the ServiceNow request transformer and Content-Type'
       : !input.content.trim() ? 'Guardian content is empty; check the ServiceNow request transformer'
-      : `Guardian content is ${bytes} UTF-8 bytes; maximum is 65536. Reduce the ServiceNow Custom Guardian Token limit so each chunk fits; content is never truncated`;
+      : `Guardian content is ${bytes} UTF-8 bytes; maximum is ${GUARDIAN_MAX_BYTES}. Submit smaller Guardian inputs; accepted content is reviewed in overlapping chunks and is never truncated`;
     ctx.extra.guardrail_input_error = detail;
     halt(ctx, 6, 400, 'invalid_guardian_content', detail, 'deny', ['SN-GUARD-INPUT']);
   }
@@ -85,13 +86,36 @@ async function inspect(ctx: Ctx, headers: IncomingHttpHeaders, input: GuardianRe
     ctx.reasons.push('Safety classifier pin mismatch; Guardian must withhold content');
     return verdict(['inspection_unavailable'], [], 'unavailable');
   }
+  const chunks = guardianChunks(String(maskArgs(input.content)));
+  const reviews: SafetyVerdict[] = [];
+  ctx.extra.guardrail_classifier = {
+    chunk_count: chunks.length, completed_chunks: 0,
+    chunk_max_bytes: GUARDIAN_CHUNK_BYTES, overlap_bytes: GUARDIAN_OVERLAP_BYTES, results: reviews,
+  };
   try {
-    const review = await reviewContent(String(maskArgs(input.content)));
-    ctx.tokensIn = review.tokens;
-    ctx.extra.guardrail_classifier = { model: review.model, category: review.category, tokens: review.tokens };
-    if (review.category === 'allow') return verdict([], [], 'complete');
+    // Bound provider concurrency; settle each batch before recording a final verdict.
+    for (let index = 0; index < chunks.length; index += 3) {
+      const results = await Promise.allSettled(chunks.slice(index, index + 3).map(chunk => reviewContent(chunk)));
+      for (const result of results) {
+        if (result.status === 'fulfilled') {
+          reviews.push(result.value);
+          ctx.tokensIn += result.value.tokens;
+        }
+      }
+      ctx.extra.guardrail_classifier = {
+        chunk_count: chunks.length, completed_chunks: reviews.length,
+        chunk_max_bytes: GUARDIAN_CHUNK_BYTES, overlap_bytes: GUARDIAN_OVERLAP_BYTES, results: [...reviews],
+      };
+      for (const result of results) {
+        if (result.status === 'rejected' && !(result.reason instanceof SafetyUnavailable)) throw result.reason;
+      }
+      const failed = results.find(result => result.status === 'rejected');
+      if (failed?.status === 'rejected') throw failed.reason;
+    }
+    const categories = [...new Set(reviews.map(review => review.category).filter(category => category !== 'allow'))];
+    if (!categories.length) return verdict([], [], 'complete');
     ctx.rules.push('SN-GUARD-SAFETY');
-    return ['cyber_abuse', 'fraud'].includes(review.category) ? verdict([review.category], [], 'complete') : verdict([], [review.category], 'complete');
+    return verdict(categories.filter(category => ['cyber_abuse', 'fraud'].includes(category)), categories.filter(category => !['cyber_abuse', 'fraud'].includes(category)), 'complete');
   } catch (error) {
     if (!(error instanceof SafetyUnavailable)) throw error;
     console.warn('ServiceNow Guardian safety review unavailable', { request_id: ctx.requestId, error: maskArgs(error.message) });
