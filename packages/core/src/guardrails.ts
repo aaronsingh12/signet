@@ -531,13 +531,23 @@ export const GUARDRAILS: readonly Guardrail[] = [
     effect: 'flag', where: 'gateway', step: 8, source: 'ServiceNow Guardian setup', code: ['apps/gateway/src/servicenow-guardian.ts'],
   },
   {
+    key: 'sn-data', rule_ids: ['SN-GUARD-DATA'], group: 'servicenow', name: 'Data the agent may not handle',
+    what: 'The agent\'s seal data rules apply to Guardian content as they do to prompts: card numbers, special-category data, legal privilege and other data classes the seal forbids are flagged. Guardian only flags; it does not tokenise or kill the agent, because ServiceNow\'s own model produced or received the text.',
+    effect: 'flag', where: 'gateway', step: 8, source: 'ServiceNow Guardian setup', code: ['apps/gateway/src/servicenow-guardian.ts'],
+  },
+  {
+    key: 'sn-attack', rule_ids: ['SN-GUARD-ATTACK'], group: 'servicenow', name: 'Prompt injection and jailbreak',
+    what: 'ServiceNow sends its Prompt Injection checks to Signet. A prompt-attack judge (the cloud model with a fixed, hashed prompt) flags attempts to override the agent\'s instructions or switch off its safety rules. DET-INJ and DET-JB score the same content beside it and flag only once a person promotes them to active.',
+    effect: 'flag', where: 'gateway', step: 8, source: 'ServiceNow Guardian setup', code: ['apps/gateway/src/servicenow-guardian.ts'],
+  },
+  {
     key: 'sn-safety', rule_ids: ['SN-GUARD-SAFETY'], group: 'servicenow', name: 'Unsafe content', detector: 'DET-SAFE',
     what: 'DET-SAFE reviews the content. Fraud and cyber abuse are flagged as security issues; the other unsafe categories as safety issues.',
     effect: 'flag', where: 'gateway', step: 8, source: 'ServiceNow Guardian setup', code: ['apps/gateway/src/servicenow-guardian.ts'],
   },
   {
     key: 'sn-unavailable', rule_ids: ['SN-GUARD-UNAVAILABLE'], group: 'servicenow', name: 'Withhold when the check cannot run',
-    what: 'If the safety classifier is unavailable or its pinned version does not match, the verdict is "inspection unavailable", so ServiceNow withholds the content.',
+    what: 'If the safety judge or the prompt-attack judge cannot answer, or the safety judge\'s pinned version does not match, the verdict is "inspection unavailable", so ServiceNow withholds the content (fail closed).',
     effect: 'flag', where: 'gateway', step: 8, source: 'ServiceNow Guardian setup', code: ['apps/gateway/src/servicenow-guardian.ts'],
   },
 ];

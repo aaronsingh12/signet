@@ -31,7 +31,7 @@ export async function agentAnalytics(): Promise<AgentAnalyticsResponse> {
       COUNT(*) FILTER (WHERE jsonb_extract_path_text(data::jsonb, 'guardrail_review', 'decision') IS NOT NULL) AS reviews,
       COUNT(*) FILTER (WHERE jsonb_extract_path_text(data::jsonb, 'guardrail_review', 'decision') = 'flagged') AS flagged,
       COUNT(*) FILTER (WHERE jsonb_extract_path_text(data::jsonb, 'guardrail_review', 'status') = 'unavailable') AS unavailable,
-      COUNT(*) FILTER (WHERE jsonb_extract_path_text(data::jsonb, 'error_code') IS NOT NULL) AS failed,
+      COUNT(*) FILTER (WHERE jsonb_extract_path_text(data::jsonb, 'error_code') IS NOT NULL AND jsonb_extract_path_text(data::jsonb, 'error_code') != 'blocked_by_signet') AS failed,
       MAX(CASE WHEN jsonb_extract_path_text(data::jsonb, 'guardrail_review', 'decision') IS NOT NULL THEN ts END) AS last_review_at
     FROM ledger_record WHERE tenant_id = ? AND kind = 'transaction' AND ts >= ? AND ts <= ?
       AND jsonb_extract_path_text(data::jsonb, 'action_type') = 'guardrail_check'
@@ -71,7 +71,7 @@ export async function agentAnalytics(): Promise<AgentAnalyticsResponse> {
     const nativeBlocks = serviceNowIds.has(agent.id) ? await nativeGuardianBlocks(agent.id) : [];
     return {
       ...agent, enforcement: (await agentLevel(agent.id)),
-      guardian: { ...(guardians.find(row => row.agent_id === agent.id) ?? { reviews: 0, flagged: 0, unavailable: 0, failed: 0, last_review_at: null }), native_blocked: nativeBlocks.length },
+      guardian: { ...(guardians.find(row => row.agent_id === agent.id) ?? { reviews: 0, flagged: 0, unavailable: 0, failed: 0, last_review_at: null }), native_blocked: nativeBlocks.length, native_signet: nativeBlocks.filter((block) => block.signet_request_id !== null).length },
       servicenow: serviceNowCoverage ? { linked: true, monitoring: serviceNowCoverage.monitoring, gateway_enforcement: serviceNowCoverage.gateway_enforcement } : agent.servicenow_identity ? { linked: false, monitoring: false, gateway_enforcement: false } : null,
       provider: providers.get(agent.id) ?? { connection_ids: [], last_sync_at: null, executions: 0, succeeded: 0, failed: 0, other: 0, avg_duration_ms: null, activity: [], recent: [] },
       requests: sum('requests'), allowed: sum('allowed'), blocked: sum('blocked'), review: sum('review'), failed: sum('failed'),

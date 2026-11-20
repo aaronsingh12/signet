@@ -85,13 +85,13 @@ test('verified idle workloads enter monitoring without promoting rollout, and sc
   assert.equal(deniedTool.items[0]?.output_check, 'not_run');
   await append({ kind: 'transaction', agent_id: setup.agent_id, data: { action_type: 'guardrail_check', outcome: 'success', guardrail_review: { decision: 'flagged', status: 'complete' }, prompt: 'PRIVATE GUARDIAN CONTENT' } });
   const review = await scanHistory(setup.agent_id, null, 1, 'servicenow_guardian');
-  assert.equal(review.items[0]?.result, 'flagged');
-  assert.equal(review.items[0]?.content_check, 'flagged');
+  assert.equal(review.items[0]?.result, 'blocked', 'A flagged Guardian review is Signet blocking the content');
+  assert.equal(review.items[0]?.content_check, 'blocked');
   assert.equal(review.items[0]?.input_check, 'not_recorded');
   assert.equal(review.items[0]?.output_check, 'not_recorded');
   await append({ kind: 'transaction', agent_id: setup.agent_id, data: { action_type: 'guardrail_check', outcome: 'success', guardrail_review: { decision: 'flagged', status: 'unavailable' } } });
   const unavailable = await scanHistory(setup.agent_id, null, 1, 'servicenow_guardian');
-  assert.equal(unavailable.items[0]?.result, 'failed');
+  assert.equal(unavailable.items[0]?.result, 'blocked', 'Fail closed: a check that could not run still blocks');
   assert.equal(unavailable.items[0]?.content_check, 'unavailable');
   await append({ kind: 'admin', agent_id: setup.agent_id, data: { event: 'servicenow.guardian_blocked', at: new Date().toISOString() } });
   const native = await scanHistory(setup.agent_id, null, 1, 'servicenow_native');

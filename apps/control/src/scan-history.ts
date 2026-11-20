@@ -43,7 +43,8 @@ export async function scanHistory(agentRef: string, beforeSeq: number | null, li
     const native = row.event === 'servicenow.guardian_blocked';
     const guardian = row.action_type === 'guardrail_check';
     const result: ScanEntry['result'] = native ? 'blocked' : guardian
-      ? row.review_status === 'unavailable' || row.review_decision === null ? 'failed' : row.review_decision === 'flagged' ? 'flagged' : 'completed'
+      // A flagged verdict is Signet's block (ServiceNow carries it out), including the fail-closed "unavailable" one.
+      ? row.review_decision === 'flagged' ? 'blocked' : row.review_decision === null ? 'failed' : 'completed'
       : row.outcome === 'pending' || row.policy_decision === 'require_approval' ? 'review' : row.outcome === 'blocked' ? 'blocked' : row.outcome === 'success' ? 'completed' : 'failed';
     const steps = recordedSteps(row.steps);
     const categoryCheck = (category: string | null): ScanCheck => category === null ? 'not_recorded' : category === 'allow' ? 'passed' : result === 'blocked' ? 'blocked' : 'flagged';
@@ -51,7 +52,7 @@ export async function scanHistory(agentRef: string, beforeSeq: number | null, li
     const output = native || guardian ? 'not_recorded' : row.action_type === 'tool_call'
       ? toolCheck(steps, 13)
       : row.output_category === null && input === 'blocked' ? 'not_run' : categoryCheck(row.output_category);
-    const content: ScanCheck = native ? 'flagged' : guardian ? row.review_status === 'unavailable' ? 'unavailable' : row.review_decision === 'flagged' ? 'flagged' : row.review_decision === 'clear' ? 'passed' : 'not_recorded' : 'not_run';
+    const content: ScanCheck = native ? 'flagged' : guardian ? row.review_status === 'unavailable' ? 'unavailable' : row.review_decision === 'flagged' ? 'blocked' : row.review_decision === 'clear' ? 'passed' : 'not_recorded' : 'not_run';
     if (!Number.isSafeInteger(row.seq) || typeof row.record_id !== 'string' || !Number.isFinite(Date.parse(row.scanned_at)) || !SCAN_RESULTS.includes(result) || !SCAN_CHECKS.includes(input) || !SCAN_CHECKS.includes(output)) throw new TypeError('Stored scan metadata is invalid');
     return { seq: row.seq, record_id: row.record_id, scanned_at: row.scanned_at, result, input_check: input, output_check: output, content_check: content, source: native ? 'servicenow_native' : guardian ? 'servicenow_guardian' : row.action_type === 'tool_call' ? 'gateway_tool' : 'gateway_model' };
   });

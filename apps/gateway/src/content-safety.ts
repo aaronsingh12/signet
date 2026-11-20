@@ -15,32 +15,43 @@ export class SafetyUnavailable extends Error {
 
 const POLICY = SAFETY_POLICY; // shared with the control plane, which pins its hash (DA 3)
 
-/** Fail closed when the independent cloud safety review cannot return a valid verdict. */
-export async function reviewContent(conversation: string): Promise<SafetyVerdict> {
+export interface Classified<L extends string> { label: L; model: string; tokens: number; usage: SafetyModelUsage[] }
+
+/**
+ * Asks the cloud LLM for exactly one label from `labels` under `policy`. Fails closed: a timeout, an
+ * unreachable provider or any answer that is not one of the labels is SafetyUnavailable after 3 attempts.
+ */
+export async function classifyWith<L extends string>(policy: string, labels: readonly L[], conversation: string, name = 'Safety classifier'): Promise<Classified<L>> {
   const model = env('SIGNET_LLM_MODEL', 'gpt-oss:120b-cloud');
   const usage: SafetyModelUsage[] = [];
-  let lastError: Error = new SafetyUnavailable('Safety review did not run', []);
+  let lastError: Error = new SafetyUnavailable(`${name} did not run`, []);
   for (let attempt = 1; attempt <= 3; attempt++) {
     const signal = AbortSignal.timeout(15_000);
     try {
       const response = await chatCompletion({ model, temperature: 0, max_tokens: 1024, messages: [
-        { role: 'system', content: POLICY },
+        { role: 'system', content: policy },
         { role: 'user', content: conversation },
       ] }, signal, undefined);
       usage.push(safetyModelUsage(model, response.usage, state.bundle?.catalogue ?? []));
       const content = response && Array.isArray(response.choices) ? response.choices[0]?.message?.content : null;
-      const label = typeof content === 'string' ? content.trim() : null;
-      const category = CATEGORIES.find((value) => value === label);
-      if (!category) throw new SafetyUnavailable(`Safety classifier ${model} returned an invalid label: ${JSON.stringify(label)}`, [...usage]);
-      return { category, model, tokens: usage.reduce((sum, record) => sum + (record.tokens_in ?? 0) + (record.tokens_out ?? 0), 0), usage };
+      const text = typeof content === 'string' ? content.trim() : null;
+      const label = labels.find((value) => value === text);
+      if (!label) throw new SafetyUnavailable(`${name} ${model} returned an invalid label: ${JSON.stringify(text)}`, [...usage]);
+      return { label, model, tokens: usage.reduce((sum, record) => sum + (record.tokens_in ?? 0) + (record.tokens_out ?? 0), 0), usage };
     } catch (error) {
-      if (signal.aborted && error instanceof Error) lastError = new SafetyUnavailable(`Safety classifier ${model} timed out: ${error.message}`, [...usage]);
+      if (signal.aborted && error instanceof Error) lastError = new SafetyUnavailable(`${name} ${model} timed out: ${error.message}`, [...usage]);
       else if (error instanceof UpstreamUnavailable || error instanceof UpstreamRejected || error instanceof SafetyUnavailable || error instanceof SyntaxError) lastError = error;
       else throw error;
-      if (attempt < 3) console.warn('Signet safety review failed; retrying', { attempt, model, error: lastError.message });
+      if (attempt < 3) console.warn(`Signet ${name.toLowerCase()} failed; retrying`, { attempt, model, error: lastError.message });
     }
   }
-  throw new SafetyUnavailable(`Safety review failed after 3 attempts for ${model}: ${lastError.message}`, usage);
+  throw new SafetyUnavailable(`${name} failed after 3 attempts for ${model}: ${lastError.message}`, usage);
+}
+
+/** Fail closed when the independent cloud safety review cannot return a valid verdict. */
+export async function reviewContent(conversation: string): Promise<SafetyVerdict> {
+  const { label, ...rest } = await classifyWith(POLICY, CATEGORIES, conversation, 'Safety classifier');
+  return { category: label, ...rest };
 }
 
 // DET-SAFE, unsafe content by policy category (DA 3). It is a registered detector, so it follows the

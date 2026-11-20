@@ -39,3 +39,8 @@ export const SERVICENOW_GUARDIAN_RESPONSE = String.raw`(function(inputs) {
   }
   return { security: checked(body.security), safety: checked(body.safety) };
 })(inputs);`;
+
+/** Start of the message a Signet block carries (Guardian categories and refused tool calls). */
+export const SIGNET_BLOCKED_PREFIX = 'This request was blocked by Signet: ';
+/** Marks the Signet request ID inside Guardian categories, so a ServiceNow block links to Signet's decision. */
+export const SIGNET_REF = 'signet_ref:';

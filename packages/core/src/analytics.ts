@@ -29,7 +29,9 @@ export interface AgentAnalytics {
   last_activity: string | null;
   activity: ActivityBucket[];
   provider: ProviderAnalytics;
-  guardian: { reviews: number; flagged: number; unavailable: number; failed: number; last_review_at: string | null; native_blocked: number };
+  guardian: { reviews: number; flagged: number; unavailable: number; failed: number; last_review_at: string | null; native_blocked: number; native_signet: number };
+  // flagged: Guardian reviews Signet blocked. native_blocked: blocks ServiceNow confirmed in its own logs, of which
+  // native_signet carried out a Signet verdict (linked by signet_ref); the rest were ServiceNow's own decision.
   servicenow: { linked: boolean; monitoring: boolean; gateway_enforcement: boolean } | null;
 }
 
@@ -58,9 +60,10 @@ export function parseAgentAnalytics(value: AgentAnalyticsResponse): AgentAnalyti
   }
   for (const agent of value.agents) {
     if (!agent.guardian) throw new TypeError('Guardian analytics are required');
-    for (const key of ['reviews', 'flagged', 'unavailable', 'failed', 'native_blocked'] as const) {
+    for (const key of ['reviews', 'flagged', 'unavailable', 'failed', 'native_blocked', 'native_signet'] as const) {
       if (!Number.isSafeInteger(agent.guardian[key]) || agent.guardian[key] < 0) throw new TypeError(`Guardian ${key} must be a nonnegative integer`);
     }
+    if (agent.guardian.native_signet > agent.guardian.native_blocked) throw new TypeError('Guardian native_signet cannot exceed native_blocked');
     if (agent.guardian.last_review_at !== null && !Number.isFinite(Date.parse(agent.guardian.last_review_at))) throw new TypeError('Guardian last review must be a date or null');
     if (agent.servicenow !== null && (!agent.servicenow || typeof agent.servicenow.linked !== 'boolean' || typeof agent.servicenow.monitoring !== 'boolean' || typeof agent.servicenow.gateway_enforcement !== 'boolean')) throw new TypeError('ServiceNow analytics coverage must be null or contain linked, monitoring and gateway_enforcement booleans');
     for (const key of ['id', 'name', 'handle', 'purpose', 'owner', 'tier', 'status', 'enforcement'] as const) {

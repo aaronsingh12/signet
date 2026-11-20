@@ -13,7 +13,7 @@ interface GuardianSetup {
   reviews_24h: number; flagged_24h: number; unavailable_24h: number; last_review_at: string | null;
   blocking_verified: boolean;
   blocked_24h: number;
-  recent_blocks: { event_id: string; execution_id: string; at: string; categories: string[] }[];
+  recent_blocks: { event_id: string; execution_id: string; at: string; categories: string[]; signet_request_id: string | null }[];
   failed_24h: number;
   last_error: { at: string; code: string; detail: string | null } | null;
   recent_reviews: { at: string; request_id: string | null; decision: string | null; status: string | null; categories: string[]; error_code: string | null }[];
@@ -35,7 +35,8 @@ export async function serviceNowGuardianSetup(agentRef: string, actor: Principal
     FROM ledger_record WHERE tenant_id = ? AND agent_id = ? AND kind = 'transaction'
       AND jsonb_extract_path_text(data::jsonb, 'action_type') = 'guardrail_check' AND ts >= ?
     ORDER BY seq DESC`).all(tenant.id, agent.id, since) as { ts: string; decision: string | null; status: string | null; error_code: string | null; error_detail: string | null; request_id: string | null; categories: string | null }[];
-  const failed = rows.filter(row => row.error_code !== null);
+  // A Signet block is a completed review, not a failed one.
+  const failed = rows.filter(row => row.error_code !== null && row.error_code !== 'blocked_by_signet');
   const blocks = await nativeGuardianBlocks(agent.id);
   return {
     endpoint: `${await gatewayAddress()}/v1/guardrails/servicenow`,
