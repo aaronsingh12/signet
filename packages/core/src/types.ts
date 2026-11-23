@@ -20,6 +20,7 @@ export interface CatalogueModel {
   region: string; // 'unverified' until the provider terms record is checked (RB-PROV-03)
   code_approved: boolean;
   price_per_1k_usd: { in: number; out: number };
+  price_source?: 'manual';
   provider_managed?: boolean;
   // An agent's own LLM. Absent means the tenant's default cloud LLM. The key stays in the Secrets Broker.
   upstream?: { base_url: string; secret_id: string | null; provider?: ModelConnection['provider'] };

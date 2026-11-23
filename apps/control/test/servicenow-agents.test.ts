@@ -27,6 +27,10 @@ test('ServiceNow agent linking reuses identities, maps read-only monitoring, rep
   await assert.rejects(() => linkServiceNowAgent(settings.id, input, { ...actor, permissions: [] }), /agents.write/);
   const linked = await linkServiceNowAgent(settings.id, input, actor);
   assert.equal((await linkServiceNowAgent(settings.id, input, actor)).agent_id, linked.agent_id);
+  const colleagueSettings = await createServiceNowSettings({ name: 'Colleague monitoring', gateway_url: 'https://colleague.example.test', instance_url: 'https://techsnitchpvtltddemo2.service-now.com', mcp_url: 'https://techsnitchpvtltddemo2.service-now.com/sncapps/mcp-server/mcp/test-monitoring', client_id: 'test-client', client_secret: 'test-client-secret' }, actor);
+  const colleagueAgent = await linkServiceNowAgent(colleagueSettings.id, { ...input, external_id: 'abcdef1234567890abcdef1234567890', name: 'Colleague agent' }, actor);
+  assert.notEqual(colleagueAgent.agent_id, linked.agent_id);
+  assert.deepEqual((await linkedServiceNowAgents(colleagueSettings.id)).map(agent => agent.agent_id), [colleagueAgent.agent_id]);
   const rows = await linkedServiceNowAgents(settings.id);
   assert.equal(rows.length, 1);
   assert.equal(rows[0]!.monitoring, false);

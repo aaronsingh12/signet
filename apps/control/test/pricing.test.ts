@@ -13,7 +13,8 @@ after(async () => {
   await dropTestDatabase();
 });
 
-const { tenant, setModelPrice, reloadSettings } = await import('../src/tenant');
+const { tenant, setModelPrice, setAgentModel, reloadSettings } = await import('../src/tenant');
+const { modelPriceQuote } = await import('../src/model-pricing');
 const { db } = await import('../src/db');
 const { buildBundle } = await import('../src/enforcement');
 
@@ -25,6 +26,29 @@ test('a model price is saved, survives a reload and reaches the gateway bundle',
   assert.deepEqual(tenant.settings.catalogue[0]!.price_per_1k_usd, { in: 0.15, out: 0.6 });
   const stored = JSON.parse(((await db.prepare('SELECT settings FROM tenant WHERE id = ?').get(tenant.id)) as { settings: string }).settings);
   assert.deepEqual(stored.catalogue[0].price_per_1k_usd, { in: 0.15, out: 0.6 });
+  assert.equal(stored.catalogue[0].price_source, 'manual');
   const bundle = decodeJwt<{ catalogue: { price_per_1k_usd: { in: number; out: number } }[] }>(await buildBundle()).payload;
   assert.deepEqual(bundle.catalogue[0]!.price_per_1k_usd, { in: 0.15, out: 0.6 });
+});
+
+test('live public pricing matches the connected provider, preserves manual rates and never assigns API prices to local models', async () => {
+  const model = 'claude-haiku-5-5';
+  await setAgentModel(model, { base_url: 'https://api.anthropic.com/v1', provider: 'claude', secret_id: null });
+  const quote = await modelPriceQuote(model);
+  assert(quote.available, 'The live catalogue must publish an exact Anthropic Haiku price');
+  assert(quote.input_per_million > 0);
+  assert(quote.output_per_million > 0);
+  assert.equal(quote.source_url, 'https://models.dev');
+  assert(Number.isFinite(Date.parse(quote.fetched_at)));
+  await setModelPrice(model, { in: 0, out: 0.0007 });
+  await modelPriceQuote(model);
+  const saved = (await reloadSettings()).catalogue.find(entry => entry.model === model)!;
+  assert.deepEqual(saved.price_per_1k_usd, { in: 0, out: 0.0007 });
+  assert.equal(saved.price_source, 'manual');
+  await setAgentModel('local-pricing-test', { base_url: 'http://localhost:11434/v1', provider: 'ollama_local', secret_id: null });
+  const local = await modelPriceQuote('local-pricing-test');
+  assert.equal(local.available, false);
+  await setAgentModel('missing-pricing-model', { base_url: 'https://api.anthropic.com/v1', provider: 'claude', secret_id: null });
+  assert.equal((await modelPriceQuote('missing-pricing-model')).available, false);
+  await assert.rejects(modelPriceQuote('unregistered-model'), /not in the tenant catalogue/);
 });

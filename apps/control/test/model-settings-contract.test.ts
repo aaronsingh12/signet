@@ -88,6 +88,11 @@ test('provider HTTP contract preserves old routes, encrypts credentials and publ
   assert.equal((await modelSettings.modelSettings()).model, 'selected-model');
   const claude: ModelConnection = { provider: 'claude', base_url: 'https://api.anthropic.com/v1', model: 'claude-test', secret_id: null };
   assert.equal(modelHeaders(claude, key)['x-api-key'], key);
+  const claudeBody = JSON.parse(modelRequestBody(claude, { model: 'claude-haiku-5-5', temperature: 0, top_p: 1, top_k: 10, max_tokens: 1024, messages: [] })) as { temperature?: number; top_p?: number; top_k?: number; max_tokens: number };
+  assert.equal(claudeBody.temperature, undefined);
+  assert.equal(claudeBody.top_p, undefined);
+  assert.equal(claudeBody.top_k, undefined);
+  assert.equal(claudeBody.max_tokens, 1024);
   const openai: ModelConnection = { ...claude, provider: 'openai', base_url: 'https://api.openai.com/v1', model: 'gpt-5' };
   const adapted = JSON.parse(modelRequestBody(openai, { model: 'gpt-5', max_tokens: 1024, temperature: 0, messages: [] })) as { max_tokens?: number; max_completion_tokens: number; temperature?: number };
   assert.equal(adapted.max_completion_tokens, 1024);

@@ -52,6 +52,8 @@ import * as servicenow from './servicenow';
 import * as platforms from './platforms';
 import { costs } from './costs';
 import { gatewayCosts } from './gateway-costs';
+import { modelPriceQuote } from './model-pricing';
+import { chatWithSignet } from './assistant';
 import { TEMPLATES } from './templates';
 import * as workflow from './workflow';
 import * as tools from './tools';
@@ -333,6 +335,11 @@ api.get('/plugins/vercel/connect', requires('tenant.admin'), route((_req, res) =
 api.get('/plugins/vercel/callback', requires('tenant.admin'), route(async (req, res) => (await plugins.completeVercelConnection(req, res, principalOf(res)))));
 api.post('/plugins/vercel/disconnect', requires('tenant.admin'), route(async (_req, res) => (await plugins.disconnectVercel(principalOf(res)))));
 api.get('/catalogue', requires('agents.read'), route(async () => ({ catalogue: (await reloadSettings()).catalogue })));
+api.get('/assistant/status', requires('agents.read'), route(async () => {
+  const model = await modelSettings();
+  return { model: model.model, provider: model.provider };
+}));
+api.post('/assistant/chat', requires('agents.read'), route(async (req, res) => chatWithSignet(req.body, principalOf(res))));
 api.get('/model-settings', requires('tenant.admin'), route(async () => modelSettings()));
 api.post('/model-settings/models', requires('tenant.admin'), route(async req => listModelOptions(req.body)));
 api.put('/model-settings', requires('tenant.admin'), route(async (req, res) => {
@@ -367,6 +374,7 @@ api.post('/catalogue', requires('tenant.admin'), route(async (req, res) => {
   return [existing ? 200 : 201, { model: { model: entry.model, base_url: entry.upstream!.base_url, key_stored: !!secretId } }];
 }));
 // Model prices drive recorded cost, daily cost budgets and the per-request cost ceiling.
+api.get('/catalogue/:model/price/quote', requires('tenant.admin'), route(async req => modelPriceQuote(String(req.params.model))));
 api.put('/catalogue/:model/price', requires('tenant.admin'), route(async (req, res) => {
   const model = String(req.params.model);
   const price = { in: req.body?.in as number, out: req.body?.out as number };

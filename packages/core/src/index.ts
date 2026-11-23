@@ -27,6 +27,8 @@ export * from './benchmark';
 export * from './benchmark-sets';
 export * from './guardrail-params';
 export * from './gateway-costs';
+export * from './assistant';
+export * from './platform-guide';
 export * from './guardrails';
 export * from './rulebook';
 export { SERVICENOW_GUARDIAN_REQUEST, SERVICENOW_GUARDIAN_RESPONSE, SIGNET_BLOCKED_PREFIX, SIGNET_REF } from './servicenow-guardian';
