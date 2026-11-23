@@ -41,7 +41,9 @@ export const SERVICENOW_GUARDIAN_RESPONSE = String.raw`(function(inputs) {
 })(inputs);`;
 
 /** Start of the message a Signet block carries (Guardian categories and refused tool calls). */
-export const SIGNET_BLOCKED_PREFIX = 'This request was blocked by Signet: ';
+export const SIGNET_BLOCKED_PREFIX = 'This request is blocked by Signet. Reason: ';
+/** Recognises a Signet block message in either wording (records written before 2026-11-23 say "This request was blocked by Signet: "). */
+export const SIGNET_BLOCKED_MESSAGE = /^This request (?:is|was) blocked by Signet(?:\. Reason:|:)\s*/i;
 /** Marks the Signet request ID inside Guardian categories, so a ServiceNow block links to Signet's decision. */
 export const SIGNET_REF = 'signet_ref:';
 
@@ -49,10 +51,10 @@ export const SIGNET_REF = 'signet_ref:';
 export const SIGNET_BLOCK_INSTRUCTION = 'Show the user this message exactly as written, including the reference, and do not retry this request.';
 
 /**
- * The message a person sees for any Signet block: "This request was blocked by Signet: <reason>. Reference: <id>".
+ * The message a person sees for any Signet block: "This request is blocked by Signet. Reason: <reason>. Reference: <id>".
  * Reasons that already carry a Signet prefix are not prefixed twice.
  */
 export function signetBlockMessage(reason: string, reference: string | null): string {
-  const plain = reason.replace(/^(?:This request was blocked by Signet:|Chat blocked by Signet[:.])\s*/i, '').trim().replace(/[.\s]+$/, '');
+  const plain = reason.replace(SIGNET_BLOCKED_MESSAGE, '').replace(/^Chat blocked by Signet[:.]\s*/i, '').trim().replace(/[.\s]+$/, '');
   return `${SIGNET_BLOCKED_PREFIX}${plain}.${reference ? ` Reference: ${reference}` : ''}`;
 }

@@ -25,7 +25,7 @@ test('a ServiceNow block links to the Signet review whose verdict it carried out
   const { nativeGuardianCategories, signetReference } = await import('../src/servicenow-guardian-events');
   const error = 'Error 300000: Check guardrail response for flagged moderation checks.';
   const ref = 'req_01M7S5KTZAEZV9KDWFVQ20BB0S';
-  const message = 'This request was blocked by Signet: prompt injection detected';
+  const message = 'This request is blocked by Signet. Reason: prompt injection detected';
   const metrics = [
     { name: 'Prompt Injection Setting', value: 'BLOCK' },
     { name: 'Prompt Injection', value: 'true' },
@@ -33,6 +33,8 @@ test('a ServiceNow block links to the Signet review whose verdict it carried out
   ];
   const categories = nativeGuardianCategories('300000', error, metrics)!;
   assert.deepEqual(signetReference(categories), { categories: ['prompt_injection'], signet_request_id: ref });
+  // Verdicts ServiceNow stored before the wording changed still have the message removed.
+  assert.deepEqual(signetReference(['prompt_injection', 'This request was blocked by Signet: prompt injection detected', `signet_ref:${ref}`]), { categories: ['prompt_injection'], signet_request_id: ref });
   // Signet flags both fields; with Prompt Injection and Offensiveness both set to BLOCK it is still one Signet review.
   const both = [
     { name: 'Prompt Injection Setting', value: 'BLOCK' }, { name: 'Prompt Injection', value: 'true' },

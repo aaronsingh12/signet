@@ -35,7 +35,7 @@ test('verdict: clear passes; a block flags both fields with the message and the 
   assert.deepEqual(clear, { security: { flagged: false, categories: [] }, safety: { flagged: false, categories: [] }, review: { status: 'complete', decision: 'clear', enforcement: 'servicenow_guardian', scope: 'submitted_content' } });
   const injection = { category: 'prompt_injection', kind: 'security' as const, rule: 'SN-GUARD-ATTACK', reason: 'prompt injection detected' };
   const flagged = guardianVerdict([injection], 'complete', 'req_X');
-  const expected = { flagged: true, categories: ['prompt_injection', 'This request was blocked by Signet: prompt injection detected', 'signet_ref:req_X'] };
+  const expected = { flagged: true, categories: ['prompt_injection', 'This request is blocked by Signet. Reason: prompt injection detected', 'signet_ref:req_X'] };
   // Prompt Injection reads `security`, Offensiveness reads `safety`: either check must block a Signet block.
   assert.deepEqual(flagged.security, expected);
   assert.deepEqual(flagged.safety, expected);
@@ -43,7 +43,7 @@ test('verdict: clear passes; a block flags both fields with the message and the 
   const secretInAnswer = guardianVerdict([{ category: 'secret_disclosure', kind: 'security', rule: 'SN-GUARD-SECRET', reason: 'the content contains a secret' }], 'complete', 'req_Y');
   assert.equal(secretInAnswer.safety.flagged, true, 'an answer checked only by Offensiveness still blocks a leaked secret');
   const both = guardianVerdict([injection, { category: 'weapons', kind: 'safety', rule: 'SN-GUARD-SAFETY', reason: 'unsafe content (weapons)' }], 'complete', 'req_Z');
-  assert.deepEqual(both.safety.categories, ['prompt_injection', 'weapons', 'This request was blocked by Signet: prompt injection detected; unsafe content (weapons)', 'signet_ref:req_Z']);
+  assert.deepEqual(both.safety.categories, ['prompt_injection', 'weapons', 'This request is blocked by Signet. Reason: prompt injection detected; unsafe content (weapons)', 'signet_ref:req_Z']);
   const many = Array.from({ length: 30 }, (_, i) => ({ ...injection, reason: `reason number ${i} with some length` }));
   assert.ok(blockedMessage(many).length <= 200, 'ServiceNow and the block sync accept categories up to 200 characters');
 });
@@ -189,17 +189,17 @@ test('every Signet block carries the exact message, its reference and the instru
   const err = (status: number, code: string, message: string, ledger: Halt['ledgerOutcome'], recordId: string | null = 'rec_01ABC') => (errorDone(ctx(), new Halt(status, code, message, 'deny', ledger), recordId).body as { error: Err }).error;
   // Policy refusals, approval outcomes, data rules, limits and identity refusals are all Signet blocks.
   const rejected = err(403, 'approval_rejected', 'rejected by admin', 'blocked');
-  assert.equal(rejected.message, 'This request was blocked by Signet: rejected by admin. Reference: rec_01ABC');
+  assert.equal(rejected.message, 'This request is blocked by Signet. Reason: rejected by admin. Reference: rec_01ABC');
   assert.equal(rejected.user_message, rejected.message);
   assert.equal(rejected.reason, 'rejected by admin');
   assert.equal(rejected.agent_instruction, SIGNET_BLOCK_INSTRUCTION);
   assert.equal(rejected.code, 'approval_rejected', 'the machine-readable fields stay the same');
-  assert.equal(err(429, 'rate_limited', 'over 60 requests per minute', 'blocked').message, 'This request was blocked by Signet: over 60 requests per minute. Reference: rec_01ABC');
-  assert.equal(err(401, 'token_expired', 'workload token has expired; refresh it', 'blocked').message, 'This request was blocked by Signet: workload token has expired; refresh it. Reference: rec_01ABC');
+  assert.equal(err(429, 'rate_limited', 'over 60 requests per minute', 'blocked').message, 'This request is blocked by Signet. Reason: over 60 requests per minute. Reference: rec_01ABC');
+  assert.equal(err(401, 'token_expired', 'workload token has expired; refresh it', 'blocked').message, 'This request is blocked by Signet. Reason: workload token has expired; refresh it. Reference: rec_01ABC');
   // A reason that already names Signet is not prefixed twice; with no record, the request ID is the reference.
   assert.equal(err(403, 'unsafe_content', 'Chat blocked by Signet: this request violates the weapons safety policy. Please ask for safe, lawful information.', 'blocked').message,
-    'This request was blocked by Signet: this request violates the weapons safety policy. Please ask for safe, lawful information. Reference: rec_01ABC');
-  assert.match(err(503, 'ledger_unavailable', 'the evidence ledger is unreachable; request not completed', 'blocked', null).message, /^This request was blocked by Signet: the evidence ledger is unreachable; request not completed\. Reference: req_/);
+    'This request is blocked by Signet. Reason: this request violates the weapons safety policy. Please ask for safe, lawful information. Reference: rec_01ABC');
+  assert.match(err(503, 'ledger_unavailable', 'the evidence ledger is unreachable; request not completed', 'blocked', null).message, /^This request is blocked by Signet. Reason: the evidence ledger is unreachable; request not completed\. Reference: req_/);
   // Not blocks: a failing tool or model, and an approval still pending.
   const upstream = err(502, 'tool_unavailable', 'tool error: 500', 'upstream_error');
   assert.deepEqual([upstream.message, upstream.user_message], ['tool error: 500', undefined]);
@@ -207,6 +207,9 @@ test('every Signet block carries the exact message, its reference and the instru
 });
 
 test('block message helper', () => {
-  assert.equal(signetBlockMessage('rejected by admin', 'rec_1'), 'This request was blocked by Signet: rejected by admin. Reference: rec_1');
-  assert.equal(signetBlockMessage('This request was blocked by Signet: no decision within the hold time.', null), 'This request was blocked by Signet: no decision within the hold time.');
+  assert.equal(signetBlockMessage('rejected by admin', 'rec_1'), 'This request is blocked by Signet. Reason: rejected by admin. Reference: rec_1');
+  assert.equal(signetBlockMessage('This request is blocked by Signet. Reason: no decision within the hold time.', null), 'This request is blocked by Signet. Reason: no decision within the hold time.');
+  // The reason is whatever Signet decided, never a fixed text; an older-worded reason is not prefixed twice.
+  assert.equal(signetBlockMessage('personal data is outside the data scope of mcp://signetdemo-mcp.update', 'rec_2'), 'This request is blocked by Signet. Reason: personal data is outside the data scope of mcp://signetdemo-mcp.update. Reference: rec_2');
+  assert.equal(signetBlockMessage('This request was blocked by Signet: this agent is quarantined', null), 'This request is blocked by Signet. Reason: this agent is quarantined.');
 });

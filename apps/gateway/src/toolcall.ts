@@ -29,7 +29,7 @@ export async function handleTool(headers: IncomingHttpHeaders, req: ToolRequest)
   try {
     return await finish(ctx, null, await run(ctx, headers, req));
   } catch (e) {
-    // Every Signet block carries "This request was blocked by Signet: <reason>. Reference: <id>" (ctx.errorDone).
+    // Every Signet block carries "This request is blocked by Signet. Reason: <reason>. Reference: <id>" (ctx.errorDone).
     if (e instanceof Halt) return finish(ctx, e, null);
     throw e;
   }

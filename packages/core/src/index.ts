@@ -31,4 +31,4 @@ export * from './assistant';
 export * from './platform-guide';
 export * from './guardrails';
 export * from './rulebook';
-export { SERVICENOW_GUARDIAN_REQUEST, SERVICENOW_GUARDIAN_RESPONSE, SIGNET_BLOCKED_PREFIX, SIGNET_BLOCK_INSTRUCTION, SIGNET_REF, signetBlockMessage } from './servicenow-guardian';
+export { SERVICENOW_GUARDIAN_REQUEST, SERVICENOW_GUARDIAN_RESPONSE, SIGNET_BLOCKED_PREFIX, SIGNET_BLOCKED_MESSAGE, SIGNET_BLOCK_INSTRUCTION, SIGNET_REF, signetBlockMessage } from './servicenow-guardian';

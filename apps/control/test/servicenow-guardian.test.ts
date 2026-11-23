@@ -91,7 +91,7 @@ test('ServiceNow BYOG transformers send real authenticated reviews; credential/s
   assert.equal(deniedBody.security.flagged, true);
   assert(deniedBody.security.categories.includes('credential_disclosure_request'));
   assert(deniedBody.security.categories.includes('signet_ref:' + deniedBody.request_id), 'A flagged verdict links back to its Signet review');
-  assert(deniedBody.security.categories.some(category => category === 'This request was blocked by Signet: it asks for passwords or other credentials'));
+  assert(deniedBody.security.categories.some(category => category === 'This request is blocked by Signet. Reason: it asks for passwords or other credentials'));
   const standard = runInNewContext(responseScript, { inputs: { response_body: deniedBody } }, { timeout: 1000 }) as Review;
   assert.equal(standard.security.flagged, true);
   for (const inputs of [JSON.stringify({ response_body: deniedBody }), { response_body: JSON.stringify(deniedBody) }]) {

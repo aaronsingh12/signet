@@ -1,4 +1,4 @@
-import { SIGNET_BLOCKED_PREFIX, SIGNET_REF } from '@signet/core';
+import { SIGNET_BLOCKED_MESSAGE, SIGNET_REF } from '@signet/core';
 import { db, nowIso, tx } from './db';
 import { invalid } from './errors';
 import { object, type Json } from './external-contract';
@@ -19,7 +19,7 @@ export function signetReference(categories: string[]): { categories: string[]; s
   const refs = [...new Set(categories.filter((c) => c.startsWith(SIGNET_REF)).map((c) => c.slice(SIGNET_REF.length)))];
   if (refs.length > 1) throw invalid('ServiceNow Guardian verdict references more than one Signet review; block evidence is ambiguous');
   if (refs[0] !== undefined && !REQUEST_ID.test(refs[0])) throw invalid('ServiceNow Guardian verdict carries a malformed Signet reference');
-  return { categories: categories.filter((c) => !c.startsWith(SIGNET_REF) && !c.startsWith(SIGNET_BLOCKED_PREFIX)), signet_request_id: refs[0] ?? null };
+  return { categories: categories.filter((c) => !c.startsWith(SIGNET_REF) && !SIGNET_BLOCKED_MESSAGE.test(c)), signet_request_id: refs[0] ?? null };
 }
 interface GuardianSource { connection_id: string; external_agent_id: string; agent_id: string; instance_url: string }
 
