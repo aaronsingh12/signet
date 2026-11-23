@@ -31,14 +31,35 @@ export function money(value: number): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: value > 0 && value < 0.01 ? 8 : 2 }).format(value);
 }
 
+/** Always show recorded token-based spend; incomplete pricing is explained separately. */
+export function gatewayCostDisplay(agents: AgentAnalytics[]): { label: string; detail: string; complete: boolean } {
+  const cost = agents.reduce((sum, agent) => sum + agent.cost_usd, 0);
+  const unpriced = agents.reduce((sum, agent) => sum + agent.cost_coverage.unpriced_calls, 0);
+  const missing = agents.reduce((sum, agent) => sum + agent.cost_coverage.missing_usage_calls + agent.cost_coverage.legacy_records, 0);
+  if (unpriced || missing) return {
+    complete: false,
+    label: money(cost),
+    detail: `${unpriced} safety model calls have no recorded rate; ${missing} calls or legacy records lack complete usage. Configure input/output rates in Settings > Gateway cost. Historical records retain their original prices.`,
+  };
+  return { label: money(cost), detail: 'Recorded gateway and safety-model cost for this reporting period.', complete: true };
+}
+
 export function useAgentAnalytics() {
+  return useAnalytics('/stats/agents');
+}
+
+export function useAllTimeAgentAnalytics() {
+  return useAnalytics('/stats/agents/all-time');
+}
+
+function useAnalytics(path: string) {
   const [data, setData] = useState<DashboardAnalytics | null>(null);
   const [error, setError] = useState<{ message: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const reload = useCallback(async (): Promise<void> => {
     setLoading(true);
     try {
-      const result = parseAgentAnalytics(await api<AgentAnalyticsResponse>('/stats/agents'));
+      const result = parseAgentAnalytics(await api<AgentAnalyticsResponse>(path));
       setData({ ...result, agents: result.agents.map((agent, index) => ({ ...agent, color: agentColor(index) })) });
       setError(null);
     } catch (failure) {
@@ -46,7 +67,7 @@ export function useAgentAnalytics() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [path]);
   useEffect(() => {
     void reload();
     const timer = window.setInterval(() => void reload(), 30_000);

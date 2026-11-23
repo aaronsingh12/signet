@@ -3,6 +3,13 @@
 type Op = { summary: string; permission?: string; public?: boolean; body?: string; runner?: boolean };
 
 const ops: Record<string, Record<string, Op>> = {
+  '/stats/agents/today': { get: { summary: 'Processing from local midnight; start query parameter is the viewer local midnight as an ISO timestamp', permission: 'agents.read' } },
+  '/stats/agents/all-time': { get: { summary: 'All retained gateway, Guardian and dated provider processing per agent without a 24-hour cutoff', permission: 'agents.read' } },
+  '/rulebooks/{book}/rules/{rule}': { put: { summary: 'Edit rule reference text, area and note in a custom or default rulebook; does not change enforcement', permission: 'tenant.admin' } },
+  '/rulebooks': {
+    get: { summary: 'List tenant custom rulebooks saved for reference; does not change enforcement', permission: 'agents.read' },
+    post: { summary: 'Save a custom rulebook with name and rules (id, area, text, note); at most 500 rules', permission: 'tenant.admin' },
+  },
   '/agents/{id}/servicenow-guardian': { get: { summary: 'Read authenticated ServiceNow BYOG setup and submitted review counts; does not assert native chat blocking', permission: 'identity.bootstrap' } },
   '/connect/settings': { put: { summary: 'Save public Control and Gateway origins in MongoDB; subsequent connections use them without restarting', permission: 'tenant.admin' } },
   '/edge-runners/{id}/tools': { post: { summary: 'Register a private HTTP tool and encrypted credential atomically', permission: 'connectors.manage and tools.manage and secrets.manage' } },
