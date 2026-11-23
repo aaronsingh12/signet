@@ -1,4 +1,4 @@
-import { Activity, BarChart3, Bell, Boxes, CircleHelp, Home, LogOut, Menu, Settings2, ShieldCheck, X } from 'lucide-react';
+import { Activity, BarChart3, Bell, Boxes, CircleHelp, Home, LogOut, Menu, Plug, Settings2, ShieldCheck, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, NavLink, Outlet } from 'react-router-dom';
 import { useApi } from '../lib/api';
@@ -11,6 +11,7 @@ import { SignetAssistant } from './SignetAssistant';
 const links = [
   { to: '/', label: 'Home', icon: Home },
   { to: '/agents', label: 'Agents', icon: Boxes },
+  // { to: '/connectors', label: 'Connectors', icon: Plug },
   { to: '/needs-you', label: 'Needs you', icon: Bell },
   { to: '/activity', label: 'Activity', icon: Activity },
   { to: '/rulebook', label: 'Rulebook', icon: ShieldCheck },

@@ -11,6 +11,7 @@ import { AgentSetup } from './pages/AgentSetup';
 import { Approvals, MobileApproval } from './pages/Approvals';
 import { CommandCenter } from './pages/CommandCenter';
 import { Connectors } from './pages/Connectors';
+// import { ConnectorHub } from './pages/ConnectorHub';
 import { Discovery } from './pages/Discovery';
 import { Enforcement } from './pages/Enforcement';
 import { Login } from './pages/Login';
@@ -73,7 +74,7 @@ createRoot(document.getElementById('root')!).render(
           
           <Route path="enforcement" element={<Moved to="/settings/safety" />} />
           <Route path="discovery" element={<Moved to="/settings/discovery" />} />
-          <Route path="connectors" element={<Moved to="/settings/systems" />} />
+          {/* <Route path="connectors" element={<ConnectorHub />} /> */}
           <Route path="policies" element={<Moved to="/settings/rules" />} />
           <Route path="plugins" element={<Moved to="/settings/accounts" />} />
           <Route path="tools" element={<Moved to="/settings/apps" />} />

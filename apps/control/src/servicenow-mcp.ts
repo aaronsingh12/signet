@@ -14,6 +14,7 @@ import { linkedServiceNowAgents } from './servicenow-agents';
 import { serviceNowAccessToken } from './servicenow-gateway';
 
 interface PendingAuthorization {
+  return_to: string;
   connection_id: string | null;
   principal_id: string;
   verifier: string;
@@ -24,13 +25,14 @@ interface PendingAuthorization {
 }
 
 /** Starts tenant-admin consent with an expiring, single-use state and PKCE verifier. */
-export async function startServiceNowConnection(id: string, res: Response, actor: Principal): Promise<void> {
+export async function startServiceNowConnection(id: string, res: Response, actor: Principal, returnTo: string): Promise<void> {
+  if (!['/settings/accounts', '/connectors'].includes(returnTo)) throw new PolicyError('SERVICENOW_CONFIG', 'Invalid ServiceNow authorization return page', 400);
   const config = await serviceNowConfiguration(id);
   const state = randomBytes(32).toString('base64url');
   const verifier = randomBytes(48).toString('base64url');
   await db.prepare('DELETE FROM servicenow_mcp_oauth_state WHERE expires_at < ?').run(Date.now());
-  await db.prepare('INSERT INTO servicenow_mcp_oauth_state (state_hash, tenant_id, principal_id, verifier, instance_url, client_id, redirect_uri, expires_at, connection_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    .run(sha256(state), tenant.id, actor.id, verifier, config.instance, config.clientId, config.redirectUri, Date.now() + 10 * 60_000, id);
+  await db.prepare('INSERT INTO servicenow_mcp_oauth_state (state_hash, tenant_id, principal_id, verifier, instance_url, client_id, redirect_uri, expires_at, connection_id, return_to) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(sha256(state), tenant.id, actor.id, verifier, config.instance, config.clientId, config.redirectUri, Date.now() + 10 * 60_000, id, returnTo);
   const url = new URL('/oauth_auth.do', config.instance);
   url.search = new URLSearchParams({ response_type: 'code', client_id: config.clientId, redirect_uri: config.redirectUri, state,
     code_challenge: createHash('sha256').update(verifier).digest('base64url'), code_challenge_method: 'S256' }).toString();
@@ -41,7 +43,7 @@ export async function startServiceNowConnection(id: string, res: Response, actor
 /** Exchanges consent once and stores tokens in the encrypted broker, never in a response or URL. */
 export async function completeServiceNowConnection(req: Request, res: Response, actor: Principal): Promise<void> {
   if (typeof req.query.state !== 'string') throw new PolicyError('SERVICENOW_AUTH', 'ServiceNow OAuth state is missing; start the connection again', 400);
-  const pending = await db.prepare('DELETE FROM servicenow_mcp_oauth_state WHERE state_hash = ? AND tenant_id = ? AND principal_id = ? RETURNING connection_id, principal_id, verifier, instance_url, client_id, redirect_uri, expires_at')
+  const pending = await db.prepare('DELETE FROM servicenow_mcp_oauth_state WHERE state_hash = ? AND tenant_id = ? AND principal_id = ? RETURNING return_to, connection_id, principal_id, verifier, instance_url, client_id, redirect_uri, expires_at')
     .get(sha256(req.query.state), tenant.id, actor.id) as PendingAuthorization | undefined;
   if (!pending || !pending.connection_id || pending.expires_at < Date.now()) throw new PolicyError('SERVICENOW_AUTH', 'ServiceNow OAuth state is expired, already used, or belongs to another user; start again', 400);
   const id = pending.connection_id;
@@ -62,7 +64,7 @@ export async function completeServiceNowConnection(req: Request, res: Response, 
   const expiresAt = Date.now() + result.expires_in * 1000;
   await saveServiceNowAuthorization(id, credential, expiresAt, actor);
   res.setHeader('cache-control', 'no-store');
-  res.redirect('/settings/accounts');
+  res.redirect(pending.return_to === '/connectors' ? `/connectors?connection=${encodeURIComponent(id)}` : '/settings/accounts');
 }
 
 /** Replaces OAuth tokens on the existing connection without resetting discovery or agent onboarding. */
@@ -105,6 +107,6 @@ export async function serviceNowConnection(id: string): Promise<ServiceNowConnec
 }
 
 export async function listServiceNowConnections(): Promise<ServiceNowConnectionView[]> {
-  const rows = await db.prepare('SELECT id FROM servicenow_mcp_account WHERE tenant_id = ? ORDER BY updated_at DESC, id').all(tenant.id) as { id: string }[];
+  const rows = await db.prepare('SELECT a.id FROM servicenow_mcp_account a WHERE a.tenant_id = ? AND NOT EXISTS (SELECT 1 FROM servicenow_connector_session c WHERE c.connection_id = a.id) ORDER BY a.updated_at DESC, a.id').all(tenant.id) as { id: string }[];
   return Promise.all(rows.map(row => serviceNowConnection(row.id)));
 }
