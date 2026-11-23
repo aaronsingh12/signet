@@ -197,9 +197,11 @@ app.post('/v1/mcp/:alias', guard(async (req, res) => {
     // "Protocol Error ... [object Object]". 401 stays a protocol error so the client renews its login.
     // Some platforms (ServiceNow) show the raw tool result in the chat, so it stays short: the message once, and
     // only the fields a client needs to type the error in _meta.signet. The full details are in the ledger record.
+    // The text is only the message: agents' models repeat the tool text as given, so an added instruction to
+    // the agent reached the person too.
     if (e.user_message && d.status !== 401) {
       const signet = { code: e.code, decision: e.decision, rule_ids: e.rule_ids ?? [], record_id: e.record_id };
-      return res.status(200).json({ jsonrpc: '2.0', id: msg.id, result: { content: [{ type: 'text', text: `${e.user_message}\n\n${e.agent_instruction ?? ''}`.trim() }], isError: true, _meta: { signet } } });
+      return res.status(200).json({ jsonrpc: '2.0', id: msg.id, result: { content: [{ type: 'text', text: e.user_message }], isError: true, _meta: { signet } } });
     }
     return res.status(d.status === 401 ? 401 : 200).json(rpcError(msg.id, -32003, e.message, e));
   }
