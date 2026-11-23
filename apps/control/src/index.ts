@@ -9,6 +9,7 @@ import * as replay from './replay';
 import * as benchmarks from './benchmarks';
 import * as auditpack from './auditpack';
 import * as library from './library';
+import { defaultRules, importRulebook, listRulebooks, updateRule } from './rulebooks';
 import * as discovery from './discovery';
 import * as enforcement from './enforcement';
 import { PolicyError, invalid } from './errors';
@@ -35,7 +36,7 @@ import { principalOf, requires, singleOperatorMode } from './rbac';
 import * as registry from './registry';
 import * as secrets from './secrets';
 import { commandCenter } from './stats';
-import { agentAnalytics } from './agent-analytics';
+import { agentAnalytics, allTimeAgentAnalytics, todayAgentAnalytics } from './agent-analytics';
 import { agentRemovalPreview, removeAgent } from './agent-removal';
 import { reloadSettings, setAgentModel, setModelPrice, tenant } from './tenant';
 import * as approvals from './approvals';
@@ -341,6 +342,9 @@ api.get('/assistant/status', requires('agents.read'), route(async () => {
 }));
 api.post('/assistant/chat', requires('agents.read'), route(async (req, res) => chatWithSignet(req.body, principalOf(res))));
 api.get('/model-settings', requires('tenant.admin'), route(async () => modelSettings()));
+api.get('/rulebooks', requires('agents.read'), route(async () => ({ items: await listRulebooks(), default_rules: await defaultRules() })));
+api.post('/rulebooks', requires('tenant.admin'), route(async (req, res) => [201, await importRulebook(req.body, principalOf(res))]));
+api.put('/rulebooks/:book/rules/:rule', requires('tenant.admin'), route(async (req, res) => updateRule(req.params.book!, req.params.rule!, req.body, principalOf(res))));
 api.post('/model-settings/models', requires('tenant.admin'), route(async req => listModelOptions(req.body)));
 api.put('/model-settings', requires('tenant.admin'), route(async (req, res) => {
   const settings = await saveModelSettings(req.body, principalOf(res));
@@ -390,6 +394,11 @@ api.get('/stats/costs', requires('agents.read'), route(async (req) => costs(Numb
 api.get('/stats/gateway-costs', requires('agents.read'), route(async (req) => gatewayCosts(Number(req.query.days ?? 30))));
 api.post('/platforms/:id/usage/sync', requires('connectors.manage'), route(async (req) => platforms.syncUsage(req.params.id!, Number(req.body?.days ?? 30))));
 api.get('/stats/agents', requires('agents.read'), route(async () => (await agentAnalytics())));
+api.get('/stats/agents/all-time', requires('agents.read'), route(async () => allTimeAgentAnalytics()));
+api.get('/stats/agents/today', requires('agents.read'), route(async req => {
+  if (typeof req.query.start !== 'string') throw invalid('Today analytics requires start as an ISO timestamp for local midnight');
+  return todayAgentAnalytics(req.query.start);
+}));
 api.get('/gateways', requires('gateways.read'), route(async () => ({ items: (await db.prepare('SELECT * FROM gateway_node ORDER BY id').all()) })));
 api.get('/live', requires('ledger.read'), (_req, res) => live.attach(res));
 

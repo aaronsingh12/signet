@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { ArrowUpRight, BookOpen, Bot, Building2, Coins, Cpu, KeyRound, Plug, Radar, ShieldCheck, SlidersHorizontal, Users } from 'lucide-react';
+import { useState, type CSSProperties } from 'react';
 import { Link, Navigate, useLocation, useSearchParams } from 'react-router-dom';
 import { Card, ErrorNote, PageHeader, Tabs } from '../components/ui';
 import { ApiError, api } from '../lib/api';
@@ -55,23 +56,23 @@ export function Reports() {
 }
 
 const SETTINGS = [
-  { to: '/settings/models', title: 'Models', text: 'Configure Ollama Local, Ollama API, OpenAI API or Claude API', perm: 'tenant.admin' },
-  { to: '/settings/gateway-cost', title: 'Gateway cost', text: 'Per-agent usage, budgets and model input/output token prices', perm: 'agents.read' },
-  { to: '/settings/people', title: 'People & roles', text: 'Who can add, approve and audit', perm: 'tenant.read' },
-  { to: '/settings/apps', title: 'Connected apps & keys', text: 'Apps agents can use and their stored credentials', perm: 'agents.read' },
-  { to: '/settings/accounts', title: 'Connected accounts', text: 'Vercel account sign-in and service integrations', perm: 'connectors.manage' },
-  { to: '/settings/systems', title: 'Company systems', text: 'ServiceNow and connected AI platforms', perm: 'compliance.read' },
-  { to: '/settings/setup-guide', title: 'Setup Guide', text: 'Turn ServiceNow setup guidance on or off', perm: 'compliance.read' },
-  { to: '/settings/rules', title: 'Safety rules', text: 'Detectors, company-wide defaults and limits', perm: 'agents.read' },
-  { to: '/settings/agent-defaults', title: 'Agent list', text: 'Manage and permanently remove agents', perm: 'agents.read' },
-  { to: '/settings/discovery', title: 'Finding hidden AI', text: 'Key sweeps, log uploads and unmanaged AI use', perm: 'discovery.read' },
-  { to: '/settings/safety', title: 'Safety center', text: 'Stop history, emergency stops and gateway health', perm: 'ledger.read' },
+  { icon: Cpu, color: '139 92 246', to: '/settings/models', title: 'Models', text: 'Configure Ollama Local, Ollama API, OpenAI API or Claude API', perm: 'tenant.admin' },
+  { icon: Coins, color: '14 165 233', to: '/settings/gateway-cost', title: 'Gateway cost', text: 'Per-agent usage, budgets and model input/output token prices', perm: 'agents.read' },
+  { icon: Users, color: '20 184 166', to: '/settings/people', title: 'People & roles', text: 'Who can add, approve and audit', perm: 'tenant.read' },
+  { icon: KeyRound, color: '245 158 11', to: '/settings/apps', title: 'Connected apps & keys', text: 'Apps agents can use and their stored credentials', perm: 'agents.read' },
+  { icon: Plug, color: '99 102 241', to: '/settings/accounts', title: 'Connected accounts', text: 'Vercel account sign-in and service integrations', perm: 'connectors.manage' },
+  { icon: Building2, color: '6 182 212', to: '/settings/systems', title: 'Company systems', text: 'ServiceNow and connected AI platforms', perm: 'compliance.read' },
+  { icon: BookOpen, color: '59 130 246', to: '/settings/setup-guide', title: 'Setup Guide', text: 'Turn ServiceNow setup guidance on or off', perm: 'compliance.read' },
+  { icon: SlidersHorizontal, color: '16 185 129', to: '/settings/rules', title: 'Safety rules', text: 'Detectors, company-wide defaults and limits', perm: 'agents.read' },
+  { icon: Bot, color: '168 85 247', to: '/settings/agent-defaults', title: 'Agent list', text: 'Manage and permanently remove agents', perm: 'agents.read' },
+  { icon: Radar, color: '236 72 153', to: '/settings/discovery', title: 'Finding hidden AI', text: 'Key sweeps, log uploads and unmanaged AI use', perm: 'discovery.read' },
+  { icon: ShieldCheck, color: '249 115 22', to: '/settings/safety', title: 'Safety center', text: 'Stop history, emergency stops and gateway health', perm: 'ledger.read' },
 ];
 
 export function Settings() {
   const can = useCan();
   return <>
     <PageHeader title="Settings" subtitle="You rarely need these. Everything is grouped by what you're trying to do." />
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{SETTINGS.filter((s) => can(s.perm) || can('tenant.admin')).map((s) => <Link key={s.to} to={s.to} data-testid={`settings-${s.to.split('/').at(-1)}`} className="card settings-tile"><h2>{s.title}</h2><p>{s.text}</p></Link>)}</div>
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{SETTINGS.filter((s) => can(s.perm) || can('tenant.admin')).map(({ icon: Icon, color, ...s }) => <Link key={s.to} to={s.to} data-testid={`settings-${s.to.split('/').at(-1)}`} className="card settings-tile" style={{ '--settings-accent': color } as CSSProperties}><div className="settings-tile-top"><span className="settings-tile-icon"><Icon size={21} strokeWidth={1.7} aria-hidden="true" /></span><ArrowUpRight className="settings-tile-arrow" size={17} aria-hidden="true" /></div><h2>{s.title}</h2><p title={s.text}>{s.text}</p></Link>)}</div>
   </>;
 }

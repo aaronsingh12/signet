@@ -13,7 +13,7 @@ const links = [
   { to: '/agents', label: 'Agents', icon: Boxes },
   { to: '/needs-you', label: 'Needs you', icon: Bell },
   { to: '/activity', label: 'Activity', icon: Activity },
-  { to: '/guardrails', label: 'Guardrails', icon: ShieldCheck },
+  { to: '/rulebook', label: 'Rulebook', icon: ShieldCheck },
   { to: '/reports', label: 'Reports', icon: BarChart3 },
   { to: '/settings', label: 'Settings', icon: Settings2 },
 ];

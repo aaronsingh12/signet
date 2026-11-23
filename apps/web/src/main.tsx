@@ -26,6 +26,7 @@ import { Tenant } from './pages/Tenant';
 import { Tools } from './pages/Tools';
 import { SetupGuide } from './pages/SetupGuide';
 import { Models } from './pages/Models';
+import { Rulebook } from './pages/Rulebook';
 
 const authed = (element: JSX.Element) => <AuthProvider>{element}</AuthProvider>;
 
@@ -59,6 +60,8 @@ createRoot(document.getElementById('root')!).render(
           <Route path="settings/setup-guide" element={<SetupGuide />} />
           <Route path="settings/models" element={<Models />} />
           <Route path="settings/rules" element={<Policies />} />
+          <Route path="rulebook" element={<Rulebook />} />
+          <Route path="settings/rulebook" element={<Moved to="/rulebook" />} />
           <Route path="settings/agent-defaults" element={<AgentSettings />} />
           <Route path="settings/discovery" element={<Discovery />} />
           <Route path="settings/safety" element={<Enforcement />} />
