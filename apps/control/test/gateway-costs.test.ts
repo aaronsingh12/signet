@@ -60,3 +60,36 @@ test('gateway cost settings include idle agents, separate models and preserve hi
   assert.equal((await gatewayCosts(7)).agents.find(agent => agent.id === first.id)!.model_calls, 2);
   for (const days of [0, 91, 1.5, NaN]) await assert.rejects(gatewayCosts(days), /days must be an integer/);
 });
+
+test('safety calls recorded before any rate was set are shown at the current rate as an estimate; priced calls keep their rate', async () => {
+  const { registerAgent } = await import('../src/registry');
+  const { permissionsFor } = await import('../src/rbac');
+  const { append } = await import('../src/ledger');
+  const { gatewayCosts } = await import('../src/gateway-costs');
+  const { agentAnalytics } = await import('../src/agent-analytics');
+  const { setAgentModel, setModelPrice } = await import('../src/tenant');
+  const owner: Principal = { id: 'estimate-owner@example.test', name: 'Owner', kind: 'human', roles: ['agent_owner'], permissions: permissionsFor(['agent_owner']), groups: [], mfa: true, auth: 'bearer', auth_time: null };
+  const agent = await registerAgent({ handle: 'cost-estimate', name: 'Estimate', purpose: 'Unpriced safety estimate', sponsor: owner.id, tier: 'T1', autonomy_level: 'L0' }, owner);
+  const model = 'estimate-judge';
+  await setAgentModel(model, { base_url: 'https://judge.example.test/v1', secret_id: null }); // registered with no rate yet
+  const usage = (calls: number, tokens_in: number, tokens_out: number, cost_usd: number, unpriced_calls: number, missing_usage_calls = 0) => ({ action_type: 'guardrail_check', target: 'servicenow://guardian', safety_usage: { model, calls, tokens_in, tokens_out, cost_usd, unpriced_calls, missing_usage_calls } });
+  await append({ kind: 'transaction', agent_id: agent.id, data: usage(2, 10_000, 1_000, 0, 2) }); // ran with no rate
+  await append({ kind: 'transaction', agent_id: agent.id, data: usage(1, 1_000, 100, 0.25, 0) }); // ran at a real rate
+  await append({ kind: 'transaction', agent_id: agent.id, data: usage(1, 0, 0, 0, 1, 1) }); // no token counts: cannot be estimated
+  const before = (await gatewayCosts(1)).agents.find(entry => entry.id === agent.id)!;
+  assert.equal(before.estimated_safety_calls, 0, 'with no rate configured there is nothing to estimate');
+  assert.equal(before.unpriced_safety_calls, 3);
+  await setModelPrice(model, { in: 0.0001, out: 0.0005 });
+  const report = (await gatewayCosts(1)).agents.find(entry => entry.id === agent.id)!;
+  const estimate = (10_000 * 0.0001 + 1_000 * 0.0005) / 1000;
+  assert.equal(report.estimated_safety_calls, 2);
+  assert(Math.abs(report.estimated_safety_cost_usd - estimate) < 1e-12);
+  assert(Math.abs(report.safety_cost_usd - (0.25 + estimate)) < 1e-12, 'the priced call keeps its recorded 0.25');
+  assert(Math.abs(report.cost_usd - (0.25 + estimate)) < 1e-12);
+  assert.equal(report.unpriced_safety_calls, 1);
+  assert(Math.abs(report.models.find(entry => entry.model === model)!.estimated_cost_usd! - estimate) < 1e-12);
+  const dashboard = (await agentAnalytics()).agents.find(entry => entry.id === agent.id)!;
+  assert(Math.abs(dashboard.cost_usd - report.cost_usd) < 1e-12);
+  assert.equal(dashboard.cost_coverage.estimated_calls, 2);
+  assert.equal(dashboard.cost_coverage.unpriced_calls, 1);
+});

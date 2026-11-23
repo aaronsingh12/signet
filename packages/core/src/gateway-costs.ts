@@ -26,6 +26,8 @@ export interface GatewayModelUsage {
   tokens_in: number;
   tokens_out: number;
   cost_usd: number;
+  // Part of cost_usd for safety calls recorded with no rate, priced at the model's current rate.
+  estimated_cost_usd?: number;
 }
 
 export interface GatewayAgentCost {
@@ -43,6 +45,9 @@ export interface GatewayAgentCost {
   safety_tokens_in: number;
   safety_tokens_out: number;
   safety_cost_usd: number;
+  // Safety calls recorded with no rate, priced at the model's current rate (included in safety_cost_usd).
+  estimated_safety_calls: number;
+  estimated_safety_cost_usd: number;
   unpriced_safety_calls: number;
   missing_safety_usage_calls: number;
   legacy_safety_records: number;
@@ -69,12 +74,13 @@ export function parseGatewayCosts(value: GatewayCostsReport): GatewayCostsReport
   for (const agent of value.agents) {
     for (const key of ['id', 'name', 'handle', 'status'] as const) if (typeof agent?.[key] !== 'string') throw new TypeError(`Gateway agent ${key} must be a string`);
     if (agent.daily_budget_usd !== null && (typeof agent.daily_budget_usd !== 'number' || !Number.isFinite(agent.daily_budget_usd) || agent.daily_budget_usd < 0)) throw new TypeError('Gateway daily budget must be nonnegative or null');
-    for (const key of ['model_calls', 'tool_calls', 'tokens_in', 'tokens_out', 'cost_usd', 'safety_calls', 'safety_tokens_in', 'safety_tokens_out', 'safety_cost_usd', 'unpriced_safety_calls', 'missing_safety_usage_calls', 'legacy_safety_records'] as const) if (typeof agent[key] !== 'number' || !Number.isFinite(agent[key]) || agent[key] < 0) throw new TypeError(`Gateway agent ${key} must be nonnegative`);
+    for (const key of ['model_calls', 'tool_calls', 'tokens_in', 'tokens_out', 'cost_usd', 'safety_calls', 'safety_tokens_in', 'safety_tokens_out', 'safety_cost_usd', 'estimated_safety_calls', 'estimated_safety_cost_usd', 'unpriced_safety_calls', 'missing_safety_usage_calls', 'legacy_safety_records'] as const) if (typeof agent[key] !== 'number' || !Number.isFinite(agent[key]) || agent[key] < 0) throw new TypeError(`Gateway agent ${key} must be nonnegative`);
     if (!Array.isArray(agent.models)) throw new TypeError('Gateway agent model usage must be an array');
     for (const model of agent.models) {
       if (typeof model.model !== 'string') throw new TypeError('Gateway usage model must be a string');
       if (model.source !== 'agent_model' && model.source !== 'safety_review') throw new TypeError('Gateway usage must identify agent model or safety review source');
       for (const key of ['calls', 'tokens_in', 'tokens_out', 'cost_usd'] as const) if (typeof model[key] !== 'number' || !Number.isFinite(model[key]) || model[key] < 0) throw new TypeError(`Gateway model usage ${key} must be nonnegative`);
+      if (model.estimated_cost_usd !== undefined && (typeof model.estimated_cost_usd !== 'number' || !Number.isFinite(model.estimated_cost_usd) || model.estimated_cost_usd < 0 || model.estimated_cost_usd > model.cost_usd + 1e-12)) throw new TypeError('Gateway model usage estimated cost must be nonnegative and part of its cost');
     }
   }
   return value;

@@ -168,5 +168,6 @@ test('dashboard aggregates real ledger records per agent without counting detect
   const unpriced = (await agentAnalytics()).agents.find(agent => agent.id === agents[3]!.id)!;
   assert.equal(unpriced.cost_usd, 0);
   assert.equal(unpriced.tokens, 6);
-  assert.deepEqual(unpriced.cost_coverage, { unpriced_calls: 1, missing_usage_calls: 1, legacy_records: 1 });
+  // A call without provider token counts cannot be estimated, so it stays unpriced.
+  assert.deepEqual(unpriced.cost_coverage, { estimated_calls: 0, estimated_usd: 0, unpriced_calls: 1, missing_usage_calls: 1, legacy_records: 1 });
 });

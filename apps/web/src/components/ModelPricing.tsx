@@ -26,7 +26,7 @@ export function ModelPriceEditor({ model, canEdit, onSaved }: { model: GatewayMo
       await api(`/catalogue/${encodeURIComponent(model.model)}/price`, { method: 'PUT', body: { in: input / 1000, out: output / 1000 } });
       await onSaved();
       setDraft(null);
-      setMessage({ ok: true, text: 'Saved for new requests. Historical recorded costs are unchanged.' });
+      setMessage({ ok: true, text: 'Saved for new requests. Costs already recorded at a rate are unchanged; calls recorded before any rate was set now show at this rate as an estimate.' });
     } catch (failure) {
       setMessage({ ok: false, text: failure instanceof Error ? failure.message : String(failure) });
     } finally { setBusy(false); }

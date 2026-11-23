@@ -1,11 +1,12 @@
 import type { ActivityBucket, AgentAnalytics, AgentAnalyticsResponse } from '@signet/core';
 import { db } from './db';
 import { agentLevel } from './enforcement';
-import { tenant } from './tenant';
+import { reloadSettings, tenant } from './tenant';
 import { providerAnalytics } from './provider-analytics';
 import { serviceNowAgentCoverage } from './servicenow-agents';
 import { nativeGuardianBlocksBetween } from './servicenow-guardian-events';
 import { invalid } from './errors';
+import { unpricedSafetyEstimates } from './safety-cost-estimate';
 
 interface AgentRow {
   id: string; name: string; handle: string; purpose: string; owner: string; tier: string; status: string;
@@ -105,7 +106,11 @@ async function analyticsBetween(from: Date, to: Date): Promise<AgentAnalyticsRes
       COUNT(*) FILTER (WHERE jsonb_extract_path_text(data::jsonb, 'guardrail_classifier', 'chunk_count') IS NOT NULL AND jsonb_extract_path_text(data::jsonb, 'safety_usage', 'model') IS NULL) AS legacy_records,
       COALESCE(SUM((jsonb_extract_path_text(data::jsonb, 'safety_usage', 'tokens_in'))::double precision), 0) + COALESCE(SUM((jsonb_extract_path_text(data::jsonb, 'safety_usage', 'tokens_out'))::double precision), 0) AS tokens
     FROM ledger_record WHERE tenant_id = ? AND kind = 'transaction' AND ts >= ? AND ts <= ? GROUP BY agent_id`).all(tenant.id, from.toISOString(), to.toISOString()) as { agent_id: string; cost: number; tokens: number; unpriced_calls: number; missing_usage_calls: number; legacy_records: number }[];
+  const estimates = await unpricedSafetyEstimates(from.toISOString(), to.toISOString(), (await reloadSettings()).catalogue);
   const items: AgentAnalytics[] = (await Promise.all(agents.map(async (agent) => {
+    const estimate = estimates.filter(row => row.agent_id === agent.id);
+    const estimatedCalls = estimate.reduce((total, row) => total + row.calls, 0);
+    const estimatedUsd = estimate.reduce((total, row) => total + row.cost_usd, 0);
     const usage = rows.filter((row) => row.agent_id === agent.id);
     const sum = (key: 'requests' | 'allowed' | 'blocked' | 'review' | 'failed' | 'tokens' | 'cost_usd' | 'latency_total' | 'latency_count'): number => usage.reduce((total, row) => total + row[key], 0);
     const activity: ActivityBucket[] = hours.map((hour) => {
@@ -130,8 +135,9 @@ async function analyticsBetween(from: Date, to: Date): Promise<AgentAnalyticsRes
       servicenow: serviceNowCoverage ? { linked: true, monitoring: serviceNowCoverage.monitoring, gateway_enforcement: serviceNowCoverage.gateway_enforcement } : agent.servicenow_identity ? { linked: false, monitoring: false, gateway_enforcement: false } : null,
       provider: providers.get(agent.id) ?? { connection_ids: [], last_sync_at: null, executions: 0, succeeded: 0, failed: 0, other: 0, avg_duration_ms: null, activity: [], recent: [] },
       requests: sum('requests'), allowed: sum('allowed'), blocked: sum('blocked'), review: sum('review'), failed: sum('failed'),
-      tokens: sum('tokens') + (safetyCosts.find(row => row.agent_id === agent.id)?.tokens ?? 0), cost_usd: sum('cost_usd') + (safetyCosts.find(row => row.agent_id === agent.id)?.cost ?? 0), avg_latency_ms: count ? sum('latency_total') / count : null,
-      cost_coverage: { unpriced_calls: safetyCosts.find(row => row.agent_id === agent.id)?.unpriced_calls ?? 0, missing_usage_calls: safetyCosts.find(row => row.agent_id === agent.id)?.missing_usage_calls ?? 0, legacy_records: safetyCosts.find(row => row.agent_id === agent.id)?.legacy_records ?? 0 },
+      tokens: sum('tokens') + (safetyCosts.find(row => row.agent_id === agent.id)?.tokens ?? 0), cost_usd: sum('cost_usd') + (safetyCosts.find(row => row.agent_id === agent.id)?.cost ?? 0) + estimatedUsd, avg_latency_ms: count ? sum('latency_total') / count : null,
+      // Calls recorded with no rate are priced at today's rate (estimated_*); they are no longer counted as unpriced.
+      cost_coverage: { estimated_calls: estimatedCalls, estimated_usd: estimatedUsd, unpriced_calls: (safetyCosts.find(row => row.agent_id === agent.id)?.unpriced_calls ?? 0) - estimatedCalls, missing_usage_calls: safetyCosts.find(row => row.agent_id === agent.id)?.missing_usage_calls ?? 0, legacy_records: safetyCosts.find(row => row.agent_id === agent.id)?.legacy_records ?? 0 },
       last_activity: usage.map((row) => row.last_activity).sort().at(-1) ?? null, activity,
       processing: { requests: processingSum('requests'), allowed: processingSum('allowed'), blocked: processingSum('blocked'), review: processingSum('review'), failed: processingSum('failed'), activity: processingActivity },
     };

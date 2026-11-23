@@ -36,12 +36,15 @@ export function gatewayCostDisplay(agents: AgentAnalytics[]): { label: string; d
   const cost = agents.reduce((sum, agent) => sum + agent.cost_usd, 0);
   const unpriced = agents.reduce((sum, agent) => sum + agent.cost_coverage.unpriced_calls, 0);
   const missing = agents.reduce((sum, agent) => sum + agent.cost_coverage.missing_usage_calls + agent.cost_coverage.legacy_records, 0);
+  const estimatedCalls = agents.reduce((sum, agent) => sum + agent.cost_coverage.estimated_calls, 0);
+  const estimatedUsd = agents.reduce((sum, agent) => sum + agent.cost_coverage.estimated_usd, 0);
+  const estimated = estimatedCalls ? ` Includes ${money(estimatedUsd)} estimated at current rates for ${estimatedCalls} safety calls that ran before a rate was set.` : '';
   if (unpriced || missing) return {
     complete: false,
     label: money(cost),
-    detail: `${unpriced} safety model calls have no recorded rate; ${missing} calls or legacy records lack complete usage. Configure input/output rates in Settings > Gateway cost. Historical records retain their original prices.`,
+    detail: `${unpriced} safety model calls have no rate; ${missing} calls or legacy records lack complete usage. Configure input/output rates in Settings > Gateway cost. Calls that ran at a rate keep that rate.${estimated}`,
   };
-  return { label: money(cost), detail: 'Recorded gateway and safety-model cost for this reporting period.', complete: true };
+  return { label: money(cost), detail: `Recorded gateway and safety-model cost for this reporting period.${estimated}`, complete: true };
 }
 
 export function useAgentAnalytics() {

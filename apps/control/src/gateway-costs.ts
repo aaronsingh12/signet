@@ -2,6 +2,7 @@ import { parseGatewayCosts, type GatewayAgentCost, type GatewayCostsReport } fro
 import { db } from './db';
 import { invalid } from './errors';
 import { reloadSettings, tenant } from './tenant';
+import { unpricedSafetyEstimates } from './safety-cost-estimate';
 import type { StoredValue } from './mongodb-schema';
 
 interface AgentRow {
@@ -65,22 +66,29 @@ export async function gatewayCosts(days: number): Promise<GatewayCostsReport> {
     WHERE tenant_id = ? AND kind = 'transaction' AND ts >= ? AND ts <= ?
       AND jsonb_extract_path_text(data::jsonb, 'guardrail_classifier', 'chunk_count') IS NOT NULL
       AND jsonb_extract_path_text(data::jsonb, 'safety_usage', 'model') IS NULL GROUP BY agent_id`).all(tenant.id, from, to);
+  // Calls recorded with no rate are priced at today's rate (estimated); recorded costs are never recalculated.
+  const estimates = await unpricedSafetyEstimates(from, to, settings.catalogue);
   const items: GatewayAgentCost[] = agents.map(agent => {
     const rows = usage.filter(row => row.agent_id === agent.id);
     const reviews = safety.filter(row => row.agent_id === agent.id);
+    const estimate = estimates.filter(row => row.agent_id === agent.id);
+    const estimatedFor = (model: string): number => estimate.filter(row => row.model === model).reduce((total, row) => total + row.cost_usd, 0);
+    const estimatedUsd = estimate.reduce((total, row) => total + row.cost_usd, 0);
+    const estimatedCalls = estimate.reduce((total, row) => total + row.calls, 0);
     const safetySum = (key: 'calls' | 'tokens_in' | 'tokens_out' | 'cost_usd' | 'unpriced' | 'missing'): number => reviews.reduce((sum, row) => sum + amount(row[key], key), 0);
     const sum = (key: 'tokens_in' | 'tokens_out' | 'cost_usd'): number => rows.reduce((total, row) => total + row[key], 0);
     return {
       ...agent,
       model_calls: rows.filter(row => row.action_type === 'llm_call').reduce((total, row) => total + row.calls, 0),
       tool_calls: rows.filter(row => row.action_type === 'tool_call').reduce((total, row) => total + row.calls, 0),
-      tokens_in: sum('tokens_in') + safetySum('tokens_in'), tokens_out: sum('tokens_out') + safetySum('tokens_out'), cost_usd: sum('cost_usd') + safetySum('cost_usd'),
-      safety_calls: safetySum('calls'), safety_tokens_in: safetySum('tokens_in'), safety_tokens_out: safetySum('tokens_out'), safety_cost_usd: safetySum('cost_usd'),
-      unpriced_safety_calls: safetySum('unpriced'), missing_safety_usage_calls: safetySum('missing'),
+      tokens_in: sum('tokens_in') + safetySum('tokens_in'), tokens_out: sum('tokens_out') + safetySum('tokens_out'), cost_usd: sum('cost_usd') + safetySum('cost_usd') + estimatedUsd,
+      safety_calls: safetySum('calls'), safety_tokens_in: safetySum('tokens_in'), safety_tokens_out: safetySum('tokens_out'), safety_cost_usd: safetySum('cost_usd') + estimatedUsd,
+      estimated_safety_calls: estimatedCalls, estimated_safety_cost_usd: estimatedUsd,
+      unpriced_safety_calls: safetySum('unpriced') - estimatedCalls, missing_safety_usage_calls: safetySum('missing'),
       legacy_safety_records: amount(legacy.find(row => row.agent_id === agent.id)?.count ?? 0, 'legacy count'),
       models: [
         ...rows.filter(row => row.action_type === 'llm_call').map(row => ({ source: 'agent_model' as const, model: row.target ?? 'Unrecorded model', calls: row.calls, tokens_in: row.tokens_in, tokens_out: row.tokens_out, cost_usd: row.cost_usd })),
-        ...reviews.map(row => ({ source: 'safety_review' as const, model: text(row.model, 'safety model'), calls: amount(row.calls, 'calls'), tokens_in: amount(row.tokens_in, 'tokens_in'), tokens_out: amount(row.tokens_out, 'tokens_out'), cost_usd: amount(row.cost_usd, 'cost_usd') })),
+        ...reviews.map(row => ({ source: 'safety_review' as const, model: text(row.model, 'safety model'), calls: amount(row.calls, 'calls'), tokens_in: amount(row.tokens_in, 'tokens_in'), tokens_out: amount(row.tokens_out, 'tokens_out'), cost_usd: amount(row.cost_usd, 'cost_usd') + estimatedFor(text(row.model, 'safety model')), estimated_cost_usd: estimatedFor(text(row.model, 'safety model')) })),
       ],
     };
   });

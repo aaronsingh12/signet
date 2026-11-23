@@ -33,7 +33,8 @@ export interface AgentAnalytics {
   failed: number;
   tokens: number;
   cost_usd: number;
-  cost_coverage: { unpriced_calls: number; missing_usage_calls: number; legacy_records: number };
+  // estimated_*: safety calls recorded with no rate, priced at the model's current rate (included in cost_usd).
+  cost_coverage: { unpriced_calls: number; missing_usage_calls: number; legacy_records: number; estimated_calls: number; estimated_usd: number };
   avg_latency_ms: number | null;
   daily_budget_usd: number | null;
   last_activity: string | null;
@@ -84,9 +85,10 @@ export function parseAgentAnalytics(value: AgentAnalyticsResponse): AgentAnalyti
       if (!Number.isFinite(agent[key]) || agent[key] < 0) throw new TypeError(`Agent ${agent.id} analytics ${key} must be nonnegative`);
     }
     if (!agent.cost_coverage) throw new TypeError(`Agent ${agent.id} cost coverage is required`);
-    for (const key of ['unpriced_calls', 'missing_usage_calls', 'legacy_records'] as const) {
+    for (const key of ['unpriced_calls', 'missing_usage_calls', 'legacy_records', 'estimated_calls'] as const) {
       if (!Number.isSafeInteger(agent.cost_coverage[key]) || agent.cost_coverage[key] < 0) throw new TypeError(`Agent ${agent.id} cost coverage ${key} must be a nonnegative integer`);
     }
+    if (!Number.isFinite(agent.cost_coverage.estimated_usd) || agent.cost_coverage.estimated_usd < 0) throw new TypeError(`Agent ${agent.id} cost coverage estimated_usd must be nonnegative`);
     for (const key of ['avg_latency_ms', 'daily_budget_usd'] as const) {
       if (agent[key] !== null && (!Number.isFinite(agent[key]) || agent[key]! < 0)) throw new TypeError(`Agent ${agent.id} analytics ${key} must be nonnegative or null`);
     }
