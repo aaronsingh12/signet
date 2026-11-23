@@ -45,7 +45,9 @@ export async function scanHistory(agentRef: string, beforeSeq: number | null, li
     const result: ScanEntry['result'] = native ? 'blocked' : guardian
       // A flagged verdict is Signet's block (ServiceNow carries it out), including the fail-closed "unavailable" one.
       ? row.review_decision === 'flagged' ? 'blocked' : row.review_decision === null ? 'failed' : 'completed'
-      : row.outcome === 'pending' || row.policy_decision === 'require_approval' ? 'review' : row.outcome === 'blocked' ? 'blocked' : row.outcome === 'success' ? 'completed' : 'failed';
+      // What happened decides: a hold that ended in a refusal (approval timeout or rejection) is a block; only a
+      // request still waiting for a person is in review.
+      : row.outcome === 'pending' ? 'review' : row.outcome === 'blocked' ? 'blocked' : row.outcome === 'success' ? 'completed' : row.policy_decision === 'require_approval' ? 'review' : 'failed';
     const steps = recordedSteps(row.steps);
     const categoryCheck = (category: string | null): ScanCheck => category === null ? 'not_recorded' : category === 'allow' ? 'passed' : result === 'blocked' ? 'blocked' : 'flagged';
     const input = native || guardian ? 'not_recorded' : row.action_type === 'tool_call' ? toolCheck(steps, 8) : categoryCheck(row.input_category);

@@ -25,9 +25,11 @@ test('dashboard aggregates real ledger records per agent without counting detect
   const decisions = [
     { policy_decision: 'allow_with_obligations', outcome: 'success' },
     { policy_decision: 'deny', outcome: 'blocked' },
-    { policy_decision: 'require_approval', outcome: 'blocked' },
+    { policy_decision: 'require_approval', outcome: 'pending' },
     { policy_decision: 'allow', outcome: 'upstream_error' },
   ];
+  // A call held for approval that nobody approved in time was refused: it is a block, not a pending review.
+  (await append({ kind: 'transaction', agent_id: agents[3]!.id, data: { action_type: 'tool_call', policy_decision: 'require_approval', outcome: 'blocked', error_code: 'approval_timeout' } }));
   for (const decision of decisions) (await append({ kind: 'transaction', agent_id: agents[0]!.id, data: { action_type: 'llm_call', tokens_in: 10, tokens_out: 5, cost_usd: 0.01, latency_ms_gateway: 10, latency_ms_upstream: 90, ...decision } }));
   (await append({ kind: 'transaction', agent_id: agents[0]!.id, data: { action_type: 'detector_score', policy_decision: 'taint' } }));
   (await append({ kind: 'transaction', agent_id: agents[1]!.id, data: { action_type: 'tool_call', policy_decision: 'allow', outcome: 'success' } }));
@@ -50,6 +52,8 @@ test('dashboard aggregates real ledger records per agent without counting detect
   assert.equal(appointment.blocked, 1);
   assert.equal(appointment.review, 1);
   assert.equal(appointment.failed, 1);
+  const care = snapshot.agents.find((agent) => agent.id === agents[3]!.id)!;
+  assert.deepEqual([care.requests, care.blocked, care.review], [1, 1, 0]);
   assert.equal(appointment.tokens, 60);
   assert.equal(appointment.cost_usd, 0.04);
   assert.equal(appointment.avg_latency_ms, 100);

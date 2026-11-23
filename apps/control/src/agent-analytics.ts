@@ -43,9 +43,11 @@ export async function agentAnalytics(): Promise<AgentAnalyticsResponse> {
     WHERE a.tenant_id = ? AND a.status != 'retired' ORDER BY a.created_at, a.id`).all(tenant.id)) as unknown as AgentRow[];
   const rows = (await db.prepare(`WITH requests AS (
       SELECT agent_id, ts, data,
-        CASE WHEN jsonb_extract_path_text(data::jsonb, 'policy_decision') = 'require_approval' THEN 'review'
+        CASE WHEN jsonb_extract_path_text(data::jsonb, 'outcome') = 'pending' THEN 'review'
           WHEN jsonb_extract_path_text(data::jsonb, 'outcome') IN ('upstream_error', 'timeout') THEN 'failed'
-          WHEN jsonb_extract_path_text(data::jsonb, 'outcome') = 'success' THEN 'allowed' ELSE 'blocked' END AS result
+          WHEN jsonb_extract_path_text(data::jsonb, 'outcome') = 'success' THEN 'allowed'
+          WHEN jsonb_extract_path_text(data::jsonb, 'outcome') = 'blocked' THEN 'blocked'
+          WHEN jsonb_extract_path_text(data::jsonb, 'policy_decision') = 'require_approval' THEN 'review' ELSE 'blocked' END AS result
       FROM ledger_record WHERE tenant_id = ? AND kind = 'transaction' AND ts >= ? AND ts <= ?
         AND jsonb_extract_path_text(data::jsonb, 'action_type') IN ('llm_call', 'tool_call')
     ) SELECT agent_id, substr(ts, 1, 13) AS hour, COUNT(*) AS requests,
