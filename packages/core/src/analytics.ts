@@ -7,6 +7,15 @@ export interface ActivityBucket {
   failed: number;
 }
 
+export interface ProcessingAnalytics {
+  requests: number;
+  allowed: number;
+  blocked: number;
+  review: number;
+  failed: number;
+  activity: ActivityBucket[];
+}
+
 export interface AgentAnalytics {
   id: string;
   name: string;
@@ -24,10 +33,12 @@ export interface AgentAnalytics {
   failed: number;
   tokens: number;
   cost_usd: number;
+  cost_coverage: { unpriced_calls: number; missing_usage_calls: number; legacy_records: number };
   avg_latency_ms: number | null;
   daily_budget_usd: number | null;
   last_activity: string | null;
   activity: ActivityBucket[];
+  processing: ProcessingAnalytics;
   provider: ProviderAnalytics;
   guardian: { reviews: number; flagged: number; unavailable: number; failed: number; last_review_at: string | null; native_blocked: number; native_signet: number };
   // flagged: Guardian reviews Signet blocked. native_blocked: blocks ServiceNow confirmed in its own logs, of which
@@ -72,6 +83,10 @@ export function parseAgentAnalytics(value: AgentAnalyticsResponse): AgentAnalyti
     for (const key of ['requests', 'allowed', 'blocked', 'review', 'failed', 'tokens', 'cost_usd'] as const) {
       if (!Number.isFinite(agent[key]) || agent[key] < 0) throw new TypeError(`Agent ${agent.id} analytics ${key} must be nonnegative`);
     }
+    if (!agent.cost_coverage) throw new TypeError(`Agent ${agent.id} cost coverage is required`);
+    for (const key of ['unpriced_calls', 'missing_usage_calls', 'legacy_records'] as const) {
+      if (!Number.isSafeInteger(agent.cost_coverage[key]) || agent.cost_coverage[key] < 0) throw new TypeError(`Agent ${agent.id} cost coverage ${key} must be a nonnegative integer`);
+    }
     for (const key of ['avg_latency_ms', 'daily_budget_usd'] as const) {
       if (agent[key] !== null && (!Number.isFinite(agent[key]) || agent[key]! < 0)) throw new TypeError(`Agent ${agent.id} analytics ${key} must be nonnegative or null`);
     }
@@ -79,6 +94,11 @@ export function parseAgentAnalytics(value: AgentAnalyticsResponse): AgentAnalyti
       if (agent[key] !== null && !Number.isFinite(Date.parse(agent[key]!))) throw new TypeError(`Agent ${agent.id} analytics ${key} must be a date or null`);
     }
     if (!Array.isArray(agent.activity)) throw new TypeError(`Agent ${agent.id} activity must be an array`);
+    if (!agent.processing || !Array.isArray(agent.processing.activity)) throw new TypeError(`Agent ${agent.id} processing totals and activity are required`);
+    for (const key of ['requests', 'allowed', 'blocked', 'review', 'failed'] as const) {
+      if (!Number.isSafeInteger(agent.processing[key]) || agent.processing[key] < 0) throw new TypeError(`Agent ${agent.id} processing ${key} must be a nonnegative integer`);
+    }
+    if (agent.processing.requests !== agent.processing.allowed + agent.processing.blocked + agent.processing.review + agent.processing.failed) throw new TypeError(`Agent ${agent.id} processing outcomes must sum to total events`);
     const provider = agent.provider;
     if (!provider || !Array.isArray(provider.connection_ids) || provider.connection_ids.some((id) => typeof id !== 'string') || !Array.isArray(provider.activity) || !Array.isArray(provider.recent)) throw new TypeError('Provider analytics must include connections, activity and recent executions');
     for (const key of ['executions', 'succeeded', 'failed', 'other'] as const) if (!Number.isSafeInteger(provider[key]) || provider[key] < 0) throw new TypeError(`Provider ${key} must be a nonnegative integer`);
@@ -86,7 +106,7 @@ export function parseAgentAnalytics(value: AgentAnalyticsResponse): AgentAnalyti
     if (provider.last_sync_at !== null && !Number.isFinite(Date.parse(provider.last_sync_at))) throw new TypeError('Provider last sync must be a date or null');
     for (const bucket of provider.activity) if (!Number.isFinite(Date.parse(bucket.hour)) || !Number.isSafeInteger(bucket.executions) || bucket.executions < 0) throw new TypeError('Invalid provider activity bucket');
     for (const record of provider.recent) if (typeof record.id !== 'string' || (record.status !== null && typeof record.status !== 'string') || !Number.isFinite(Date.parse(record.timestamp)) || (record.duration_ms !== null && (!Number.isFinite(record.duration_ms) || record.duration_ms < 0))) throw new TypeError('Invalid provider execution');
-    for (const bucket of agent.activity) {
+    for (const bucket of [...agent.activity, ...agent.processing.activity]) {
       if (!Number.isFinite(Date.parse(bucket.hour))) throw new TypeError(`Agent ${agent.id} activity hour must be a date`);
       for (const key of ['requests', 'allowed', 'blocked', 'review', 'failed'] as const) {
         if (!Number.isFinite(bucket[key]) || bucket[key] < 0) throw new TypeError(`Agent ${agent.id} hourly ${key} must be nonnegative`);

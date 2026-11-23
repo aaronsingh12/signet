@@ -31,7 +31,6 @@ const COVERAGE: Record<Coverage, { label: string; cls: string }> = {
   not_built: { label: 'Not built yet', cls: 'bg-bad-50 text-bad' },
   guidance: { label: 'Guidance', cls: 'bg-slate-100 text-ink-2' },
 };
-const LABEL: Record<string, string> = { defined: 'Defined', proposed: 'Proposed', decision: 'Decision' };
 
 const EFFECT: Record<string, { label: string; cls: string }> = {
   block: { label: 'Blocks', cls: 'bg-bad-50 text-bad' },
@@ -63,7 +62,6 @@ const Chip = ({ cls, children, title }: { cls: string; children: ReactNode; titl
 
 export function Guardrails() {
   const { data, error } = useApi<GuardrailsView>('/guardrails');
-  const [view, setView] = useState<'guardrails' | 'rulebook'>('guardrails');
   const [query, setQuery] = useState('');
   const [group, setGroup] = useState<string>('');
   const [step, setStep] = useState<number | null>(null);
@@ -86,18 +84,10 @@ export function Guardrails() {
       <PageHeader
         title="Guardrails"
         subtitle="Every check Signet applies to your agents, where it runs and what it does when triggered. Values shown are the ones in force now."
-        actions={
-          <div className="inline-flex rounded-lg border border-line p-0.5" role="group" aria-label="View">
-            {([['guardrails', 'Guardrails in force'], ['rulebook', 'Rulebook coverage']] as const).map(([id, label]) => (
-              <button key={id} aria-pressed={view === id} onClick={() => setView(id)} className={`rounded-md px-3 py-1 text-sm ${view === id ? 'bg-royal text-white' : 'text-ink-2 hover:text-ink'}`}>{label}</button>
-            ))}
-          </div>
-        }
       />
       <ErrorNote error={error} />
       {!data && !error && <Card><p className="text-sm text-ink-3">Loading guardrails…</p></Card>}
-      {data && view === 'rulebook' && <RulebookCoverage book={data.rulebook} items={data.items} onOpen={(name) => { setView('guardrails'); setGroup(''); setStatus(''); setStep(null); setQuery(name); }} />}
-      {data && view === 'guardrails' && (
+      {data && (
         <>
           <div className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <Stat label="Guardrails" value={data.counts.total} hint="in one catalogue" />
@@ -230,82 +220,5 @@ function Details({ g, rules }: { g: Item; rules: Rule[] }) {
         <ul className="space-y-0.5">{g.code.map((c) => <li key={c}><Mono>{c}</Mono></li>)}</ul>
       </div>
     </div>
-  );
-}
-
-// The full Rulebook, each rule with what the code does about it today.
-function RulebookCoverage({ book, items, onOpen }: { book: GuardrailsView['rulebook']; items: Item[]; onOpen: (name: string) => void }) {
-  const [coverage, setCoverage] = useState('');
-  const [area, setArea] = useState('');
-  const [query, setQuery] = useState('');
-  const [decisions, setDecisions] = useState(false);
-  const names = useMemo(() => new Map(items.map((g) => [g.key, g.name])), [items]);
-  const q = query.trim().toLowerCase();
-  const shown = book.rules.filter((r) =>
-    (!coverage || r.coverage === coverage) && (!area || r.area === area) &&
-    (!q || [r.id, r.text, r.note ?? ''].some((s) => s.toLowerCase().includes(q))));
-  const c = book.counts;
-  return (
-    <>
-      <div className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <Stat label="Enforced" value={c.enforced} tone="ok" hint={`of ${c.total} Rulebook rules`} />
-        <Stat label="Partly built" value={c.partial} tone={c.partial ? 'warn' : undefined} hint="see the note on each" />
-        <Stat label="Not built yet" value={c.not_built} tone={c.not_built ? 'bad' : undefined} hint="planned in the Rulebook" />
-        <Stat label="Guidance" value={c.guidance} hint="process, not enforcement" />
-      </div>
-      <Card className="mb-4">
-        <h2 className="font-semibold">{book.title} {book.version} <span className="font-normal text-ink-3">· {book.date}</span></h2>
-        <p className="mt-1 text-sm text-ink-2">{book.basis}</p>
-        <p className="mt-1 text-xs text-ink-3">Labels from the Rulebook: Defined (stated in the Blueprint or DA), Proposed (a default where they are silent), Decision (settled in the decisions log). Coverage shows what Signet's code does today.</p>
-      </Card>
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <input className="input max-w-xs" placeholder="Search ID or text" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Search the Rulebook" />
-        <select className="input max-w-[16rem]" value={area} onChange={(e) => setArea(e.target.value)} aria-label="Filter by area">
-          <option value="">All areas</option>
-          {book.areas.map((a) => <option key={a.id} value={a.id}>{a.title}</option>)}
-        </select>
-        <select className="input max-w-[12rem]" value={coverage} onChange={(e) => setCoverage(e.target.value)} aria-label="Filter by coverage">
-          <option value="">Any coverage</option>
-          {Object.entries(COVERAGE).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-        </select>
-        <span className="text-xs text-ink-3">{shown.length} of {book.rules.length}</span>
-      </div>
-      {!shown.length && <Empty>No Rulebook rule matches these filters.</Empty>}
-      <div className="grid gap-4">
-        {book.areas.map((a) => {
-          const rows = shown.filter((r) => r.area === a.id);
-          if (!rows.length) return null;
-          return (
-            <Card key={a.id} pad={false} title={<span>{a.title} <span className="font-normal text-ink-3">· {rows.length}</span></span>}>
-              <ul className="divide-y divide-line">
-                {rows.map((r) => (
-                  <li key={r.id} className="px-4 py-3" data-testid={`rule-${r.id}`}>
-                    <div className="flex flex-wrap items-start justify-between gap-2">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2"><Mono>{r.id}</Mono><span className="text-[11px] text-ink-3">{LABEL[r.status]}</span></div>
-                        <p className="mt-1 text-sm">{r.text}</p>
-                        {r.note && <p className="mt-1 text-xs text-ink-2"><span className="font-medium">In Signet today: </span>{r.note}</p>}
-                        {r.guardrails.length > 0 && (
-                          <div className="mt-1 flex flex-wrap gap-x-2 text-xs">
-                            <span className="text-ink-3">Guardrails:</span>
-                            {r.guardrails.map((k) => <button key={k} className="text-royal hover:underline" onClick={() => onOpen(names.get(k) ?? k)}>{names.get(k) ?? k}</button>)}
-                          </div>
-                        )}
-                      </div>
-                      <Chip cls={COVERAGE[r.coverage].cls}>{COVERAGE[r.coverage].label}</Chip>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </Card>
-          );
-        })}
-      </div>
-      <Card className="mt-4" title="Decisions log" action={<button className="text-xs text-royal hover:underline" onClick={() => setDecisions(!decisions)}>{decisions ? 'Hide' : `Show ${book.decisions.length}`}</button>}>
-        {decisions ? (
-          <ul className="space-y-1.5 text-sm">{book.decisions.map((d) => <li key={d.id}><Mono>{d.id}</Mono> <span className="font-medium">{d.question}:</span> <span className="text-ink-2">{d.decided}</span></li>)}</ul>
-        ) : <p className="text-sm text-ink-3">Choices the Rulebook settled where the Blueprint and the Decision Architecture were silent or disagreed.</p>}
-      </Card>
-    </>
   );
 }

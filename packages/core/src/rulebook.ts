@@ -15,6 +15,30 @@ import { GUARDRAIL_PARAMS } from './guardrail-params';
 export type RuleStatus = 'defined' | 'proposed' | 'decision';
 export type Coverage = 'enforced' | 'partial' | 'not_built' | 'guidance';
 
+export interface CustomRule {
+  id: string;
+  area: string;
+  text: string;
+  note: string;
+}
+
+export interface RuleEdit {
+  area: string;
+  text: string;
+  note: string;
+}
+
+export interface CustomRulebookInput {
+  name: string;
+  rules: CustomRule[];
+}
+
+export interface CustomRulebook extends CustomRulebookInput {
+  id: string;
+  created_at: string;
+  created_by: string;
+}
+
 export interface RulebookRule {
   id: string;
   area: string;

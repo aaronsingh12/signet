@@ -16,7 +16,7 @@ test('dashboard aggregates real ledger records per agent without counting detect
   const { registerAgent, issueSeal } = await import('../src/registry');
   const { permissionsFor } = await import('../src/rbac');
   const { append } = await import('../src/ledger');
-  const { agentAnalytics } = await import('../src/agent-analytics');
+  const { agentAnalytics, allTimeAgentAnalytics, todayAgentAnalytics } = await import('../src/agent-analytics');
   const { parseAgentAnalytics } = await import('@signet/core');
   const owner: Principal = { id: 'owner@example.test', name: 'Owner', kind: 'human', roles: ['agent_owner'], permissions: permissionsFor(['agent_owner']), groups: [], mfa: true, auth: 'bearer', auth_time: null };
   const security: Principal = { ...owner, id: 'security@example.test', roles: ['security_officer'], permissions: permissionsFor(['security_officer']) };
@@ -35,7 +35,7 @@ test('dashboard aggregates real ledger records per agent without counting detect
   (await append({ kind: 'transaction', agent_id: agents[1]!.id, data: { action_type: 'tool_call', policy_decision: 'allow', outcome: 'success' } }));
   for (const review of [
     { guardrail_review: { decision: 'clear', status: 'complete' } },
-    { guardrail_review: { decision: 'flagged', status: 'complete' }, outcome: 'blocked', error_code: 'blocked_by_signet' },
+    { guardrail_review: { decision: 'flagged', status: 'complete' }, outcome: 'blocked', error_code: 'blocked_by_signet', request_id: 'req_01M83BLOCKTEST000000000001' },
     { guardrail_review: { decision: 'flagged', status: 'unavailable' }, outcome: 'blocked', error_code: 'blocked_by_signet' },
     { error_code: 'invalid_guardian_content' },
   ]) await append({ kind: 'transaction', agent_id: agents[0]!.id, data: { action_type: 'guardrail_check', ...review } });
@@ -43,6 +43,12 @@ test('dashboard aggregates real ledger records per agent without counting detect
   assert.equal(snapshot.agents.length, 4);
   const appointment = snapshot.agents.find((agent) => agent.id === agents[0]!.id)!;
   assert.equal(appointment.requests, 4);
+  assert.equal(appointment.processing.requests, 8);
+  assert.equal(appointment.processing.allowed, 2);
+  assert.equal(appointment.processing.blocked, 3);
+  assert.equal(appointment.processing.review, 1);
+  assert.equal(appointment.processing.failed, 2);
+  assert.equal(appointment.processing.activity.reduce((sum, bucket) => sum + bucket.blocked, 0), 3);
   assert.equal(appointment.guardian.reviews, 3);
   assert.equal(appointment.guardian.flagged, 2);
   assert.equal(appointment.guardian.unavailable, 1);
@@ -98,4 +104,69 @@ test('dashboard aggregates real ledger records per agent without counting detect
   assert.equal(external.provider.recent.length, 3);
   assert.equal(synced.agents.find((agent) => agent.id === agents[0]!.id)!.requests, 4);
   assert.equal(synced.agents.find((agent) => agent.id === agents[1]!.id)!.provider.executions, 0);
+  const { hashRecord, newId } = await import('@signet/core');
+  const { tenant } = await import('../src/tenant');
+  const { tx } = await import('../src/db');
+  const historicAt = new Date(Date.now() - 3 * 86400000).toISOString();
+  for (const data of [
+    { action_type: 'llm_call', policy_decision: 'allow', outcome: 'success', tokens_in: 7, tokens_out: 0, cost_usd: 0.02 },
+    { action_type: 'guardrail_check', guardrail_review: { decision: 'flagged', status: 'complete' }, safety_usage: { tokens_in: 3, tokens_out: 0, cost_usd: 0.03 } },
+  ]) {
+    await tx(async () => {
+      await db.lock();
+      const head = await db.prepare('SELECT seq, record_hash FROM ledger_record ORDER BY seq DESC LIMIT 1').get() as { seq: number; record_hash: string };
+      const record = { record_id: newId('rec'), seq: head.seq + 1, tenant_id: tenant.id, kind: 'transaction' as const, ts: historicAt, agent_id: agents[0]!.id, cert_id: null, data, prev_hash: head.record_hash };
+      await db.prepare('INSERT INTO ledger_record (seq, record_id, tenant_id, kind, ts, agent_id, cert_id, data, prev_hash, record_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(record.seq, record.record_id, record.tenant_id, record.kind, record.ts, record.agent_id, record.cert_id, JSON.stringify(data), record.prev_hash, hashRecord(record));
+    });
+  }
+  const history = parseAgentAnalytics(await allTimeAgentAnalytics());
+  const historicAgent = history.agents.find(agent => agent.id === agents[0]!.id)!;
+  assert.equal(historicAgent.requests, 5);
+  assert.equal(historicAgent.processing.requests, 10);
+  assert.equal(historicAgent.processing.blocked, 4);
+  assert.equal(historicAgent.allowed, 2);
+  assert.equal(historicAgent.guardian.flagged, 3);
+  assert.equal(historicAgent.tokens, 70);
+  assert(Math.abs(historicAgent.cost_usd - 0.09) < 1e-10);
+  assert.equal(historicAgent.activity.reduce((sum, bucket) => sum + bucket.requests, 0), 5);
+  assert(Date.parse(history.from) <= Date.parse(historicAt));
+  assert.equal(history.agents.find(agent => agent.id === agents[2]!.id)!.provider.executions, 4);
+  assert.equal(history.agents.find(agent => agent.id === agents[2]!.id)!.provider.activity.reduce((sum, bucket) => sum + bucket.executions, 0), 4);
+  const recent = await agentAnalytics();
+  assert.equal(recent.agents.find(agent => agent.id === agents[0]!.id)!.requests, 4);
+  assert.equal(recent.agents.find(agent => agent.id === agents[2]!.id)!.provider.executions, 3);
+  const { nativeGuardianBlocks, nativeGuardianBlocksBetween } = await import('../src/servicenow-guardian-events');
+  await db.prepare('INSERT INTO external_observation (connection_id, external_agent_id, external_id, kind, metadata, observed_at) VALUES (?, ?, ?, ?, ?, ?)').run(connection.id, 'external-lab', 'a'.repeat(32), 'guardian_block', JSON.stringify({ event_id: 'a'.repeat(32), execution_id: 'b'.repeat(32), at: historicAt, categories: ['blocked'], instance_url: 'https://provider.example', signet_request_id: null }), eventTime);
+  assert.equal((await nativeGuardianBlocks(agents[2]!.id)).length, 0);
+  assert.equal((await nativeGuardianBlocksBetween(agents[2]!.id, history.from, history.to)).length, 1);
+  await db.prepare('INSERT INTO external_agent_mapping (connection_id, external_id, agent_id, last_seen_at) VALUES (?, ?, ?, ?)').run(connection.id, 'external-appointment', agents[0]!.id, eventTime);
+  const confirmed = { event_id: 'd'.repeat(32), execution_id: 'c'.repeat(32), at: eventTime, categories: ['blocked'], instance_url: 'https://provider.example', signet_request_id: 'req_01M83BLOCKTEST000000000001' };
+  await db.prepare('INSERT INTO external_observation (connection_id, external_agent_id, external_id, kind, metadata, observed_at) VALUES (?, ?, ?, ?, ?, ?)').run(connection.id, 'external-appointment', confirmed.event_id, 'guardian_block', JSON.stringify(confirmed), eventTime);
+  const combined = parseAgentAnalytics(await allTimeAgentAnalytics());
+  assert.equal(combined.agents.find(agent => agent.id === agents[0]!.id)!.processing.blocked, 4, 'ServiceNow confirmation must not count the same Signet block twice');
+  const nativeOnly = combined.agents.find(agent => agent.id === agents[2]!.id)!;
+  assert.equal(nativeOnly.requests, 0, 'Native blocks must not become gateway calls');
+  assert.equal(nativeOnly.processing.requests, 1);
+  assert.equal(nativeOnly.processing.blocked, 1);
+  assert.equal(nativeOnly.processing.activity.reduce((sum, bucket) => sum + bucket.blocked, 0), 1);
+  for (const agent of combined.agents) {
+    assert.equal(agent.processing.requests, agent.processing.allowed + agent.processing.blocked + agent.processing.review + agent.processing.failed);
+    assert.equal(agent.processing.activity.reduce((sum, bucket) => sum + bucket.requests, 0), agent.processing.requests);
+  }
+  const midnight = new Date();
+  midnight.setHours(0, 0, 0, 0);
+  const today = parseAgentAnalytics(await todayAgentAnalytics(midnight.toISOString()));
+  assert.equal(today.from, midnight.toISOString());
+  assert.equal(today.agents.find(agent => agent.id === agents[0]!.id)!.processing.requests, 8);
+  assert.equal(today.agents.find(agent => agent.id === agents[0]!.id)!.processing.blocked, 3);
+  assert.equal(today.agents.find(agent => agent.id === agents[2]!.id)!.provider.executions, 3);
+  assert.equal(today.agents.find(agent => agent.id === agents[2]!.id)!.processing.blocked, 0);
+  await assert.rejects(todayAgentAnalytics('invalid-date'), /local midnight/);
+  await assert.rejects(todayAgentAnalytics(historicAt), /local midnight/);
+  await append({ kind: 'transaction', agent_id: agents[3]!.id, data: { action_type: 'guardrail_check', guardrail_review: { decision: 'clear', status: 'complete' }, safety_usage: { model: 'unpriced-model', calls: 1, tokens_in: 5, tokens_out: 1, cost_usd: 0, unpriced_calls: 1, missing_usage_calls: 1 } } });
+  await append({ kind: 'transaction', agent_id: agents[3]!.id, data: { action_type: 'guardrail_check', guardrail_classifier: { chunk_count: 1 }, guardrail_review: { decision: 'clear', status: 'complete' } } });
+  const unpriced = (await agentAnalytics()).agents.find(agent => agent.id === agents[3]!.id)!;
+  assert.equal(unpriced.cost_usd, 0);
+  assert.equal(unpriced.tokens, 6);
+  assert.deepEqual(unpriced.cost_coverage, { unpriced_calls: 1, missing_usage_calls: 1, legacy_records: 1 });
 });

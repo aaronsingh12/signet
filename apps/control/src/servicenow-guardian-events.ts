@@ -111,12 +111,18 @@ export async function syncNativeGuardianBlocks(source: GuardianSource, execution
 
 /** Counts native events once across sources without claiming a Signet request-ID correlation. */
 export async function nativeGuardianBlocks(agentId: string): Promise<GuardianBlock[]> {
+  const now = new Date();
+  return nativeGuardianBlocksBetween(agentId, new Date(now.getTime() - 86400000).toISOString(), now.toISOString());
+}
+
+export async function nativeGuardianBlocksBetween(agentId: string, from: string, to: string): Promise<GuardianBlock[]> {
   const data = await db.prepare(`SELECT o.metadata FROM external_observation o JOIN external_connection c ON c.id = o.connection_id
     JOIN external_agent_mapping m ON m.connection_id = o.connection_id AND m.external_id = o.external_agent_id
     WHERE c.tenant_id = ? AND m.agent_id = ? AND o.kind = 'guardian_block'`).all(tenant.id, agentId) as { metadata: string }[];
   const unique = new Map<string, GuardianBlock>();
-  const now = Date.now();
-  const since = now - 86400000;
+  const now = Date.parse(to);
+  const since = Date.parse(from);
+  if (!Number.isFinite(now) || !Number.isFinite(since) || since > now) throw invalid('Native Guardian history requires valid from/to timestamps in chronological order');
   for (const row of data) {
     const block = object(JSON.parse(row.metadata), 'native Guardian evidence');
     const at = text(block, 'at');

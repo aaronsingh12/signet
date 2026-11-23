@@ -1,19 +1,19 @@
-import { ArrowRight, Check, Plus } from 'lucide-react';
+import { Check, Plus } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { ActivityChart, AgentCard, AgentMetrics, OutcomeChart, UsageComparison } from '../components/AgentCharts';
+import { HomeDashboard } from '../components/HomeDashboard';
 import { CostQuality } from '../components/CostQuality';
 import { ProviderActivity } from '../components/ProviderActivity';
 import { ErrorNote, TierChip } from '../components/ui';
 import { useApi } from '../lib/api';
-import { agentState, useAgentAnalytics } from '../lib/analytics';
+import { agentState, useAllTimeAgentAnalytics } from '../lib/analytics';
 import { useCan, useMe } from '../lib/auth';
 
-// Home: what needs a person first, then how each agent is doing. A new workspace gets its first steps.
+// Home: what needs a person first, then workspace metrics. A new workspace gets its first steps.
 
 export function CommandCenter() {
   const me = useMe();
   const can = useCan();
-  const { data, error, loading, reload } = useAgentAnalytics();
+  const { data, error, loading, reload } = useAllTimeAgentAnalytics();
   const { data: waiting } = useApi<{ items: any[] }>('/approvals?mine=1');
   const agents = data?.agents ?? [];
   const firstName = me.principal.name.split(' ')[0];
@@ -33,13 +33,9 @@ export function CommandCenter() {
           {attention.slice(0, 3).map((a) => <li key={a.id} className="flex flex-wrap items-center justify-between gap-3 py-3"><div><b className="text-sm">{a.name}: {agentState(a).label}</b><div className="text-xs text-ink-3">{agentState(a).description}</div></div><Link className="btn-ghost" to={`/agents/${a.id}`}>See why</Link></li>)}
         </ul>
       </section>}
-      <AgentMetrics agents={agents} />
-      <div className="section-heading"><div><h2>Your agents</h2></div><Link to="/agents">Manage agents <ArrowRight size={14} /></Link></div>
-      <div className="agent-grid">{agents.map((agent) => <AgentCard key={agent.id} agent={agent} />)}</div>
-      <details className="mt-7"><summary className="cursor-pointer text-sm font-medium text-ink-2">Charts, usage and cost</summary>
-        <ProviderActivity agents={agents} onRefresh={reload} />
-        <div className="chart-layout"><section className="chart-card"><div className="chart-heading"><div><h2>Gateway activity</h2><p>Requests per hour, last 24 hours, in your local time</p></div></div><ActivityChart agents={agents} /></section><section className="chart-card"><div className="chart-heading"><div><h2>Gateway outcomes</h2><p>Routed model and tool calls; confirmed native blocks are counted separately.</p></div></div><OutcomeChart agents={agents} /></section></div>
-        <section className="chart-card mt-5"><div className="chart-heading"><div><h2>Requests by agent</h2></div></div><UsageComparison agents={agents} /></section>
+      <HomeDashboard agents={agents} from={data.from} updatedAt={data.to} loading={loading} onRefresh={reload} />
+      <details className="mt-7"><summary className="cursor-pointer text-sm font-medium text-ink-2">Provider execution details &amp; 30-day reports</summary>
+        <ProviderActivity agents={agents} onRefresh={reload} periodLabel="all time" />
         <CostQuality />
       </details>
     </>}
