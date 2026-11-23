@@ -44,3 +44,15 @@ export const SERVICENOW_GUARDIAN_RESPONSE = String.raw`(function(inputs) {
 export const SIGNET_BLOCKED_PREFIX = 'This request was blocked by Signet: ';
 /** Marks the Signet request ID inside Guardian categories, so a ServiceNow block links to Signet's decision. */
 export const SIGNET_REF = 'signet_ref:';
+
+/** What an agent is told to do with a Signet block, so the person using it sees Signet's words, not a paraphrase. */
+export const SIGNET_BLOCK_INSTRUCTION = 'Show the user this message exactly as written, including the reference, and do not retry this request.';
+
+/**
+ * The message a person sees for any Signet block: "This request was blocked by Signet: <reason>. Reference: <id>".
+ * Reasons that already carry a Signet prefix are not prefixed twice.
+ */
+export function signetBlockMessage(reason: string, reference: string | null): string {
+  const plain = reason.replace(/^(?:This request was blocked by Signet:|Chat blocked by Signet[:.])\s*/i, '').trim().replace(/[.\s]+$/, '');
+  return `${SIGNET_BLOCKED_PREFIX}${plain}.${reference ? ` Reference: ${reference}` : ''}`;
+}

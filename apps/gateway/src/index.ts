@@ -191,7 +191,13 @@ app.post('/v1/mcp/:alias', guard(async (req, res) => {
     });
     res.set(d.headers);
     if (d.status === 200) return res.json({ jsonrpc: '2.0', id: msg.id, result: d.body });
-    const e = (d.body as { error: { message: string } }).error;
+    const e = (d.body as { error: { message: string; user_message?: string; agent_instruction?: string } }).error;
+    // A Signet block is a tool result with isError (the MCP way to report a failed tool call), so the agent's model
+    // reads Signet's message and the instruction to show it as written; a protocol error reaches the person as
+    // "Protocol Error ... [object Object]". 401 stays a protocol error so the client renews its login.
+    if (e.user_message && d.status !== 401) {
+      return res.status(200).json({ jsonrpc: '2.0', id: msg.id, result: { content: [{ type: 'text', text: `${e.user_message}\n\n${e.agent_instruction ?? ''}`.trim() }], isError: true, _meta: { signet: e } } });
+    }
     return res.status(d.status === 401 ? 401 : 200).json(rpcError(msg.id, -32003, e.message, e));
   }
 

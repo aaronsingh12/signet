@@ -1,5 +1,5 @@
 import type { IncomingHttpHeaders } from 'node:http';
-import { GUARDRAIL_PARAMS, SIGNET_BLOCKED_PREFIX, canonicalize, combine, sha256, type Outcome, type ToolAlias } from '@signet/core';
+import { GUARDRAIL_PARAMS, canonicalize, combine, sha256, type Outcome, type ToolAlias } from '@signet/core';
 import { type Ctx, type Done, Halt, decisionInputs, finish, halt, humanApproval, ladder, maskArgs, newCtx, preflight, recordOutOfManifest, sessionKey, step, wouldBlock } from './ctx';
 import { detectInjection, notDeployed } from './detectors';
 import { evaluate } from './engine';
@@ -29,24 +29,10 @@ export async function handleTool(headers: IncomingHttpHeaders, req: ToolRequest)
   try {
     return await finish(ctx, null, await run(ctx, headers, req));
   } catch (e) {
-    if (e instanceof Halt) return blockedByName(await finish(ctx, e, null));
+    // Every Signet block carries "This request was blocked by Signet: <reason>. Reference: <id>" (ctx.errorDone).
+    if (e instanceof Halt) return finish(ctx, e, null);
     throw e;
   }
-}
-
-const BLOCKED_PREFIX = SIGNET_BLOCKED_PREFIX;
-
-/**
- * A tool call Signet refused (403) or limited (429) tells the agent so in words it can pass on, for example
- * "This request was blocked by Signet: mcp://x.y is not in this agent's seal". Identity failures (401), approval
- * holds (202) and tool outages (5xx) keep their own messages: those are not Signet blocking the request.
- */
-export function blockedByName(d: Done): Done {
-  if (d.status !== 403 && d.status !== 429) return d;
-  const body = d.body as { error?: { message?: unknown } } | null;
-  const message = body?.error?.message;
-  if (typeof message !== 'string' || message.startsWith(BLOCKED_PREFIX)) return d;
-  return { ...d, body: { ...body, error: { ...body!.error, message: `${BLOCKED_PREFIX}${message}` } } };
 }
 
 async function run(ctx: Ctx, headers: IncomingHttpHeaders, req: ToolRequest): Promise<unknown> {

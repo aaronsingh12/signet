@@ -4,7 +4,8 @@ import type { DetectorResult } from '@signet/core';
 import { SafetyUnavailable } from '../src/content-safety';
 import { newCtx } from '../src/ctx';
 import { attributeReview, blockedMessage, fastFindings, guardianDebugCapture, guardianVerdict, modelFindings, reviewScope, type GuardianChecks } from '../src/servicenow-guardian';
-import { blockedByName } from '../src/toolcall';
+import { SIGNET_BLOCK_INSTRUCTION, signetBlockMessage } from '@signet/core';
+import { errorDone, Halt } from '../src/ctx';
 import * as state from '../src/state';
 
 // ServiceNow Guardian: Signet decides, ServiceNow's Block action carries it out. Checks run fastest first,
@@ -183,12 +184,29 @@ test('credential requests are read from the request, not from ServiceNow engine 
   assert.ok(fastFindings(ctx(), leaked, policy, model, reviewScope(leaked).text).some((f) => f.category === 'secret_disclosure'), 'secrets are still scanned in the whole content');
 });
 
-test('tool calls Signet refuses carry the exact message; other errors keep theirs', () => {
-  const done = (status: number, message: string) => ({ status, recordId: null, headers: {}, body: { error: { type: 'signet_policy', code: 'x', message } } });
-  const msg = (d: { body: unknown }) => (d.body as { error: { message: string } }).error.message;
-  assert.equal(msg(blockedByName(done(403, "mcp://sn.delete_incident is not in this agent's seal"))), "This request was blocked by Signet: mcp://sn.delete_incident is not in this agent's seal");
-  assert.equal(msg(blockedByName(done(429, 'over 60 requests per minute'))), 'This request was blocked by Signet: over 60 requests per minute');
-  assert.equal(msg(blockedByName(done(401, 'workload token has expired; refresh it'))), 'workload token has expired; refresh it');
-  assert.equal(msg(blockedByName(done(502, 'tool error: 500'))), 'tool error: 500');
-  assert.equal(msg(blockedByName(done(403, 'This request was blocked by Signet: already'))), 'This request was blocked by Signet: already');
+test('every Signet block carries the exact message, its reference and the instruction; other failures keep theirs', () => {
+  type Err = { message: string; reason?: string; user_message?: string; agent_instruction?: string; code: string; record_id: string | null };
+  const err = (status: number, code: string, message: string, ledger: Halt['ledgerOutcome'], recordId: string | null = 'rec_01ABC') => (errorDone(ctx(), new Halt(status, code, message, 'deny', ledger), recordId).body as { error: Err }).error;
+  // Policy refusals, approval outcomes, data rules, limits and identity refusals are all Signet blocks.
+  const rejected = err(403, 'approval_rejected', 'rejected by admin', 'blocked');
+  assert.equal(rejected.message, 'This request was blocked by Signet: rejected by admin. Reference: rec_01ABC');
+  assert.equal(rejected.user_message, rejected.message);
+  assert.equal(rejected.reason, 'rejected by admin');
+  assert.equal(rejected.agent_instruction, SIGNET_BLOCK_INSTRUCTION);
+  assert.equal(rejected.code, 'approval_rejected', 'the machine-readable fields stay the same');
+  assert.equal(err(429, 'rate_limited', 'over 60 requests per minute', 'blocked').message, 'This request was blocked by Signet: over 60 requests per minute. Reference: rec_01ABC');
+  assert.equal(err(401, 'token_expired', 'workload token has expired; refresh it', 'blocked').message, 'This request was blocked by Signet: workload token has expired; refresh it. Reference: rec_01ABC');
+  // A reason that already names Signet is not prefixed twice; with no record, the request ID is the reference.
+  assert.equal(err(403, 'unsafe_content', 'Chat blocked by Signet: this request violates the weapons safety policy. Please ask for safe, lawful information.', 'blocked').message,
+    'This request was blocked by Signet: this request violates the weapons safety policy. Please ask for safe, lawful information. Reference: rec_01ABC');
+  assert.match(err(503, 'ledger_unavailable', 'the evidence ledger is unreachable; request not completed', 'blocked', null).message, /^This request was blocked by Signet: the evidence ledger is unreachable; request not completed\. Reference: req_/);
+  // Not blocks: a failing tool or model, and an approval still pending.
+  const upstream = err(502, 'tool_unavailable', 'tool error: 500', 'upstream_error');
+  assert.deepEqual([upstream.message, upstream.user_message], ['tool error: 500', undefined]);
+  assert.equal(err(202, 'approval_pending', 'waiting for owner-approvers', 'pending').user_message, undefined);
+});
+
+test('block message helper', () => {
+  assert.equal(signetBlockMessage('rejected by admin', 'rec_1'), 'This request was blocked by Signet: rejected by admin. Reference: rec_1');
+  assert.equal(signetBlockMessage('This request was blocked by Signet: no decision within the hold time.', null), 'This request was blocked by Signet: no decision within the hold time.');
 });

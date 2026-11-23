@@ -1,4 +1,4 @@
-import { CONTROL, GW_A1, GW_A2, MODEL, api, approveAll, check, deployAgent, ensureTools, gw, mcp, onboard, outcome, type GwResult, type Json } from './api';
+import { CONTROL, GW_A1, GW_A2, MODEL, api, approveAll, check, deployAgent, ensureTools, gw, mcp, onboard, outcome, gatewayError, type GwResult, type Json } from './api';
 
 // Phase 1 gate (BP 20.2) as an e2e suite: register agent, approve, call the real model and the fixture
 // tools, DLP masking, out-of-manifest block, kill on every gateway node, ledger chain. Runs against the
@@ -13,7 +13,7 @@ function show(r: GwResult, want?: string | string[]) {
   const got = outcome(r);
   if (want) check((Array.isArray(want) ? want : [want]).includes(got), `expected ${want}, got ${got}: ${JSON.stringify(r.json).slice(0, 300)}`);
   const rpc = r.json.jsonrpc ? r.json : null;
-  const err = rpc?.error?.data ?? r.json.error;
+  const err = gatewayError(r.json);
   if (r.status === 200 && !err) {
     const out = rpc ? JSON.stringify(rpc.result?.structuredContent ?? rpc.result ?? rpc) : String(r.json.choices?.[0]?.message?.content ?? JSON.stringify(r.json)).trim();
     say(`\x1b[32m${r.decision ?? 'allow'}\x1b[0m  ${r.ms} ms (gateway ${r.gatewayMs ?? '-'} ms)  ${r.record ?? ''}`);
@@ -188,8 +188,8 @@ export async function run() {
   const v = await api('security', 'POST', '/ledger/verify', {});
   check(v.json.ok === true, 'ledger chain verifies');
   say(`chain ${v.json.ok ? 'verified' : 'BROKEN'} · ${v.json.count} records · ${v.json.roots_checked} signed daily roots valid=${v.json.roots_valid} · ${v.json.ms} ms`);
-  if (killCall.json.error?.record_id) {
-    const proof = await api('security', 'GET', `/ledger/records/${killCall.json.error.record_id}/proof`);
+  if (gatewayError(killCall.json)?.record_id) {
+    const proof = await api('security', 'GET', `/ledger/records/${gatewayError(killCall.json).record_id}/proof`);
     say(`record ${proof.json.record_id}: leaf ${proof.json.index} of ${proof.json.tree_size}, ${proof.json.proof.length}-step Merkle path to ${proof.json.provisional ? "today's provisional root" : 'the signed daily root'} ${String(proof.json.merkle_root).slice(0, 16)}…`);
   }
 }

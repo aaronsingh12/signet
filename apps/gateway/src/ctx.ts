@@ -1,6 +1,6 @@
 import type { IncomingHttpHeaders } from 'node:http';
 import {
-  GUARDRAIL_PARAMS, PIPELINE_STEPS, TOKEN_AUDIENCE, newId, rewrite, scan, sha256, tokenIssuer, verifyJws,
+  GUARDRAIL_PARAMS, PIPELINE_STEPS, SIGNET_BLOCK_INSTRUCTION, TOKEN_AUDIENCE, newId, rewrite, scan, sha256, signetBlockMessage, tokenIssuer, verifyJws,
   type CertificateBody, type CompiledPolicy, type DetectorResult, type Outcome, type WorkloadClaims,
 } from '@signet/core';
 import { appendRecord } from './ledgerclient';
@@ -347,6 +347,11 @@ function exportDecisionSpan(ctx: Ctx, data: { policy_decision: string; policy_ru
 
 export function errorDone(ctx: Ctx, err: Halt, recordId: string | null, headers: Record<string, string> = {}): Done {
   if (typeof err.extra.retry_after === 'number') headers['retry-after'] = String(err.extra.retry_after);
+  // A Signet block (any refusal Signet itself decided, as opposed to an upstream failure or a pending approval)
+  // carries the message the person using the agent should see, its reference, and an instruction for the agent's
+  // model to show it as written. Status codes and the machine-readable fields stay the same.
+  const blocked = err.ledgerOutcome === 'blocked';
+  const userMessage = blocked ? signetBlockMessage(err.message, recordId ?? ctx.requestId) : null;
   return {
     status: err.status,
     recordId,
@@ -355,7 +360,8 @@ export function errorDone(ctx: Ctx, err: Halt, recordId: string | null, headers:
       error: {
         type: 'signet_policy',
         code: err.code,
-        message: err.message,
+        message: userMessage ?? err.message,
+        ...(userMessage ? { reason: err.message, user_message: userMessage, agent_instruction: SIGNET_BLOCK_INSTRUCTION } : {}),
         decision: err.outcome,
         rule_ids: [...new Set(ctx.rules)],
         request_id: ctx.requestId,

@@ -1,4 +1,4 @@
-import { GW_A1, MODEL, TOOLS_URL, api, approveAll, deployAgent, ensureTools, gw, mcp, onboard, type GwResult, type Json, check, outcome } from './api';
+import { GW_A1, MODEL, TOOLS_URL, api, approveAll, deployAgent, ensureTools, gw, mcp, onboard, type GwResult, type Json, check, outcome, gatewayError } from './api';
 
 // Phase 2 gate (BP 20.3) as an e2e suite: a T2 agent through the 8-stage lifecycle and the approval
 // matrix, shadow -> canary -> enforce, runtime human approval (sync, async, session grant, reject), and
@@ -14,7 +14,7 @@ function show(r: GwResult, want?: string | string[]) {
   const got = outcome(r);
   if (want) check((Array.isArray(want) ? want : [want]).includes(got), `expected ${want}, got ${got}: ${JSON.stringify(r.json).slice(0, 300)}`);
   const rpc = r.json.jsonrpc ? r.json : null;
-  const err = rpc?.error?.data ?? r.json.error;
+  const err = gatewayError(r.json);
   if (r.status === 200 && !err) {
     const out = rpc ? JSON.stringify(rpc.result?.structuredContent ?? rpc.result ?? rpc) : String(r.json.choices?.[0]?.message?.content ?? JSON.stringify(r.json)).trim();
     say(`\x1b[32m${r.decision ?? 'allow'}\x1b[0m  ${r.ms} ms  ${r.record ?? ''}`);

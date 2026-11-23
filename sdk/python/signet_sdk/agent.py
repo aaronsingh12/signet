@@ -29,6 +29,12 @@ def raise_for_gateway(r: httpx.Response) -> Any:
         err = body.get("error")
         if isinstance(err, dict) and body.get("jsonrpc") == "2.0":
             err = err.get("data") if isinstance(err.get("data"), dict) else {"message": err.get("message"), "code": None}
+        elif body.get("jsonrpc") == "2.0":
+            # A Signet block on an MCP tool call is a tool result with isError and the details in _meta.signet.
+            result = body.get("result")
+            meta = result.get("_meta") if isinstance(result, dict) else None
+            if isinstance(result, dict) and result.get("isError") and isinstance(meta, dict) and isinstance(meta.get("signet"), dict):
+                err = meta["signet"]
     if r.status_code < 300 and not err:
         return body
     err = err if isinstance(err, dict) else {"message": r.text[:300]}

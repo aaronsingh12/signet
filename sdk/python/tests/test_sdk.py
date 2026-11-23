@@ -114,6 +114,13 @@ def test_gateway_answers_map_to_typed_errors():
     rpc = httpx.Response(200, json={"jsonrpc": "2.0", "id": 1, "error": {"code": -32003, "message": "x", "data": {"code": "policy_denied", "decision": "deny", "rule_ids": []}}})
     with pytest.raises(SignetPolicyError):
         raise_for_gateway(rpc)
+    # A blocked MCP tool call arrives as a tool result with isError; it is still a typed policy error.
+    blocked_tool = httpx.Response(200, json={"jsonrpc": "2.0", "id": 2, "result": {"isError": True, "content": [{"type": "text", "text": "This request was blocked by Signet: rejected by admin. Reference: rec_9"}], "_meta": {"signet": {"code": "approval_rejected", "decision": "deny", "rule_ids": ["RB-PRIV-07"], "record_id": "rec_9", "message": "This request was blocked by Signet: rejected by admin. Reference: rec_9"}}}})
+    with pytest.raises(SignetPolicyError) as blocked:
+        raise_for_gateway(blocked_tool)
+    assert blocked.value.code == "approval_rejected" and blocked.value.record_id == "rec_9" and str(blocked.value).startswith("This request was blocked by Signet")
+    # An ordinary tool result is still data.
+    assert raise_for_gateway(httpx.Response(200, json={"jsonrpc": "2.0", "id": 3, "result": {"content": []}})) == {"jsonrpc": "2.0", "id": 3, "result": {"content": []}}
     upstream = httpx.Response(503, json={"error": {"code": "upstream_unavailable", "message": "LLM down"}})
     with pytest.raises(SignetUpstreamError):
         raise_for_gateway(upstream)
