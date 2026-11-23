@@ -156,10 +156,11 @@ export async function ensureTools() {
 }
 
 // The gateway's refusal: a JSON-RPC error's data, a blocked MCP tool call's result (isError, details in
-// _meta.signet), or a plain HTTP error body.
+// _meta.signet, the message in its text), or a plain HTTP error body.
 export function gatewayError(json: any): any {
   const rpc = json?.jsonrpc ? json : null;
-  return rpc?.error?.data ?? (rpc?.result?.isError ? rpc.result._meta?.signet : undefined) ?? json?.error;
+  const blocked = rpc?.result?.isError && rpc.result._meta?.signet ? { ...rpc.result._meta.signet, message: rpc.result.content?.[0]?.text } : undefined;
+  return rpc?.error?.data ?? blocked ?? json?.error;
 }
 
 // What the gateway decided: the error's decision, or the x-signet-decision header on success.

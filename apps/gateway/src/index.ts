@@ -191,12 +191,15 @@ app.post('/v1/mcp/:alias', guard(async (req, res) => {
     });
     res.set(d.headers);
     if (d.status === 200) return res.json({ jsonrpc: '2.0', id: msg.id, result: d.body });
-    const e = (d.body as { error: { message: string; user_message?: string; agent_instruction?: string } }).error;
+    const e = (d.body as { error: { message: string; code?: string; decision?: string; rule_ids?: string[]; record_id?: string; user_message?: string; agent_instruction?: string } }).error;
     // A Signet block is a tool result with isError (the MCP way to report a failed tool call), so the agent's model
     // reads Signet's message and the instruction to show it as written; a protocol error reaches the person as
     // "Protocol Error ... [object Object]". 401 stays a protocol error so the client renews its login.
+    // Some platforms (ServiceNow) show the raw tool result in the chat, so it stays short: the message once, and
+    // only the fields a client needs to type the error in _meta.signet. The full details are in the ledger record.
     if (e.user_message && d.status !== 401) {
-      return res.status(200).json({ jsonrpc: '2.0', id: msg.id, result: { content: [{ type: 'text', text: `${e.user_message}\n\n${e.agent_instruction ?? ''}`.trim() }], isError: true, _meta: { signet: e } } });
+      const signet = { code: e.code, decision: e.decision, rule_ids: e.rule_ids ?? [], record_id: e.record_id };
+      return res.status(200).json({ jsonrpc: '2.0', id: msg.id, result: { content: [{ type: 'text', text: `${e.user_message}\n\n${e.agent_instruction ?? ''}`.trim() }], isError: true, _meta: { signet } } });
     }
     return res.status(d.status === 401 ? 401 : 200).json(rpcError(msg.id, -32003, e.message, e));
   }

@@ -34,7 +34,10 @@ def raise_for_gateway(r: httpx.Response) -> Any:
             result = body.get("result")
             meta = result.get("_meta") if isinstance(result, dict) else None
             if isinstance(result, dict) and result.get("isError") and isinstance(meta, dict) and isinstance(meta.get("signet"), dict):
-                err = meta["signet"]
+                content = result.get("content")
+                first = content[0] if isinstance(content, list) and content and isinstance(content[0], dict) else {}
+                # The message is the tool result's text; _meta.signet carries only code, decision, rules and record.
+                err = {**meta["signet"], "message": meta["signet"].get("message") or first.get("text")}
     if r.status_code < 300 and not err:
         return body
     err = err if isinstance(err, dict) else {"message": r.text[:300]}
