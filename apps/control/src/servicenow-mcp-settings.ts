@@ -66,7 +66,7 @@ export async function serviceNowConfiguration(id: string): Promise<{ instance: s
     clientSecret: await revealPlatformCredential(row.client_secret_id), redirectUri: settingsView(row).callback_url };
 }
 
-function validatedSettings(input: ServiceNowSettingsInput): { gateway: URL; instance: URL; endpoint: URL } {
+export function validatedSettings(input: ServiceNowSettingsInput): { gateway: URL; instance: URL; endpoint: URL } {
   if (typeof input.name !== 'string' || !input.name.trim() || input.name.trim().length > 120) throw new PolicyError('SERVICENOW_CONFIG', 'Connection name is required and must not exceed 120 characters', 400);
   const gateway = httpsUrl(input.gateway_url, 'Public Signet URL');
   const instance = httpsUrl(input.instance_url, 'ServiceNow instance URL');

@@ -31,6 +31,8 @@ import { serviceNowSettings, createServiceNowSettings, updateServiceNowSettings,
 import { linkServiceNowAgent, linkedServiceNowAgents, serviceNowLinksForAgent, availableServiceNowAgents } from './servicenow-agents';
 import * as copilot from './copilot-agents';
 import { prepareServiceNowGateway, serviceNowGatewayRoute } from './servicenow-gateway';
+// import { serviceNowRouting } from './servicenow-connector';
+// import * as connectorOnboarding from './servicenow-connector-onboarding';
 import { openapi } from './openapi';
 import { principalOf, requires, singleOperatorMode } from './rbac';
 import * as registry from './registry';
@@ -263,6 +265,21 @@ api.put('/edge-runners/:id/tools/:alias/credential', requires('connectors.manage
   return result;
 }));
 api.get('/plugins/vercel', requires('tenant.admin'), route(async (_req, res) => (await plugins.vercelConnection(principalOf(res)))));
+// api.get('/connector/servicenow/apps', requires('tenant.admin'), route(async () => ({ items: await connectorOnboarding.connectorApps() })));
+// api.put('/connector/servicenow/apps', requires('tenant.admin'), requires('tools.manage'), route(async (req, res) => connectorOnboarding.saveConnectorApp(req.body ?? {}, principalOf(res))));
+// api.get('/connector/servicenow/sessions', requires('tenant.admin'), route(async (_req, res) => { res.setHeader('cache-control', 'no-store'); return { items: await connectorOnboarding.connectorSessions() }; }));
+// api.post('/connector/servicenow/start', requires('tenant.admin'), route(async (req, res) => connectorOnboarding.startConnector(req.body?.instance_url, principalOf(res))));
+// api.get('/connector/servicenow/sessions/:id/authorize', requires('tenant.admin'), route(async (req, res) => {
+//   await connectorOnboarding.requireConnectorSession(req.params.id!);
+//   return serviceNowMcp.startServiceNowConnection(req.params.id!, res, principalOf(res), '/connectors');
+// }));
+// api.post('/connector/servicenow/sessions/:id/discover', requires('tenant.admin'), requires('tools.manage'), route(async (req, res) => {
+//   res.setHeader('cache-control', 'no-store');
+//   const result = await connectorOnboarding.discoverConnector(req.params.id!, principalOf(res));
+//   hub.publish('bundle', { reason: 'servicenow.connector_prepared', alias: result.route.alias });
+//   return result;
+// }));
+// api.post('/connector/servicenow/sessions/:id/agents', requires('tenant.admin'), route(async (req, res) => [201, await connectorOnboarding.selectConnectorAgent(req.params.id!, req.body?.external_id, principalOf(res))]));
 api.get('/plugins/servicenow', requires('tenant.admin'), route(async (_req, res) => {
   res.setHeader('cache-control', 'no-store');
   return { items: await serviceNowMcp.listServiceNowConnections() };
@@ -289,7 +306,7 @@ api.put('/plugins/servicenow/connections/:id/settings', requires('tenant.admin')
   hub.publish('bundle', { reason: 'servicenow.settings_changed' });
   return { settings };
 }));
-api.get('/plugins/servicenow/connections/:id/connect', requires('tenant.admin'), route(async (req, res) => serviceNowMcp.startServiceNowConnection(req.params.id!, res, principalOf(res))));
+api.get('/plugins/servicenow/connections/:id/connect', requires('tenant.admin'), route(async (req, res) => serviceNowMcp.startServiceNowConnection(req.params.id!, res, principalOf(res), req.query.return_to === undefined ? '/settings/accounts' : String(req.query.return_to))));
 api.get('/plugins/servicenow/connections/:id/agents', requires('tenant.admin'), route(async req => ({ items: await linkedServiceNowAgents(req.params.id!) })));
 api.get('/agents/:id/servicenow-guardian', requires('identity.bootstrap'), route(async (req, res) => serviceNowGuardianSetup(req.params.id!, principalOf(res))));
 api.get('/plugins/servicenow/connections/:id/agents/available', requires('tenant.admin'), route(async (req, res) => {
@@ -303,6 +320,10 @@ api.post('/plugins/servicenow/connections/:id/gateway', requires('tenant.admin')
   return result;
 }));
 api.get('/plugins/servicenow/connections/:id/gateway', requires('tenant.admin'), route(async req => ({ route: await serviceNowGatewayRoute(req.params.id!) })));
+// api.get('/plugins/servicenow/connections/:id/routing', requires('tenant.admin'), route(async (req, res) => {
+//   res.setHeader('cache-control', 'no-store');
+//   return serviceNowRouting(req.params.id!);
+// }));
 api.post('/plugins/servicenow/connections/:id/agents', requires('tenant.admin'), route(async (req, res) => {
   res.setHeader('cache-control', 'no-store');
   return [201, await linkServiceNowAgent(req.params.id!, req.body ?? {}, principalOf(res))];
