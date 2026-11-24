@@ -3,6 +3,13 @@
 type Op = { summary: string; permission?: string; public?: boolean; body?: string; runner?: boolean };
 
 const ops: Record<string, Record<string, Op>> = {
+//   '/connector/servicenow/apps': { get: { summary: 'List separately registered connector applications without credentials', permission: 'tenant.admin' }, put: { summary: 'One-time per-instance connector OAuth app registration; does not create a manual connection', permission: 'tenant.admin and tools.manage' } },
+//   '/connector/servicenow/start': { post: { summary: 'Start a fresh connector session using only the registered ServiceNow instance URL', permission: 'tenant.admin' } },
+//   '/connector/servicenow/sessions': { get: { summary: 'List connector sessions only; excludes manual company-system connections', permission: 'tenant.admin' } },
+//   '/connector/servicenow/sessions/{id}/authorize': { get: { summary: 'Redirect connector session to ServiceNow login and consent using PKCE', permission: 'tenant.admin' } },
+//   '/connector/servicenow/sessions/{id}/discover': { post: { summary: 'Discover agents and MCP tools automatically and prepare their unapproved route', permission: 'tenant.admin and tools.manage' } },
+//   '/connector/servicenow/sessions/{id}/agents': { post: { summary: 'Select an agent from authorized discovery without manual identity fields', permission: 'tenant.admin' } },
+//   '/plugins/servicenow/connections/{id}/routing': { get: { summary: 'Current agent approval, MCP routing evidence and block evidence scoped to this ServiceNow route', permission: 'tenant.admin' } },
   '/stats/agents/today': { get: { summary: 'Processing from local midnight; start query parameter is the viewer local midnight as an ISO timestamp', permission: 'agents.read' } },
   '/stats/agents/all-time': { get: { summary: 'All retained gateway, Guardian and dated provider processing per agent without a 24-hour cutoff', permission: 'agents.read' } },
   '/rulebooks/{book}/rules/{rule}': { put: { summary: 'Edit rule reference text, area and note in a custom or default rulebook; does not change enforcement', permission: 'tenant.admin' } },

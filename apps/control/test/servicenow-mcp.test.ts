@@ -27,7 +27,7 @@ test('ServiceNow connections keep independent settings and OAuth state, enforce 
   app.put('/settings/:id', route(req => updateServiceNowSettings(req.params.id!, req.body, actor)));
   app.get('/settings/:id', route(req => serviceNowSettings(req.params.id!)));
   app.delete('/connections/:id', route(req => removeServiceNowConnection(req.params.id!)));
-  app.get('/connect/:id', route((req, res) => startServiceNowConnection(req.params.id!, res, actor)));
+  app.get('/connect/:id', route((req, res) => startServiceNowConnection(req.params.id!, res, actor, req.query.return_to === undefined ? '/settings/accounts' : String(req.query.return_to))));
   app.get('/callback', route((req, res) => completeServiceNowConnection(req, res, actor)));
   app.get('/other-callback', route((req, res) => completeServiceNowConnection(req, res, { ...actor, id: 'other@example.test' })));
   app.use(problemHandler);
@@ -59,7 +59,13 @@ test('ServiceNow connections keep independent settings and OAuth state, enforce 
     assert.equal(authorization.pathname, '/oauth_auth.do');
     assert.equal(authorization.searchParams.get('redirect_uri'), 'https://signet.example.test/api/v1/plugins/servicenow/callback');
     const state = authorization.searchParams.get('state')!;
-    const pending = await db.prepare('SELECT verifier FROM servicenow_mcp_oauth_state WHERE state_hash = ?').get(createHash('sha256').update(state).digest('hex')) as { verifier: string };
+    const pending = await db.prepare('SELECT verifier, return_to FROM servicenow_mcp_oauth_state WHERE state_hash = ?').get(createHash('sha256').update(state).digest('hex')) as { verifier: string; return_to: string };
+    assert.equal(pending.return_to, '/settings/accounts');
+    const connectorStart = await fetch(`${base}/connect/${id}?return_to=%2Fconnectors`, { redirect: 'manual' });
+    assert.equal(connectorStart.status, 302);
+    const connectorState = new URL(connectorStart.headers.get('location')!).searchParams.get('state')!;
+    assert.equal((await db.prepare('SELECT return_to FROM servicenow_mcp_oauth_state WHERE state_hash = ?').get(createHash('sha256').update(connectorState).digest('hex')) as { return_to: string }).return_to, '/connectors');
+    assert.equal((await fetch(`${base}/connect/${id}?return_to=https%3A%2F%2Fevil.example`, { redirect: 'manual' })).status, 400);
     assert.equal(authorization.searchParams.get('code_challenge'), createHash('sha256').update(pending.verifier).digest('base64url'));
     assert.equal(authorization.searchParams.get('code_challenge_method'), 'S256');
     assert.equal((await fetch(`${base}/other-callback?state=${state}&error=access_denied`)).status, 400);

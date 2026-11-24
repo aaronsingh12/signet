@@ -73,6 +73,6 @@ export function Settings() {
   const can = useCan();
   return <>
     <PageHeader title="Settings" subtitle="You rarely need these. Everything is grouped by what you're trying to do." />
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{SETTINGS.filter((s) => can(s.perm) || can('tenant.admin')).map(({ icon: Icon, color, ...s }) => <Link key={s.to} to={s.to} data-testid={`settings-${s.to.split('/').at(-1)}`} className="card settings-tile" style={{ '--settings-accent': color } as CSSProperties}><div className="settings-tile-top"><span className="settings-tile-icon"><Icon size={21} strokeWidth={1.7} aria-hidden="true" /></span><ArrowUpRight className="settings-tile-arrow" size={17} aria-hidden="true" /></div><h2>{s.title}</h2><p title={s.text}>{s.text}</p></Link>)}</div>
+    <div className="settings-grid">{SETTINGS.filter((s) => can(s.perm) || can('tenant.admin')).map(({ icon: Icon, color, ...s }) => <Link key={s.to} to={s.to} data-testid={`settings-${s.to.split('/').at(-1)}`} className="card settings-tile" style={{ '--settings-accent': color } as CSSProperties}><div className="settings-tile-top"><span className="settings-tile-icon"><Icon size={21} strokeWidth={1.7} aria-hidden="true" /></span><ArrowUpRight className="settings-tile-arrow" size={17} aria-hidden="true" /></div><h2>{s.title}</h2><p title={s.text}>{s.text}</p></Link>)}</div>
   </>;
 }
