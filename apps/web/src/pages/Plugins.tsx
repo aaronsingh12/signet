@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Card, PageHeader } from '../components/ui';
 import { ServiceNowConnection } from '../components/ServiceNowConnection';
 import { CopilotConnection } from '../components/CopilotConnection';
+import { AwsConnection } from '../components/AwsConnection';
 import { ExternalConnections } from '../components/ExternalConnections';
 
 export function Plugins() {
@@ -12,6 +13,7 @@ export function Plugins() {
       <div className="space-y-4">
         <ServiceNowConnection />
         <CopilotConnection />
+        <AwsConnection />
         <ExternalConnections agentId={null} />
         <Card>
           <div className="flex items-start gap-3">

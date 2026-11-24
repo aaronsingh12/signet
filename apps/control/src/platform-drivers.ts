@@ -138,6 +138,11 @@ async function aws<T>(s: AwsSecret, region: string, service: string, method: str
   return call<T>('AWS', url, { method, headers, body: payload });
 }
 
+/** A signed AWS JSON call with a stored AWS connection secret (used by the universal connector). */
+export async function awsCall<T>(secret: string, region: string, service: string, method: string, url: URL, body?: unknown): Promise<T> {
+  return aws<T>(awsSecret(secret), region, service, method, url, body);
+}
+
 const lambdaUrl = (region: string, path: string) => new URL(`https://lambda.${region}.amazonaws.com/2015-03-31/functions${path}`);
 
 const awsDriver: Driver = {

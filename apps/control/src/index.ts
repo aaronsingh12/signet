@@ -30,6 +30,7 @@ import { discoverServiceNowTools } from './servicenow-mcp-discovery';
 import { serviceNowSettings, createServiceNowSettings, updateServiceNowSettings, removeServiceNowConnection } from './servicenow-mcp-settings';
 import { linkServiceNowAgent, linkedServiceNowAgents, serviceNowLinksForAgent, availableServiceNowAgents } from './servicenow-agents';
 import * as copilot from './copilot-agents';
+import * as awsAgents from './aws-agents';
 import { prepareServiceNowGateway, serviceNowGatewayRoute } from './servicenow-gateway';
 import { openapi } from './openapi';
 import { principalOf, requires, singleOperatorMode } from './rbac';
@@ -331,6 +332,26 @@ api.get('/plugins/copilot/connections/:id/agents/available', requires('tenant.ad
 api.post('/plugins/copilot/connections/:id/agents', requires('tenant.admin'), route(async (req, res) => {
   res.setHeader('cache-control', 'no-store');
   return [201, await copilot.linkCopilotAgent(req.params.id!, req.body ?? {}, principalOf(res))];
+}));
+// Amazon Bedrock agents: an AWS account connection, its AgentCore and Classic agents, and linking them.
+api.get('/plugins/aws', requires('tenant.admin'), route(async (_req, res) => {
+  res.setHeader('cache-control', 'no-store');
+  return { items: await awsAgents.listAwsConnections() };
+}));
+api.post('/plugins/aws/connections', requires('tenant.admin'), route(async (req, res) => {
+  res.setHeader('cache-control', 'no-store');
+  return [201, { connection: await awsAgents.createAwsConnection(req.body ?? {}, principalOf(res)) }];
+}));
+api.delete('/plugins/aws/connections/:id', requires('tenant.admin'), route(async (req, res) => awsAgents.removeAwsConnection(req.params.id!, principalOf(res))));
+api.post('/plugins/aws/connections/:id/test', requires('tenant.admin'), route(async (req, res) => ({ connection: await awsAgents.testAwsConnection(req.params.id!, principalOf(res)) })));
+api.get('/plugins/aws/connections/:id/agents', requires('tenant.admin'), route(async req => ({ items: await awsAgents.linkedAwsAgents(req.params.id!) })));
+api.get('/plugins/aws/connections/:id/agents/available', requires('tenant.admin'), route(async (req, res) => {
+  res.setHeader('cache-control', 'no-store');
+  return { items: await awsAgents.availableAwsAgents(req.params.id!) };
+}));
+api.post('/plugins/aws/connections/:id/agents', requires('tenant.admin'), route(async (req, res) => {
+  res.setHeader('cache-control', 'no-store');
+  return [201, await awsAgents.linkAwsAgent(req.params.id!, req.body ?? {}, principalOf(res))];
 }));
 api.get('/plugins/vercel/connect', requires('tenant.admin'), route((_req, res) => plugins.startVercelConnection(res, principalOf(res))));
 api.get('/plugins/vercel/callback', requires('tenant.admin'), route(async (req, res) => (await plugins.completeVercelConnection(req, res, principalOf(res)))));

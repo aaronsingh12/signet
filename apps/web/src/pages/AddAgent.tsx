@@ -10,6 +10,7 @@ import type { ConnectionMethod } from '@signet/core/types';
 import { ErrorNote, Modal, TierChip } from '../components/ui';
 import { ServiceNowSetup } from '../components/ServiceNowSetup';
 import { CopilotSetup } from '../components/CopilotConnection';
+import { AwsSetup } from '../components/AwsConnection';
 import { ApiError, api, useApi } from '../lib/api';
 import { useCan, useMe } from '../lib/auth';
 import { Plugins } from './Plugins';
@@ -108,6 +109,7 @@ export function AddAgentFlow() {
   const [step, setStep] = useState(0);
   const [addingServiceNow, setAddingServiceNow] = useState(false);
   const [addingCopilot, setAddingCopilot] = useState(false);
+  const [addingAws, setAddingAws] = useState(false);
   const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
@@ -296,6 +298,7 @@ export function AddAgentFlow() {
           {step === 0 && can('tenant.admin') && <div className="flow-why">
             <button type="button" data-testid="add-servicenow-ai-agents" className="btn-primary w-full" onClick={() => setAddingServiceNow(true)}>Add ServiceNow AI Agents</button>
             <button type="button" data-testid="add-copilot-agents" className="btn-primary mt-3 w-full" onClick={() => setAddingCopilot(true)}>Add Copilot Studio Agents</button>
+            <button type="button" data-testid="add-aws-agents" className="btn-primary mt-3 w-full" onClick={() => setAddingAws(true)}>Add Amazon Bedrock Agents</button>
             <Link data-testid="servicenow-connections-list" className="btn-ghost mt-3 w-full justify-center" to="/settings/systems">All connections</Link>
           </div>}
         </aside>
@@ -303,6 +306,9 @@ export function AddAgentFlow() {
       {addingLlm && <AgentLlmPanel onClose={() => setAddingLlm(false)} onSaved={(model) => { set({ model }); setAddingLlm(false); void reloadCatalogue(); }} />}
       {addingCopilot && <Modal title="Add Copilot Studio Agents" onClose={() => setAddingCopilot(false)}>
         <CopilotSetup onSaved={() => { setAddingCopilot(false); nav('/settings/accounts'); }} onCancel={() => setAddingCopilot(false)} />
+      </Modal>}
+      {addingAws && <Modal title="Add Amazon Bedrock Agents" width="max-w-3xl" onClose={() => setAddingAws(false)}>
+        <AwsSetup onSaved={() => { setAddingAws(false); nav('/settings/accounts'); }} onCancel={() => setAddingAws(false)} />
       </Modal>}
       {addingServiceNow && <Modal title="Add ServiceNow AI Agents" onClose={() => setAddingServiceNow(false)}>
         <ServiceNowSetup onSaved={() => {}} onCancel={() => setAddingServiceNow(false)} />

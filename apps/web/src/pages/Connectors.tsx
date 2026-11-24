@@ -7,6 +7,7 @@ import { EdgeRunners } from '../components/EdgeRunners';
 import { ExternalConnections } from '../components/ExternalConnections';
 import { ServiceNowConnection } from '../components/ServiceNowConnection';
 import { CopilotConnection } from '../components/CopilotConnection';
+import { AwsConnection } from '../components/AwsConnection';
 
 // GRC connectors (BP 10): ServiceNow gets risks, CIs, control tests, indicator results, issues and
 // incidents through an outbox with retries; its authority documents come back into the library.
@@ -28,6 +29,7 @@ export function Connectors() {
       {adding && <NewConnector onDone={() => (setAdding(false), void reload())} onCancel={() => setAdding(false)} />}
       <div className="mb-4"><ServiceNowConnection /></div>
       <div className="mb-4"><CopilotConnection /></div>
+      <div className="mb-4"><AwsConnection /></div>
       <div className="mb-4"><ExternalConnections agentId={null} /></div>
       <div className="mb-4"><EdgeRunners /></div>
       {items.length ? (
